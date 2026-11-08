@@ -24,6 +24,7 @@ namespace SmartHdrManager
         private static string? _localAddr;
         private static volatile bool _connected;
         private static readonly SemaphoreSlim _semaphore = new(1, 1);
+        private static int _msgId;
 
         public static bool IsRunning
         {
@@ -314,6 +315,8 @@ namespace SmartHdrManager
                 };
 
                 HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 发送亮度设置请求，值={v}");
+                var createAlertJson = System.Text.Json.JsonSerializer.Serialize(alertPayload);
+                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert JSON: {createAlertJson}");
                 
                 var createResp = await client.RequestAsync("ssap://system.notifications/createAlert", alertPayload, 8000, CancellationToken.None).ConfigureAwait(false);
 
@@ -330,7 +333,15 @@ namespace SmartHdrManager
                     if (!string.IsNullOrEmpty(alertId))
                     {
                         HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 关闭提示框 alertId={alertId}");
-                        await client.RequestAsync("ssap://system.notifications/closeAlert", new Dictionary<string, object> { ["alertId"] = alertId }, 3000, CancellationToken.None).ConfigureAwait(false);
+                        var msgId = Interlocked.Increment(ref _msgId).ToString();
+                        var closeAlertJson = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            id = msgId,
+                            type = "closeAlert",
+                            payload = new { alertId }
+                        });
+                        HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] closeAlert JSON: {closeAlertJson}");
+                        await client.SendCustomJsonAsync(closeAlertJson, CancellationToken.None).ConfigureAwait(false);
                     }
                 }
 

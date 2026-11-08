@@ -314,6 +314,15 @@ namespace SmartHdrManager
             await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
         }
 
+        /// <summary>发送自定义 JSON 消息（用于非标准 SSAP 消息如 closeAlert）。</summary>
+        public async Task SendCustomJsonAsync(string json, CancellationToken ct)
+        {
+            if (_ws == null || _ws.State != WebSocketState.Open)
+                throw new InvalidOperationException("未连接");
+            var bytes = Encoding.UTF8.GetBytes(json);
+            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+        }
+
         private void _failAll(Exception ex)
         {
             lock (_lock)
