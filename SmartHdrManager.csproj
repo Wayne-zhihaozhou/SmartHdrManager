@@ -12,6 +12,9 @@
          x64 by default; ARM64 when built with -r win-arm64 (Windows on ARM). -->
     <PlatformTarget>x64</PlatformTarget>
     <PlatformTarget Condition="'$(RuntimeIdentifier)' == 'win-arm64'">ARM64</PlatformTarget>
+    <!-- Self-contained: ships with .NET Runtime, no install required on target machine -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <RootNamespace>SmartHdrManager</RootNamespace>
     <AssemblyName>SmartHdrManager</AssemblyName>
     <Version>2.6.2</Version>
