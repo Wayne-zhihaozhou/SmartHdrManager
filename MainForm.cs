@@ -56,7 +56,6 @@ namespace SmartHdrManager
         private readonly Stepper _scanInterval = new()
         {
             Minimum = -1, Maximum = 30, Size = new Size(150, 34),
-            Stops = new[] { -1, 0, 1, 7, 30 },
             Format = v => v switch { < 0 => "关闭", 0 => "每次启动", 1 => "每天", 7 => "每周", 30 => "每月", _ => $"{v} 天" }
         };
         private Label? _scanIntervalDesc;
@@ -64,32 +63,10 @@ namespace SmartHdrManager
         private readonly ToggleSwitch _swShowOthers = new();
         private readonly Stepper _minimumHdr = new() { Minimum = 0, Maximum = 120, Step = 5, ZeroText = "关闭" };
         private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
-        private readonly ToggleSwitch _swBrowserWindowed = new();
-        private readonly ToggleSwitch _swKeepBrowserHdr = new();
+
         private readonly ToggleSwitch _swColorProfile = new();
         private readonly ToggleSwitch _swRefreshApps = new();
         private readonly ToggleSwitch _swKeepDesktopSdr = new();
-        private readonly ToggleSwitch _swAutoUpdate = new();
-        private ModernButton? _checkUpdatesButton;
-        private Label? _updateDesc;
-        private readonly Stepper _fallback = new() { Minimum = 0, Maximum = 30 };
-
-        // Video & RTX HDR
-        private readonly ToggleSwitch _swVideoAuto = new();
-        private readonly SegmentedTabs _videoMode = new() { Size = new Size(240, 34) };
-        private static readonly string[] VideoModes = { VideoHdrModes.Smart, VideoHdrModes.NativeOnly, VideoHdrModes.Always };
-        private readonly SegmentedTabs _videoTrigger = new() { Size = new Size(200, 34) };
-        private static readonly string[] VideoTriggerModes = { VideoTriggers.Fullscreen, VideoTriggers.Any };
-        private readonly ToggleSwitch _swVideoBrowsers = new();
-        private readonly ToggleSwitch _swVideoPlayers = new();
-        // 0 s … 5 min: small steps first, then 1 / 2 / 3 / 5 minutes (keeps HDR through a pause)
-        private readonly Stepper _videoRevert = new()
-        {
-            Minimum = 0, Maximum = HdrEngine.MaxVideoRevertSeconds,
-            Stops = new[] { 0, 1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 300 },
-            Format = v => v >= 60 && v % 60 == 0 ? $"{v / 60} 分钟" : $"{v} 秒"
-        };
-        private readonly ToggleSwitch _swVideoBattery = new();
 
         // Log page
         private readonly TextBox _log = new()
@@ -102,11 +79,7 @@ namespace SmartHdrManager
 
         // Settings page parts that change at runtime
         private SmoothScrollTable? _settingsPage;
-        private SmoothScrollTable? _appsPage;
-        private readonly List<(int Row, int Height, Control Control)> _videoDetailRows = new();
-        private int _videoMasterRow;
-        private Label? _scriptStatusLabel, _browserWindowedDesc, _keepBrowserDesc;
-        private bool? _lastScriptSeen;
+
         private bool _reallyExit;
         private int _logCursor;
         private int _lastState = -1;
@@ -124,11 +97,6 @@ namespace SmartHdrManager
             _hotkeyChoice.AddTab("Win+Alt");
             _hotkeyChoice.AddTab("Ctrl+Alt");
             _hotkeyChoice.AddTab("关闭");
-            _videoMode.AddTab("智能");
-            _videoMode.AddTab("仅 HDR");
-            _videoMode.AddTab("总是");
-            _videoTrigger.AddTab("全屏");
-            _videoTrigger.AddTab("任意");
 
             SuspendLayout();
 
@@ -150,13 +118,11 @@ namespace SmartHdrManager
             root.Controls.Add(_statusCard, 0, 0);
 
             _tabs.AddTab("游戏");
-            _tabs.AddTab("程序");
             _tabs.AddTab("设置");
             _tabs.AddTab("日志");
             root.Controls.Add(_tabs, 0, 1);
 
             AddPage(BuildGamesPage());
-            AddPage(BuildAppsPage());
             AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
             root.Controls.Add(_content, 0, 2);
@@ -252,7 +218,7 @@ namespace SmartHdrManager
         {
             for (int i = 0; i < _pages.Count; i++)
                 _pages[i].Visible = i == index;
-            if (index == 2) UpdateNeverHdrDescription();   // Settings: games excluded meanwhile with Win+Alt+I
+            if (index == 1) UpdateNeverHdrDescription();   // Settings: games excluded meanwhile with Win+Alt+I
         }
 
         private Control BuildGamesPage()
@@ -404,61 +370,13 @@ namespace SmartHdrManager
 
             // ---- Switching back ----
             Section("切回 SDR", "本程序只切回自己开启的 HDR。您开启的 HDR 保持开启。");
-            Add(SettingRow("切回前等待", "游戏或视频结束后。", _fallback), 68);
             Add(SettingRow("HDR 最短时长", "快速启动 / 停止时减少黑屏。", _minimumHdr), 68);
             Add(SettingRow("保持桌面为 SDR", "同时切回您或其他程序开启的 HDR。", _swKeepDesktopSdr), 68);
-
-            // ---- YouTube & browser ----
-            Section("浏览器中的 YouTube", "YouTube HDR 视频的 HDR – 需要浏览器脚本（Tampermonkey）。");
-            var guide = new ModernButton { Glyph = Theme.GlyphDocument, Text = "安装指南", AutoSize = true };
-            guide.Click += (_, _) => OpenScriptGuide();
-            var scriptRow = SettingRow("浏览器脚本", "检查中 …", guide);
-            _scriptStatusLabel = RowDescription(scriptRow);
-            Add(scriptRow, 68);
-            var windowedRow = SettingRow("窗口模式也生效", "不仅限于视频全屏时。", _swBrowserWindowed);
-            _browserWindowedDesc = RowDescription(windowedRow);
-            Add(windowedRow, 68);
-            var keepRow = SettingRow("后台保持 HDR", "HDR 视频播放时您使用其他窗口也保持。", _swKeepBrowserHdr);
-            _keepBrowserDesc = RowDescription(keepRow);
-            Add(keepRow, 68);
-
-            // ---- Videos & RTX Video HDR ----
-            Section("视频 / RTX Video HDR", "视频播放时使用 HDR – 包括 SDR 视频，由 NVIDIA RTX Video HDR 提升。");
-            _videoMasterRow = Add(SettingRow("视频 HDR", "视频播放时开启，结束后关闭。", _swVideoAuto), 68);
-            void Detail(Control c, int height)
-            {
-                int row = Add(c, height);
-                _videoDetailRows.Add((row, height, c));
-            }
-            Detail(SettingRow("哪些视频", "智能：HDR 视频，以及 RTX Video HDR 开启时的 SDR 视频。", _videoMode), 68);
-            Detail(SettingRow("何时", "仅全屏，或窗口模式也生效。", _videoTrigger), 68);
-            Detail(SettingRow("浏览器中", "需要浏览器脚本  ·  按浏览器设置：程序选项卡。", _swVideoBrowsers), 68);
-            Detail(SettingRow("视频播放器中", "按播放器设置：程序选项卡。", _swVideoPlayers), 68);
-            Detail(SettingRow("视频停止后等待", "更久 = 暂停或跳过时不切换。", _videoRevert), 68);
-            Detail(SettingRow("非电池供电时", "笔记本：拔掉电源时不启用视频 HDR。", _swVideoBattery), 68);
-
-            var videoCard = new RoundedPanel { Radius = 10, BackColor = Theme.Surface, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 8), Padding = new Padding(16, 12, 16, 12) };
-            videoCard.Controls.Add(new Label
-            {
-                Dock = DockStyle.Fill, Font = Theme.Small, ForeColor = Theme.Muted,
-                Text = RtxVideoStatus.Query().Describe() + " 只有视频所在显示器会切换，游戏永远优先。" +
-                       "想让某个视频保持 SDR？托盘菜单 › 此视频使用 SDR。"
-            });
-            Detail(videoCard, 84);
 
             // ---- Display fixes ----
             Section("显示修复", "修复退出 HDR 后的副作用。");
             Add(SettingRow("重新加载颜色配置文件", "HDR 后重新应用您的校准（可能需要管理员权限）。", _swColorProfile), 68);
             Add(SettingRow("刷新应用", "修复 Chrome 等程序在 HDR 后变暗的问题。", _swRefreshApps), 68);
-
-            // ---- Updates ----
-            Section("更新", "仅连接 GitHub 以检查更新。不会发送任何您的信息。");
-            _checkUpdatesButton = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "检查更新", AutoSize = true };
-            _checkUpdatesButton.Click += async (_, _) => await OnCheckForUpdatesAsync();
-            var updateRow = SettingRow($"版本 {Updater.CurrentVersionText}  ({Updater.BuildDescription})", "一键安装新版本。", _checkUpdatesButton);
-            _updateDesc = RowDescription(updateRow);
-            Add(updateRow, 68);
-            Add(SettingRow("自动检查", "每周一次 – 只通知您，从不自动安装。", _swAutoUpdate), 68);
 
             // ---- Advanced ----
             Section("高级", "设置文件、日志和重置。");
@@ -494,47 +412,6 @@ namespace SmartHdrManager
 
         /// <summary>The description line of a <see cref="SettingRow"/> (its last label).</summary>
         private static Label RowDescription(RoundedPanel row) => row.Controls.OfType<Label>().Last();
-
-        /// <summary>Shows or hides the detail rows of "Videos / RTX Video HDR" (only shown while the main switch is on).</summary>
-        private void SetVideoDetailsVisible(bool visible)
-        {
-            if (_settingsPage == null) return;
-            _settingsPage.SuspendLayout();
-            foreach (var (row, height, control) in _videoDetailRows)
-            {
-                // Same scale as the "Switch to HDR for videos" row, which is never hidden: WinForms DPI-scales row
-                // heights (68 -> 102 px at 150 %), so restoring the plain value made these rows smaller than the rest.
-                float scale = _settingsPage.RowStyles[_videoMasterRow].Height / 68f;
-                _settingsPage.RowStyles[row].Height = visible ? height * scale : 0;
-                control.Visible = visible;
-            }
-            _settingsPage.ResumeLayout(true);
-        }
-
-        private void UpdateScriptStatus()
-        {
-            bool seen = _engine.BrowserScriptSeen;
-            if (_scriptStatusLabel == null || _lastScriptSeen == seen) return;
-            _lastScriptSeen = seen;
-            _scriptStatusLabel.Text = seen
-                ? "已检测 ✓"
-                : "尚未检测 – 请播放一个 YouTube 视频，或查看指南。";
-            _scriptStatusLabel.ForeColor = seen ? Theme.Muted : Theme.Warn;
-        }
-
-        private void OpenScriptGuide()
-        {
-            const string url = "https://github.com/VantaCode420/SmartHdrManager#browser-script-needed-for-youtube-hdr-and-browser-videos";
-            try
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
-            }
-            catch
-            {
-                string readme = Path.Combine(AppContext.BaseDirectory, "README.md");
-                OpenInNotepad(readme);
-            }
-        }
 
         private void OnResetSettings()
         {
@@ -667,39 +544,9 @@ namespace SmartHdrManager
                 _engine.Update(c => c.DriveScanIntervalDays = days);
                 UpdateScanDescription();
             };
-            _swBrowserWindowed.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.EnableHdrForBrowserInWindowedMode = _swBrowserWindowed.Checked); };
-            _swKeepBrowserHdr.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.KeepBrowserHdrWhenNotFocused = _swKeepBrowserHdr.Checked); };
             _swColorProfile.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.ReloadColorProfileAfterSdr = _swColorProfile.Checked); };
             _swRefreshApps.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.RefreshAppsAfterSdr = _swRefreshApps.Checked); };
-            _fallback.ValueChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.SdrFallbackDelaySeconds = _fallback.Value); };
 
-            _swVideoAuto.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                _engine.Update(c => c.VideoHdrAutomation = _swVideoAuto.Checked);
-                UpdateVideoDependents();
-            };
-            _videoMode.SelectedIndexChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                string mode = VideoModes[Math.Clamp(_videoMode.SelectedIndex, 0, VideoModes.Length - 1)];
-                _engine.Update(c => c.VideoHdrMode = mode);
-            };
-            _videoTrigger.SelectedIndexChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                string trigger = VideoTriggerModes[Math.Clamp(_videoTrigger.SelectedIndex, 0, VideoTriggerModes.Length - 1)];
-                _engine.Update(c => c.VideoHdrTrigger = trigger);
-            };
-            _swVideoBrowsers.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                _engine.Update(c => c.VideoHdrInBrowsers = _swVideoBrowsers.Checked);
-                UpdateVideoDependents();
-            };
-            _swVideoPlayers.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.VideoHdrInPlayers = _swVideoPlayers.Checked); };
-            _videoRevert.ValueChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.VideoHdrRevertSeconds = _videoRevert.Value); };
-            _swVideoBattery.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.VideoHdrDisableOnBattery = _swVideoBattery.Checked); };
             _swKeepDesktopSdr.CheckedChanged += (_, _) =>
             {
                 if (_loadingSettings) return;
@@ -708,13 +555,6 @@ namespace SmartHdrManager
                 _engine.Log("CONFIG", on
                     ? "保持桌面为 SDR：开启 – 您或其他程序开启的 HDR 也会被切回 SDR。"
                     : "保持桌面为 SDR：关闭 – 只切回本程序开启的 HDR。");
-            };
-            _swAutoUpdate.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                bool on = _swAutoUpdate.Checked;
-                _engine.Update(c => c.CheckForUpdatesAutomatically = on);
-                _engine.Log("UPDATE", on ? "已开启定期更新检查。" : "已关闭定期更新检查。");
             };
 
             Resize += (_, _) =>
@@ -797,7 +637,6 @@ namespace SmartHdrManager
         public void RefreshView()
         {
             var s = _engine.Status;
-            UpdateScriptStatus();
 
             // Visual state: 0 off, 1 on, 2 paused; +10 / +20 while a manual override (HDR / SDR) is active
             int state = (s.Paused && s.Override == HdrOverride.None ? 2 : s.HdrOn ? 1 : 0) + (int)s.Override * 10;
@@ -867,10 +706,6 @@ namespace SmartHdrManager
             {
                 detail = $"{s.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
             }
-            else if (s.Video != null)
-            {
-                detail = s.HoldSecondsLeft > 0 ? $"视频已停止 · {FormatSeconds(s.HoldSecondsLeft)} 后切回 SDR" : $"播放中：{s.Video}";
-            }
             else if (s.HoldSecondsLeft > 0)
             {
                 detail = $"再保持 HDR {s.HoldSecondsLeft} 秒";
@@ -902,7 +737,7 @@ namespace SmartHdrManager
         // ------------------------------------------------------------------
         // Games page
         // ------------------------------------------------------------------
-        /// <summary>45 -> "45 s", 299 -> "4:59 min" (long video delays since 2.5.2).</summary>
+        /// <summary>45 -> "45 s", 299 -> "4:59 min".</summary>
         private static string FormatSeconds(int seconds) =>
             seconds < 60 ? $"{seconds} 秒" : $"{seconds / 60}:{seconds % 60:00} 分钟";
 
@@ -1289,11 +1124,7 @@ namespace SmartHdrManager
             CreateLaunchShortcut(owner, item.Name, item.ExePath);
         }
 
-        /// <summary>
-        /// Desktop shortcut "&lt;name&gt; (HDR)" that runs SmartHdrManager.exe --launch "&lt;exe&gt;": HDR on first, then the program.
-        /// Files dropped onto the shortcut are passed on to the program (e.g. a video onto a player shortcut).
-        /// </summary>
-        private static void CreateLaunchShortcut(IWin32Window owner, string displayName, string exePath, bool videoPlayer = false)
+        private static void CreateLaunchShortcut(IWin32Window owner, string displayName, string exePath)
         {
             string name = string.Concat(displayName.Split(Path.GetInvalidFileNameChars())).Trim();
             if (name.Length == 0) name = Path.GetFileNameWithoutExtension(exePath);
@@ -1304,7 +1135,7 @@ namespace SmartHdrManager
                 dynamic shell = Activator.CreateInstance(shellType)!;
                 dynamic shortcut = shell.CreateShortcut(link);
                 shortcut.TargetPath = LauncherExe;
-                shortcut.Arguments = $"{(videoPlayer ? "--launch-video" : "--launch")} \"{exePath}\"";
+                shortcut.Arguments = $"--launch \"{exePath}\"";
                 shortcut.WorkingDirectory = Path.GetDirectoryName(exePath) ?? string.Empty;
                 shortcut.IconLocation = exePath + ",0";
                 shortcut.Description = $"以 HDR 开启 {displayName}（Smart HDR Manager）";
@@ -1318,414 +1149,6 @@ namespace SmartHdrManager
         }
 
         // ------------------------------------------------------------------
-        // Apps tab (2.6): every program that is not a game but that the app reacts to, one mode per program.
-        // Video players (also: start them with HDR already on, for NVIDIA RTX Video HDR), web browsers, creative apps
-        // that need SDR, recording / streaming apps. Programs that are not listed are never touched.
-        // ------------------------------------------------------------------
-        private Control BuildAppsPage()
-        {
-            var page = new SmoothScrollTable { ColumnCount = 1, Margin = new Padding(0), AutoScroll = true, Padding = new Padding(0, 0, SystemInformation.VerticalScrollBarWidth, 0) };
-            page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            Theme.UseDarkScrollbars(page);
-            _appsPage = page;
-            FillAppsPage();
-            return page;
-        }
-
-        private void FillAppsPage()
-        {
-            var page = _appsPage;
-            if (page == null || page.IsDisposed) return;
-
-            // No drawing while the rows are rebuilt: otherwise the half-built page flashes for a moment
-            bool redrawOff = page.IsHandleCreated;
-            if (redrawOff) SendMessage(page.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-            page.SuspendLayout();
-            foreach (Control c in page.Controls.Cast<Control>().ToList())
-            {
-                ForgetToolTips(c);   // the shared ToolTip would otherwise keep the old buttons alive
-                c.Dispose();
-            }
-            page.Controls.Clear();
-            page.RowStyles.Clear();
-
-            // Row heights in the window's current scale: before WinForms has DPI-scaled the window (first build in
-            // the constructor) the plain values are used and scaled with everything else; on later rebuilds the
-            // window is already scaled, so the rows have to be too. The tab bar (designed 40 px high) tells which.
-            float scale = _tabs.Height / 40f;
-            int S(int v) => (int)Math.Round(v * scale);
-            void Add(Control c, int height)
-            {
-                page.RowStyles.Add(new RowStyle(SizeType.Absolute, S(height)));
-                page.Controls.Add(c, 0, page.RowStyles.Count - 1);
-            }
-            RoundedPanel Note(string text)
-            {
-                var card = new RoundedPanel { Radius = 10, BackColor = Theme.Surface, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 8), Padding = new Padding(16, 12, 16, 12) };
-                card.Controls.Add(new Label { Dock = DockStyle.Fill, Font = Theme.Small, ForeColor = Theme.Muted, UseMnemonic = false, Text = text });
-                return card;
-            }
-            // A row's control with a "Remove" button in front of it (programs added by hand)
-            Control WithRemove(Control main, string process)
-            {
-                var panel = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0), BackColor = Color.Transparent };
-                var remove = new ModernButton { Glyph = Theme.GlyphCancel, Text = "移除", AutoSize = true, Margin = new Padding(0, 0, 10, 0) };
-                _toolTip.SetToolTip(remove, "将此程序从列表中移除");
-                remove.Click += (_, _) =>
-                {
-                    _engine.RemoveApp(process);
-                    BeginInvoke(new Action(FillAppsPage));   // not while this button's click is still running
-                };
-                remove.Size = remove.GetPreferredSize(Size.Empty);
-                main.Margin = new Padding(main.Margin.Left, Math.Max(0, (remove.Height - main.Height) / 2), 0, 0);
-                panel.Controls.Add(remove);
-                panel.Controls.Add(main);
-                panel.Size = panel.PreferredSize;
-                return panel;
-            }
-            FlowLayoutPanel Actions(params Control[] buttons)
-            {
-                var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
-                foreach (var b in buttons) { b.Margin = new Padding(0, 0, 8, 0); row.Controls.Add(b); }
-                return row;
-            }
-
-            // Installed programs: new ones join the list with their suggested mode (a listed program keeps its mode)
-            List<PlayerInfo> players;
-            List<FoundApp> found;
-            try { players = VideoPlayers.Find(_engine.Read(c => c.HdrPlayerPaths.ToList())); }
-            catch { players = new List<PlayerInfo>(); }
-            try { found = AppCatalog.Find(); }
-            catch { found = new List<FoundApp>(); }
-            _engine.AddFoundApps(players.Where(p => !p.Custom).Select(p => (AppCatalog.ProcessOf(p.ExePath), AppCategories.Player, AppModes.Auto))
-                .Concat(found.Select(f => (f.Process, f.Category, f.DefaultMode))));
-            var rules = _engine.GetAppRules();
-            string ModeOf(string process, string category) =>
-                rules.TryGetValue(process, out var r) && r.Category == category ? r.Mode : AppModes.Normalize(category, null);
-
-            // Rows of one group: installed catalogue programs + programs added by hand
-            List<(string Process, string Name, string Path, bool Added)> GroupRows(string category)
-            {
-                var list = found.Where(f => f.Category == category)
-                                .Select(f => (f.Process, f.Name, f.ExePath, rules.TryGetValue(f.Process, out var r) && r.AddedByUser))
-                                .ToList();
-                // Added by hand – also a known program picked with "Add app" that was not found automatically (e.g. an
-                // unusual install folder): it has an exe path then, and must show up too
-                foreach (var kv in rules.Where(x => x.Value.Category == category && (x.Value.AddedByUser || !string.IsNullOrEmpty(x.Value.ExePath))))
-                {
-                    if (list.Any(x => x.Process.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))) continue;
-                    list.Add((kv.Key, AppCatalog.NameFor(kv.Key, kv.Value.ExePath), kv.Value.ExePath ?? $"{kv.Key}.exe", true));
-                }
-                return list.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-
-            // ---- Video players ----
-            Add(SectionHeader("视频播放器"), 34);
-            Add(SectionDescription("自动：同 设置 › 视频  ·  仅 HDR：仅 HDR 视频  ·  关闭：不处理（如 madVR）。"), 30);
-            if (players.Count == 0)
-                Add(Note("未找到视频播放器。用下面的“添加播放器”选择其 .exe 文件。"), 60);
-
-            foreach (var player in players)
-            {
-                var p = player;
-                string process = AppCatalog.ProcessOf(p.ExePath);
-                var buttons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0), BackColor = Color.Transparent };
-                bool isApp = VideoPlayers.IsRegisteredAsApp(p.ExePath);
-                bool inMenu = VideoPlayers.IsInContextMenu(p.ExePath);
-
-                var mode = ModeButton(process, AppCategories.Player, ModeOf(process, AppCategories.Player), p.Name, removable: false);
-
-                var setDefault = new ModernButton { Text = "默认应用…", AutoSize = true, Primary = true, Margin = new Padding(0, 0, 8, 0) };
-                _toolTip.SetToolTip(setDefault, $"将“{VideoPlayers.AppName(p)}”设为视频应用：双击任何视频都会以 HDR 播放");
-                setDefault.Click += (_, _) => OnSetDefaultPlayer(p);
-
-                var more = new ModernButton { Text = "更多 ▾", AutoSize = true, Margin = new Padding(0) };
-                more.Click += (_, _) =>
-                {
-                    var menu = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), BackColor = Theme.Surface, ForeColor = Theme.Text, ShowImageMargin = false };
-                    menu.Items.Add("创建桌面快捷方式", null, (_, _) => CreateLaunchShortcut(this, p.Name, p.ExePath, videoPlayer: true));
-                    menu.Items.Add(inMenu ? "移除右键菜单项" : "添加右键菜单项（“以 HDR 播放”）", null, (_, _) => ToggleContextMenu(p));
-                    if (isApp)
-                        menu.Items.Add($"从“打开方式”中移除“{VideoPlayers.AppName(p)}”", null, (_, _) => OnUnregisterPlayer(p));
-                    if (p.Custom)
-                    {
-                        menu.Items.Add(new ToolStripSeparator());
-                        menu.Items.Add("从此列表移除播放器", null, (_, _) => RemovePlayer(p));
-                    }
-                    menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
-                    menu.Show(more, new Point(0, more.Height));
-                };
-                buttons.Controls.Add(mode);
-                buttons.Controls.Add(setDefault);
-                buttons.Controls.Add(more);
-                buttons.Size = buttons.PreferredSize;
-
-                var status = new List<string> { p.Custom ? "您添加的" : "自动发现" };
-                if (isApp) status.Add("打开方式 ✓");
-                if (inMenu) status.Add("右键 ✓");
-                Add(SettingRow(p.Name, $"{string.Join("  ·  ", status)}  ·  {p.ExePath}", buttons), 68);
-            }
-
-            // Player names typed into config.json by hand (no exe known): mode and "remove" only
-            var shownPlayers = new HashSet<string>(players.Select(x => AppCatalog.ProcessOf(x.ExePath)), StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in rules.Where(x => x.Value.Category == AppCategories.Player && x.Value.AddedByUser && !shownPlayers.Contains(x.Key))
-                                    .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
-            {
-                string name = AppCatalog.NameFor(kv.Key, kv.Value.ExePath);
-                var mode = ModeButton(kv.Key, AppCategories.Player, kv.Value.Mode, name, removable: false);
-                mode.Margin = new Padding(0);
-                Add(SettingRow(name, $"您添加的  ·  {kv.Value.ExePath ?? kv.Key + ".exe"}", WithRemove(mode, kv.Key)), 68);
-            }
-
-            var addPlayer = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加播放器", AutoSize = true };
-            addPlayer.Click += (_, _) => OnAddPlayer();
-            Add(Actions(addPlayer), 52);
-            Add(Note("默认应用…：双击任何视频都会以 HDR 播放 – 最适合 RTX Video HDR。" +
-                     "更多：桌面快捷方式、右键菜单项、移除。播放器设置：README。"), 76);
-
-            // ---- Web browsers ----
-            Add(SectionHeader("浏览器"), 46);
-            Add(SectionDescription("YouTube HDR 和浏览器视频 – 需要浏览器脚本。"), 30);
-            var browsers = GroupRows(AppCategories.Browser);
-            if (browsers.Count == 0) Add(Note("未找到浏览器。"), 60);
-            foreach (var (process, name, path, added) in browsers)
-            {
-                var mode = ModeButton(process, AppCategories.Browser, ModeOf(process, AppCategories.Browser), name, removable: false);
-                mode.Margin = new Padding(0);
-                Add(SettingRow(name, $"{(added ? "您添加的" : "自动发现")}  ·  {path}", added ? WithRemove(mode, process) : mode), 68);
-            }
-            var addBrowser = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加浏览器", AutoSize = true };
-            addBrowser.Click += (_, _) => OnAddApp(AppCategories.Browser, "选择浏览器（.exe）");
-            Add(Actions(addBrowser), 52);
-
-            // ---- Creative apps ----
-            Add(SectionHeader("创意应用"), 46);
-            Add(SectionDescription("开启：该应用在前台时使用 SDR，以获得准确的颜色。之后您的 HDR 会恢复。"), 30);
-            var creative = GroupRows(AppCategories.Creative);
-            if (creative.Count == 0) Add(Note("未找到照片或视频编辑软件。请在下面添加。"), 60);
-            foreach (var (process, name, path, added) in creative)
-            {
-                string proc = process, display = name;
-                var sw = new ToggleSwitch { Size = new Size(S(44), S(22)), BackColor = Theme.Surface, Checked = ModeOf(proc, AppCategories.Creative) == AppModes.Sdr };
-                sw.CheckedChanged += (_, _) => _engine.SetAppMode(proc, sw.Checked ? AppModes.Sdr : AppModes.Off, display);
-                _toolTip.SetToolTip(sw, "开启：此应用在前台时使用 SDR");
-                sw.Margin = new Padding(0);
-                Add(SettingRow(name, $"{(added ? "您添加的" : "自动发现")}  ·  {path}", added ? WithRemove(sw, proc) : sw), 68);
-            }
-            var addCreative = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加应用", AutoSize = true };
-            addCreative.Click += (_, _) => OnAddApp(AppCategories.Creative, "选择需要 SDR 的应用（.exe）");
-            Add(Actions(addCreative), 52);
-
-            // ---- Recording & streaming ----
-            Add(SectionHeader("录制与直播"), 46);
-            Add(SectionDescription("开启：运行期间不启用 HDR，避免录制过曝。之后您的 HDR 会恢复。"), 30);
-            var recording = GroupRows(AppCategories.Recording);
-            if (recording.Count == 0) Add(Note("未找到录制软件（OBS Studio、Streamlabs）。请在下面添加。"), 60);
-            foreach (var (process, name, path, added) in recording)
-            {
-                string proc = process, display = name;
-                var sw = new ToggleSwitch { Size = new Size(S(44), S(22)), BackColor = Theme.Surface, Checked = ModeOf(proc, AppCategories.Recording) == AppModes.NoHdr };
-                sw.CheckedChanged += (_, _) => _engine.SetAppMode(proc, sw.Checked ? AppModes.NoHdr : AppModes.Off, display);
-                _toolTip.SetToolTip(sw, "开启：此应用运行期间不启用 HDR（包括游戏）");
-                sw.Margin = new Padding(0);
-                Add(SettingRow(name, $"{(added ? "您添加的" : "自动发现")}  ·  {path}", added ? WithRemove(sw, proc) : sw), 68);
-            }
-            var addRecording = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加应用", AutoSize = true };
-            addRecording.Click += (_, _) => OnAddApp(AppCategories.Recording, "选择录制或直播软件（.exe）");
-            Add(Actions(addRecording), 52);
-
-            Add(Note("未在此处或游戏中列出的程序永远不会被处理。“关闭”含义相同。"), 60);
-
-            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // filler
-            page.ResumeLayout(true);
-            if (redrawOff)
-            {
-                SendMessage(page.Handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
-                page.Invalidate(true);
-            }
-        }
-
-        private static (string Mode, string Short, string Long)[] ModeOptions(string category) => category switch
-        {
-            AppCategories.Recording => new[]
-            {
-                (AppModes.NoHdr, "从不 HDR", "从不 HDR – 游戏和视频保持 SDR，您的 HDR 稍后恢复"),
-                (AppModes.Off, "关闭", "关闭 – 运行它不会改变任何设置")
-            },
-            AppCategories.Browser => new[]
-            {
-                (AppModes.Auto, "自动", "自动 – YouTube HDR 视频，其他视频按 设置 › 视频 中的设置"),
-                (AppModes.HdrOnly, "仅 HDR", "仅 HDR – 仅真正的 HDR 视频会开启 HDR"),
-                (AppModes.Off, "关闭", "关闭 – 此浏览器从不开启 HDR")
-            },
-            _ => new[]
-            {
-                (AppModes.Auto, "自动", "自动 – HDR 视频，SDR 视频按 设置 › 视频 中的设置"),
-                (AppModes.HdrOnly, "仅 HDR", "仅 HDR – 仅 HDR 视频会开启 HDR"),
-                (AppModes.Off, "关闭", "关闭 – 不处理 HDR（播放器自行切换，如 madVR）")
-            }
-        };
-
-        /// <summary>Grey first line of a mode menu: what the choices are about.</summary>
-        private static string ModeMenuTitle(string category, string name) => category switch
-        {
-            AppCategories.Recording => $"{name} 运行期间：",
-            AppCategories.Browser => $"{name} 中的视频：",
-            _ => $"{name} 中的视频："
-        };
-
-        private static string ShortMode(string category, string mode)
-        {
-            foreach (var (m, shortText, _) in ModeOptions(category))
-                if (m == mode) return shortText;
-            return mode;
-        }
-
-        /// <summary>A button showing the program's mode ("Auto ▾"); a click opens the choices.</summary>
-        private ModernButton ModeButton(string process, string category, string mode, string displayName, bool removable)
-        {
-            string current = mode;
-            // Same width for every choice (no jumping); a preferred size, so the row's layout reserves the room for it
-            string widest = ModeOptions(category).Select(o => o.Short + "  ▾").OrderByDescending(t => t.Length).First();
-            var button = new ModernButton { Margin = new Padding(0, 0, 8, 0), SizingText = widest, Text = ShortMode(category, current) + "  ▾" };
-            button.AutoSize = true;
-            button.Size = button.GetPreferredSize(Size.Empty);
-            _toolTip.SetToolTip(button, "此程序的处理方式 – 点击更改");
-            button.Click += (_, _) =>
-            {
-                var menu = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), BackColor = Theme.Surface, ForeColor = Theme.Text, ShowImageMargin = false, ShowCheckMargin = true };
-                menu.Items.Add(new ToolStripMenuItem(ModeMenuTitle(category, displayName)) { Enabled = false });
-                menu.Items.Add(new ToolStripSeparator());
-                foreach (var (m, _, longText) in ModeOptions(category))
-                {
-                    string chosen = m;
-                    var item = new ToolStripMenuItem(longText) { Checked = chosen == current };
-                    item.Click += (_, _) =>
-                    {
-                        if (chosen == current) return;
-                        current = chosen;
-                        _engine.SetAppMode(process, chosen, displayName);
-                        if (!button.IsDisposed) button.Text = ShortMode(category, chosen) + "  ▾";
-                    };
-                    menu.Items.Add(item);
-                }
-                if (removable)
-                {
-                    menu.Items.Add(new ToolStripSeparator());
-                    menu.Items.Add("从此列表移除", null, (_, _) =>
-                    {
-                        _engine.RemoveApp(process);
-                        BeginInvoke(new Action(FillAppsPage));
-                    });
-                }
-                menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
-                menu.Show(button, new Point(0, button.Height));
-            };
-            return button;
-        }
-
-        private void OnAddApp(string category, string title)
-        {
-            using var dlg = new OpenFileDialog
-            {
-                Title = title,
-                Filter = "Programs (*.exe)|*.exe",
-                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)
-            };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            if (!_engine.AddApp(dlg.FileName, category))
-            {
-                MessageBox.Show(this, "无法添加此程序。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            FillAppsPage();
-        }
-
-        private const int WM_SETREDRAW = 0x000B;
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-        private void ForgetToolTips(Control control)
-        {
-            _toolTip.SetToolTip(control, null);
-            foreach (Control child in control.Controls) ForgetToolTips(child);
-        }
-
-        private void OnSetDefaultPlayer(PlayerInfo player)
-        {
-            if (!VideoPlayers.IsRegisteredAsApp(player.ExePath))
-            {
-                if (!VideoPlayers.RegisterAsApp(player, LauncherExe, out string error))
-                {
-                    MessageBox.Show(this, $"“{VideoPlayers.AppName(player)}”无法注册（{error}）。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-                _engine.Log("VIDEO", $"“{VideoPlayers.AppName(player)}”已注册为视频文件的应用。");
-            }
-
-            MessageBox.Show(this,
-                $"“{VideoPlayers.AppName(player)}”现在可作为视频应用使用。\n\n" +
-                "Windows 将打开 设置 › 默认应用。点击顶部的“设为默认”即可对所有视频类型使用它" +
-                "（或在下面选择单个文件类型）。\n\n" +
-                "Windows 不允许程序自行更改此设置，所以这一步需要您手动完成。" +
-                "或者：右键视频 › 打开方式 › 选择其他应用 › 选中它 › 始终。",
-                "视频默认应用", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            VideoPlayers.OpenDefaultAppsSettings(player.ExePath);
-            FillAppsPage();   // shows "Open with ✓"
-        }
-
-        private void OnUnregisterPlayer(PlayerInfo player)
-        {
-            VideoPlayers.UnregisterApp(player.ExePath);
-            _engine.Log("VIDEO", $"“{VideoPlayers.AppName(player)}”已从“打开方式”中移除。");
-            FillAppsPage();
-        }
-
-        private void ToggleContextMenu(PlayerInfo player)
-        {
-            if (VideoPlayers.IsInContextMenu(player.ExePath))
-            {
-                VideoPlayers.RemoveFromContextMenu(player.ExePath);
-                _engine.Log("VIDEO", $"右键菜单“以 HDR 播放（{player.Name}）”已移除。");
-            }
-            else if (VideoPlayers.AddToContextMenu(player, LauncherExe, out string error))
-            {
-                _engine.Log("VIDEO", $"右键菜单“以 HDR 播放（{player.Name}）”已为视频文件添加。");
-            }
-            else
-            {
-                MessageBox.Show(this, $"无法添加右键菜单项（{error}）。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-            FillAppsPage();
-        }
-
-        private void OnAddPlayer()
-        {
-            using var dlg = new OpenFileDialog
-            {
-                Title = "选择视频播放器（.exe）",
-                Filter = "Programs (*.exe)|*.exe",
-                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)
-            };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            string file = dlg.FileName;
-            _engine.Update(c =>
-            {
-                if (!c.HdrPlayerPaths.Contains(file, StringComparer.OrdinalIgnoreCase)) c.HdrPlayerPaths.Add(file);
-            });
-            _engine.AddApp(file, AppCategories.Player);   // also watched for videos (Auto)
-            FillAppsPage();
-        }
-
-        private void RemovePlayer(PlayerInfo player)
-        {
-            VideoPlayers.RemoveFromContextMenu(player.ExePath);
-            VideoPlayers.UnregisterApp(player.ExePath);
-            _engine.Update(c => c.HdrPlayerPaths.RemoveAll(x => string.Equals(x, player.ExePath, StringComparison.OrdinalIgnoreCase)));
-            _engine.RemoveApp(AppCatalog.ProcessOf(player.ExePath));   // only if it was added by hand
-            FillAppsPage();
-        }
-
         // ---- monitors ----
         private void OnMonitorToggled(ToggleSwitch changed)
         {
@@ -1826,45 +1249,9 @@ namespace SmartHdrManager
                         ? selection.Contains(monitor.DevicePath, StringComparer.OrdinalIgnoreCase)
                         : !onlyPrimary || monitor.IsPrimary);
                 }
-                _swBrowserWindowed.Checked = _engine.Read(c => c.EnableHdrForBrowserInWindowedMode);
-                _swKeepBrowserHdr.Checked = _engine.Read(c => c.KeepBrowserHdrWhenNotFocused);
-                _swColorProfile.Checked = _engine.Read(c => c.ReloadColorProfileAfterSdr);
-                _swRefreshApps.Checked = _engine.Read(c => c.RefreshAppsAfterSdr);
-                _fallback.Value = _engine.Read(c => c.SdrFallbackDelaySeconds);
-                _swKeepDesktopSdr.Checked = _engine.Read(c => c.KeepDesktopSdr);
-                _swAutoUpdate.Checked = _engine.Read(c => c.CheckForUpdatesAutomatically);
-
-                _swVideoAuto.Checked = _engine.Read(c => c.VideoHdrAutomation);
-                _videoMode.SelectedIndex = Math.Max(0, Array.IndexOf(VideoModes, _engine.Read(c => VideoHdrModes.Normalize(c.VideoHdrMode))));
-                _videoTrigger.SelectedIndex = Math.Max(0, Array.IndexOf(VideoTriggerModes, _engine.Read(c => VideoTriggers.Normalize(c.VideoHdrTrigger))));
-                _swVideoBrowsers.Checked = _engine.Read(c => c.VideoHdrInBrowsers);
-                _swVideoPlayers.Checked = _engine.Read(c => c.VideoHdrInPlayers);
-                _videoRevert.Value = _engine.Read(c => c.VideoHdrRevertSeconds);
-                _swVideoBattery.Checked = _engine.Read(c => c.VideoHdrDisableOnBattery);
-                UpdateVideoDependents();
-                _lastScriptSeen = null;
-                UpdateScriptStatus();
                 UpdateNeverHdrDescription();
             }
             finally { _loadingSettings = false; }
-        }
-
-        /// <summary>
-        /// The video detail rows are only shown while video switching is on. With video automation for browsers on,
-        /// the two older YouTube switches no longer apply – their description says why instead of just greying out.
-        /// </summary>
-        private void UpdateVideoDependents()
-        {
-            SetVideoDetailsVisible(_swVideoAuto.Checked);
-
-            bool videoHandlesBrowsers = _swVideoAuto.Checked && _swVideoBrowsers.Checked;
-            _swBrowserWindowed.Enabled = !videoHandlesBrowsers;
-            _swKeepBrowserHdr.Enabled = !videoHandlesBrowsers;
-            const string handled = "由下方的“视频 HDR”设置。";
-            if (_browserWindowedDesc != null)
-                _browserWindowedDesc.Text = videoHandlesBrowsers ? handled : "不仅当视频全屏时。";
-            if (_keepBrowserDesc != null)
-                _keepBrowserDesc.Text = videoHandlesBrowsers ? handled : "HDR 视频播放且您使用其他窗口时。";
         }
 
         /// <summary>"Looks for newly installed games · last scan: 3 days ago".</summary>
@@ -1879,62 +1266,6 @@ namespace SmartHdrManager
             _scanIntervalDesc.Text = _scanInterval.Value < 0
                 ? $"关闭 – 使用 游戏选项卡 中的“扫描游戏”  ·  {when}"
                 : $"搜索您磁盘中的新游戏  ·  {when}";
-        }
-
-        // ---- Check for updates (Settings › Updates) ----
-        private bool _checkingUpdates;
-
-        private async Task OnCheckForUpdatesAsync()
-        {
-            if (_checkingUpdates) return;
-            _checkingUpdates = true;
-            var button = _checkUpdatesButton;
-            if (button != null)
-            {
-                button.Enabled = false;
-                button.Text = "检查中…";
-            }
-            try
-            {
-                var info = await Updater.CheckAsync(System.Threading.CancellationToken.None);
-                _engine.Update(c => c.LastUpdateCheckUtc = DateTime.UtcNow);
-                if (IsDisposed) return;
-                if (!info.IsNewer)
-                {
-                    _engine.Log("UPDATE", $"版本 {Updater.CurrentVersionText} 已是最新版本。");
-                    if (_updateDesc != null) _updateDesc.Text = $"已是最新 ✓  （检查于 {DateTime.Now:HH:mm}）";
-                    return;
-                }
-
-                _engine.Log("UPDATE", $"版本 {info.VersionText} 可用。");
-                if (_updateDesc != null) _updateDesc.Text = $"版本 {info.VersionText} 可用。";
-                bool restart;
-                using (var dlg = new UpdateDialog(info, _engine, _windowIcon))
-                {
-                    dlg.ShowDialog(this);
-                    restart = dlg.RestartRequested;
-                }
-                // The new version has been started and waits for this one: exit after this click has been handled
-                if (restart && !IsDisposed) BeginInvoke(new Action(_exitApp));
-            }
-            catch (Exception ex)
-            {
-                _engine.Log("UPDATE", $"更新检查失败：{ex.Message}");
-                if (!IsDisposed)
-                {
-                    if (_updateDesc != null) _updateDesc.Text = "无法检查更新 – 请查看日志选项卡。";
-                    MessageBox.Show(this, $"无法检查更新：\n{ex.Message}", "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-            finally
-            {
-                _checkingUpdates = false;
-                if (button != null && !button.IsDisposed)
-                {
-                    button.Enabled = true;
-                    button.Text = "检查更新";
-                }
-            }
         }
 
         private void OpenInNotepad(string path)

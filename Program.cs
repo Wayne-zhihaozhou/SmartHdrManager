@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,10 +27,6 @@ namespace SmartHdrManager
         private bool _exiting;
         private string _lastTooltip = string.Empty;
 
-        // Weekly update check (Settings › Updates, off by default): first look a minute after the start
-        private const int UpdateCheckEveryMs = 6 * 3600 * 1000;
-        private long _nextUpdateCheckMs = Environment.TickCount64 + 60000;
-        private bool _updateCheckRunning;
 
         public TrayAppContext(HdrEngine engine, EventWaitHandle showEvent, CommandEvents commands, CliCommand startCommand, bool startHidden,
                               bool justUpdated)
@@ -39,9 +35,7 @@ namespace SmartHdrManager
             _showEvent = showEvent;
             _commands = commands;
 
-            _tray = new TrayAndStartupManager(ShowMain, SetPaused, Exit, SetOverride, GetOverride, () => Shortcut('O'),
-                                              () => _engine.OverrideMode == HdrOverride.None && !_engine.Paused ? _engine.VideoMenuState : 0,
-                                              _engine.SkipCurrentVideo, _engine.ResumeVideoHdr);
+            _tray = new TrayAndStartupManager(ShowMain, SetPaused, Exit, SetOverride, GetOverride, () => Shortcut('O'));
 
             ApplyHotkeys();
 
@@ -56,18 +50,7 @@ namespace SmartHdrManager
             _engine.Start();
             if (TrayAndStartupManager.RefreshAutostartPath())
                 _engine.Log("INFO", "\"开机自启动\"指向了旧位置 – 已更新为本程序。");
-            if (Environment.ProcessPath is string exe &&
-                VideoPlayers.RefreshContextMenu(exe) + VideoPlayers.RefreshAppRegistrations(exe) > 0)
-                _engine.Log("INFO", "\"以 HDR 播放\"条目指向了旧位置 – 已更新为本程序。");
             if (startCommand != CliCommand.None) RunCommand(startCommand);
-
-            // After "Check for updates › Update now": remove the old exe, say what happened
-            Updater.CleanUp();
-            if (justUpdated)
-            {
-                _engine.Log("UPDATE", $"已更新到版本 {Updater.CurrentVersionText}。");
-                _tray.ShowBalloon("Smart HDR Manager 已更新", $"当前运行版本 {Updater.CurrentVersionText}。新功能说明：程序旁的 CHANGELOG.md。");
-            }
 
             if (!startHidden) ShowMain();
         }
@@ -221,14 +204,6 @@ namespace SmartHdrManager
             // Notifications from the engine (crash hint)
             while (_engine.TryTakeNotification(out string noteTitle, out string noteText))
                 _tray.ShowBalloon(noteTitle, noteText);
-
-            // Weekly update check, only if turned on (Settings › Updates)
-            if (Environment.TickCount64 >= _nextUpdateCheckMs)
-            {
-                _nextUpdateCheckMs = Environment.TickCount64 + UpdateCheckEveryMs;
-                _ = AutoCheckForUpdateAsync();
-            }
-
             // Only does anything if the app was built as a console exe (see ConsoleWindowHider)
             ConsoleWindowHider.HideIfMinimized();
 
@@ -261,44 +236,6 @@ namespace SmartHdrManager
                 form.HiddenToTray -= OnFormHidden;
                 form.AllowExit();
                 form.Dispose();
-            }
-        }
-
-        /// <summary>
-        /// "Check for updates automatically": at most once a week, only a notification – nothing is downloaded or
-        /// installed without you (Settings › Updates › Check for updates). Each new version is mentioned once.
-        /// </summary>
-        private async Task AutoCheckForUpdateAsync()
-        {
-            if (_updateCheckRunning || _exiting) return;
-            bool enabled = _engine.Read(c => c.CheckForUpdatesAutomatically);
-            DateTime? last = _engine.Read(c => c.LastUpdateCheckUtc);
-            if (!enabled || (last != null && DateTime.UtcNow - last.Value < TimeSpan.FromDays(7))) return;
-
-            _updateCheckRunning = true;
-            try
-            {
-                var info = await Updater.CheckAsync(CancellationToken.None);
-                _engine.Update(c => c.LastUpdateCheckUtc = DateTime.UtcNow);
-                if (!info.IsNewer)
-                {
-                    _engine.Log("UPDATE", $"定期检查：{Updater.CurrentVersionText} 已是最新版本。");
-                    return;
-                }
-                bool alreadyMentioned = string.Equals(_engine.Read(c => c.LastNotifiedVersion), info.VersionText, StringComparison.OrdinalIgnoreCase);
-                _engine.Log("UPDATE", $"定期检查：有新版本 {info.VersionText}（设置 › 更新 › 检查更新）。");
-                if (alreadyMentioned || _exiting) return;
-                _engine.Update(c => c.LastNotifiedVersion = info.VersionText);
-                _tray.ShowBalloon($"Smart HDR Manager {info.VersionText} 可用",
-                    "打开程序 › 设置 › 更新 › 检查更新即可安装。");
-            }
-            catch (Exception ex)
-            {
-                _engine.Log("UPDATE", $"定期更新检查失败：{ex.Message}");
-            }
-            finally
-            {
-                _updateCheckRunning = false;
             }
         }
 
@@ -439,14 +376,12 @@ namespace SmartHdrManager
         {
             // "Launch with HDR": SmartHdrManager.exe --launch <game> [arguments] – starts a game with HDR already on.
             // Runs as its own small process (no window, no tray icon) and exits when the game has closed.
-            int launchIndex = Array.FindIndex(args, a => a.Equals("--launch", StringComparison.OrdinalIgnoreCase) ||
-                                                         a.Equals("--launch-video", StringComparison.OrdinalIgnoreCase));
+            int launchIndex = Array.FindIndex(args, a => a.Equals("--launch", StringComparison.OrdinalIgnoreCase));
             if (launchIndex >= 0)
             {
                 SetTaskbarIdentity(LauncherUserModelId);
                 Application.EnableVisualStyles();
-                bool videoPlayer = args[launchIndex].Equals("--launch-video", StringComparison.OrdinalIgnoreCase);
-                Environment.ExitCode = HdrLauncher.Run(args, launchIndex, videoPlayer);
+                Environment.ExitCode = HdrLauncher.Run(args, launchIndex, false);
                 return;
             }
 
@@ -493,3 +428,4 @@ namespace SmartHdrManager
         }
     }
 }
+

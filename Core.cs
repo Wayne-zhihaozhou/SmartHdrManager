@@ -40,47 +40,6 @@ namespace SmartHdrManager
         // Catalog of all games found on drives (selectable via menu [G] before starting a game)
         public List<string> DiscoveredGames { get; set; } = new();
 
-        // Dedicated local media players (use HdrVideoKeywords)
-        public List<string> LocalVideoPlayers { get; set; } = new()
-        {
-            "vlc",
-            "mpc-hc64",
-            "potplayermini64",
-            "mpv",
-            "mpvnet",      // mpv.net
-            "mpc-be64",
-            "kodi"         // window title has no file name: only "Videos & RTX Video HDR" (Always) can use it
-        };
-
-        // Web browsers (never use generic keywords; only react to BrowserRealHdrToken)
-        public List<string> Browsers { get; set; } = new()
-        {
-            "chrome",
-            "msedge",
-            "firefox",
-            "brave"
-        };
-
-        // Keywords used ONLY for local video players (not browsers)
-        public List<string> HdrVideoKeywords { get; set; } = new()
-        {
-            "hdr",
-            "dolby vision",
-            "bt2020",
-            "dovi"
-            // not "10bit": many SDR encodes (e.g. anime) are 10-bit, that says nothing about HDR
-        };
-
-        // Unique token injected by the Tampermonkey script when a real HDR video stream is loaded
-        public string BrowserRealHdrToken { get; set; } = "[real_hdr_active]";
-
-        // If false, browser HDR only activates in fullscreen. If true, also in windowed mode.
-        public bool EnableHdrForBrowserInWindowedMode { get; set; } = true;
-
-        // Keep HDR on while a browser window still shows the HDR token, even if another window has focus
-        // (browser pop-ups, menus, a second monitor). Only keeps HDR on; it never switches HDR on by itself.
-        public bool KeepBrowserHdrWhenNotFocused { get; set; } = true;
-
         // After leaving HDR, tell open windows that the display changed so apps like Chrome stop rendering
         // with their cached HDR brightness (which makes them look dimmed until minimized/restored).
         public bool RefreshAppsAfterSdr { get; set; } = true;
@@ -107,74 +66,314 @@ namespace SmartHdrManager
         // Keyboard shortcuts: "WinAlt" (default, never collides with AltGr typing), "CtrlAlt" or "Off"
         public string HotkeyModifier { get; set; } = HotkeySettings.WinAlt;
 
-        // ---- v2.5: video playback (RTX Video HDR) ----
-        // Switch Windows to HDR while a video plays (browsers via the userscript, video players via their audio).
-        public bool VideoHdrAutomation { get; set; } = false;
-        // "Smart" (HDR videos + SDR videos when RTX Video HDR is on), "NativeOnly" (HDR videos only), "Always" (every video)
-        public string VideoHdrMode { get; set; } = VideoHdrModes.Smart;
-        // "Fullscreen" (recommended) or "Any" (windowed and full screen)
-        public string VideoHdrTrigger { get; set; } = VideoTriggers.Fullscreen;
-        public bool VideoHdrInBrowsers { get; set; } = true;
-        public bool VideoHdrInPlayers { get; set; } = true;
-        // A video must play this long before HDR is switched on (ignores previews and short sounds)
-        public int VideoHdrActivationSeconds { get; set; } = 2;
-        // After the video stops / pauses: wait this long before going back to SDR (0 s – 5 min, 30 s max before 2.5.2)
-        public int VideoHdrRevertSeconds { get; set; } = 5;
-        public bool VideoHdrDisableOnBattery { get; set; } = true;
-        // While one of these programs runs, videos never switch HDR (a switch would disturb a recording/stream)
-        public List<string> VideoHdrBlockingApps { get; set; } = new() { "obs64", "obs32" };
-        // ---- v2.5.1 ----
-        // While one of the VideoHdrBlockingApps (OBS) runs, never switch HDR on automatically – games included – and go
-        // back to SDR when it starts, so a recording is never made in HDR by mistake. Manual overrides still work.
-        public bool NoHdrWhileObsRunning { get; set; } = false;
-        // When a browser tab with the userscript marker was first seen (Settings shows "Browser script: detected")
-        public DateTime? BrowserScriptSeenUtc { get; set; }
-        // Videos tab: video players added by hand (full exe paths); installed ones are found automatically
-        public List<string> HdrPlayerPaths { get; set; } = new();
-        // Marker the userscript adds to the tab title while an SDR video plays
-        public string BrowserSdrVideoToken { get; set; } = "[sdr_video_active]";
+
         // ---- v2.5.2 ----
         // Learned launchers: launcher process -> the game process(es) it started (e.g. "redprelauncher" -> "witcher3").
         // Filled automatically when a watched game closes within seconds and a program from the same folder takes over.
         public Dictionary<string, List<string>> LauncherGames { get; set; } = new();
 
         // ---- v2.6 ----
-        // Apps tab: every program that is not a game but that the app reacts to – process name -> category and mode.
-        // Replaces Browsers, LocalVideoPlayers, ForceSdrApps, VideoHdrBlockingApps and NoHdrWhileObsRunning, which are
-        // still written (for older versions) but no longer read.
-        public Dictionary<string, AppRule> AppRules { get; set; } = AppCatalog.DefaultRules();
+        // Legacy field kept for old config files; no longer used internally.
+        public Dictionary<string, AppRule> AppRules { get; set; } = new();
         // Off (default): the app only switches back HDR that it turned on itself; HDR turned on by you or another
         // program is left alone. On: the 2.5 behaviour – back to SDR whenever nothing in the lists needs HDR.
         public bool KeepDesktopSdr { get; set; } = false;
         // Automatic drive scan for newly installed games: -1 = off, 0 = at every start, N = every N days (default weekly)
         public int DriveScanIntervalDays { get; set; } = 7;
-        // Look for a new version on GitHub once a week. Off by default: no internet connection unless asked for.
-        public bool CheckForUpdatesAutomatically { get; set; } = false;
-        public DateTime? LastUpdateCheckUtc { get; set; }
-        public string? LastNotifiedVersion { get; set; }          // the automatic check mentions each version only once
         // Games that closed within seconds after HDR was switched on for them (possible crash, e.g. with NVIDIA RTX HDR)
         public Dictionary<string, int> QuickExitCounts { get; set; } = new();
 
         // Full exe paths of programs added by hand or by hotkey (for their icons in the Games tab)
         public Dictionary<string, string> ProgramPaths { get; set; } = new();
 
-        public List<string> ForceSdrApps { get; set; } = new()
-        {
-            "photoshop",
-            "lightroom",
-            "resolve",
-            "premiere",
-            "adobe premiere pro",   // the real process name of Premiere Pro
-            "afterfx"               // After Effects
-        };
-
         public bool EnableHdrOnProcessStart { get; set; } = true;
         public int ProcessScanIntervalMs { get; set; } = 100;
         // Off by default: the Windows task it uses needs administrator rights on most PCs
         public bool ReloadColorProfileAfterSdr { get; set; } = false;
-        public bool RequireKeywordForFullscreenVideo { get; set; } = true;
         public int SdrFallbackDelaySeconds { get; set; } = 3;
     }
+
+    // =========================================================================
+    // APP RULES (migrated from AppCatalog.cs)
+    // =========================================================================
+    public static class AppCategories
+    {
+        public static string? Normalize(string input)
+        {
+            switch (input)
+            {
+                case "browser": return "browser";
+                case "player": return "player";
+                case "creative": return "creative";
+                case "recording": return "recording";
+                default: return null;
+            }
+        }
+    }
+
+    public static class AppModes
+    {
+        public const string Off = "off";
+        public const string Sdr = "sdr";
+        public const string HdrOnly = "hdr_only";
+        public const string Auto = "auto";
+        public const string NoHdr = "no_hdr";
+
+        public static string Normalize(string category, string? mode)
+        {
+            switch (category)
+            {
+                case "browser":
+                case "player":
+                    return mode switch { Off => Off, HdrOnly => HdrOnly, _ => Auto };
+                case "creative":
+                    return mode switch { Sdr => Sdr, _ => Off };
+                case "recording":
+                    return mode switch { Off => Off, NoHdr => NoHdr, _ => Auto };
+                default:
+                    return Off;
+            }
+        }
+    }
+
+    public sealed class AppRule
+    {
+        public string Category { get; set; } = string.Empty;
+        public string Mode { get; set; } = string.Empty;
+        public string? ExePath { get; set; }
+        public bool AddedByUser { get; set; }
+    }
+
+    // =========================================================================
+    // AppCatalog stubs (migrated from AppCatalog.cs; Apps tab deleted)
+    // =========================================================================
+    public static class AppCatalog
+    {
+        // Minimal known-processes list (was used to filter non-game executables during drive scanning)
+        private static readonly HashSet<string> _knownProcesses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "explorer", "smarthdrmanager", "code", "visualstudio", "devenv",
+            "notepad", "notepad++", "sublime_text", "atom", "webstorm",
+            "intellij", "pycharm", "webstorm", "phpstorm", "clion",
+            "taskhostw", "dwm", "csrss", "svchost", "services", "lsass",
+            "winlogon", "spoolsv", "explorer", "sihost", "inputhost",
+            "shellexperiencehost", "startmenuexperiencehost", "searchui",
+            "runtimebroker", "compattelrunner", "fontdrvhost",
+            "store", "msedge", "chrome", "firefox", "brave",
+            "vlc", "mpc-hc64", "mpc-be64", "mpv", "potplayer",
+            "photoshop", "lightroom", "premiere", "afterfx", "resolve",
+            "obs64", "obs32", "streamlabs",
+            "spotify", "discord", "telegram", "whatsapp",
+            "onedrive", "dropbox", "icloud",
+            "rstrty", "comsurrogate", "dfsshare",
+            "searchindex", "searchprotocol", "searchhost",
+            "fontdrvhost", "dwm", "wininit", "winlogon",
+            "conhost", "regedit", "msconfig", "msdtc",
+            "msedge_update", "edgeupdate", "edgeupdatem",
+            "chrome_updater", "firefoxupdater",
+            "steam", "steamwebhelper", "epicgameslauncher",
+            "epicgames-launcher", "goggalaxy", "gog-galaxy",
+            "xboxapp", "xboxgamebar", "xboxgamingoverlay",
+            "ubisoftconnect", "ubisoftconnect", "uplay",
+            "battle.net", "blizzard", "rockstar", "epicgames",
+            "riotclient", "heroic", "itch",
+            "taskmgr", "dwm", "csrss",
+            "wlms", "WUDFHost", "SecurityHealthSystray",
+            "ccSvcHst", "ccSvcHst64", "ccSetMgr",
+            "avastui", "avgui", "mssecess", "msmpeng",
+            "nvvsvc", "NVIDIA Container", "nvudisp",
+            "RtkAudUService", "AudioSrv", "Audiodg",
+            "ctfmon", "SearchApp", "WidgetService",
+            "ShellExperienceHost", "TextInputHost",
+            "StartMenuExperienceHost", "explorer",
+            "OneDrive", "OneDriveSetup", "OneDriveUpdater",
+            "Dropbox", "DropboxUpdater",
+            "MailApp", "Microsoft.Winget.Source",
+            "GameBar", "GameBarNative", "GameConfigService",
+            "XboxGameOverlay", "XboxAccessibiity",
+            "XboxGfxMod", "XboxNetApi",
+            "esearch", "epicgames",
+            "launcher", "launcherclient", "launcherupdater",
+            "gogclient", "gog-client",
+            "uplay", "uplayinstaller",
+            "battle", "battleye", "easyanticheat",
+            "r5apiere", "r5launcher", "r5poster",
+            "redprelauncher", "playgtav", "rsglauncher",
+            "riotclientcrashreport",
+        };
+
+        public static bool IsKnown(string process) => _knownProcesses.Contains(process);
+
+        public static string NameFor(string process, string? exePath)
+        {
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                try
+                {
+                    var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
+                    if (!string.IsNullOrEmpty(info.ProductName) && info.ProductName.Length >= 3)
+                        return info.ProductName;
+                }
+                catch { }
+            }
+            return process;
+        }
+
+        public static string ProcessOf(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath)) return string.Empty;
+            return System.IO.Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant();
+        }
+
+        public static List<FoundApp> Find()
+        {
+            return new List<FoundApp>();
+        }
+
+        public static Dictionary<string, AppRule> DefaultRules()
+        {
+            return new Dictionary<string, AppRule>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        public static Dictionary<string, AppRule> FromLegacy(AppConfig config)
+        {
+            return new Dictionary<string, AppRule>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        public static void WriteLegacyLists(AppConfig config) { }
+
+        public static bool IsRegisteredAsApp(string exePath) => false;
+        public static bool IsInContextMenu(string exePath) => false;
+        public static string AppName(object player) => string.Empty;
+    }
+
+    public sealed class FoundApp
+    {
+        public string Process { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? ExePath { get; set; }
+        public string Category { get; set; } = string.Empty;
+        public string DefaultMode { get; set; } = string.Empty;
+    }
+
+    public static class VideoPlayers
+    {
+        public static int RefreshContextMenu(string exe) => 0;
+        public static int RefreshAppRegistrations(string exe) => 0;
+        public static List<PlayerInfo> Find(List<string> paths) => new();
+        public static bool IsRegisteredAsApp(string exePath) => false;
+        public static bool IsInContextMenu(string exePath) => false;
+        public static string AppName(object player) => string.Empty;
+        public static void RegisterAsApp(object player, string launcherExe, out string error) { error = ""; }
+        public static void UnregisterApp(string exePath) { }
+        public static void RemoveFromContextMenu(string exePath) { }
+        public static bool AddToContextMenu(object player, string launcherExe, out string error) { error = ""; return false; }
+        public static void OpenDefaultAppsSettings(string exePath) { }
+    }
+
+    public sealed class PlayerInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public string ExePath { get; set; } = string.Empty;
+        public bool Custom { get; set; }
+    }
+
+    // =========================================================================
+    // Updater stub (Updater.cs deleted; update functionality removed)
+    // =========================================================================
+    public static class Updater
+    {
+        public const string CurrentVersionText = "2.6.1";
+        public const string BuildDescription = "精简版";
+        public static void CleanUp() { }
+        public static System.Threading.Tasks.Task<UpdateInfo> CheckAsync(System.Threading.CancellationToken ct) =>
+            System.Threading.Tasks.Task.FromResult(new UpdateInfo { IsNewer = false, VersionText = CurrentVersionText, ReleaseUrl = string.Empty });
+    }
+
+    public sealed class UpdateInfo
+    {
+        public bool IsNewer { get; init; }
+        public string VersionText { get; init; } = string.Empty;
+        public string ReleaseUrl { get; init; } = string.Empty;
+    }
+
+    // =========================================================================
+    // Video HDR stubs (VideoPlayback.cs deleted; video HDR functionality removed)
+    // =========================================================================
+    public static class VideoHdrModes
+    {
+        public const string Smart = "Smart";
+        public const string NativeOnly = "NativeOnly";
+        public const string Always = "Always";
+        public static string Normalize(string mode) => mode;
+    }
+
+    public static class VideoTriggers
+    {
+        public const string Fullscreen = "Fullscreen";
+        public const string Any = "Any";
+        public static string Normalize(string trigger) => trigger;
+    }
+
+    public sealed class VideoScanOptions
+    {
+        public HashSet<string> Browsers { get; set; } = new();
+        public HashSet<string> Players { get; set; } = new();
+        public bool IncludeBrowsers { get; set; }
+        public bool IncludePlayers { get; set; }
+        public bool FullscreenOnly { get; set; }
+        public bool AllowSdr { get; set; }
+        public string[] HdrKeywords { get; set; } = Array.Empty<string>();
+        public HashSet<string> HdrOnly { get; set; } = new();
+        public string HdrToken { get; set; } = string.Empty;
+        public string SdrToken { get; set; } = string.Empty;
+    }
+
+    public sealed class VideoCandidate
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+        public IntPtr Hwnd { get; set; }
+        public MonitorFilter Target { get; set; } = new(true, null);
+    }
+
+    public sealed class RtxVideoStatus
+    {
+        public bool Enabled { get; set; }
+        public string Describe() => "RTX Video HDR 不可用";
+        public bool CanUpgradeSdr => false;
+        public static RtxVideoStatus Query() => new() { Enabled = false };
+    }
+
+    public sealed class VideoPlaybackMonitor
+    {
+        public VideoCandidate? Find(VideoScanOptions opts)
+        {
+            var procs = Process.GetProcesses();
+            foreach (var p in procs)
+            {
+                try
+                {
+                    if (p.MainWindowHandle != IntPtr.Zero)
+                    {
+                        var c = new VideoCandidate
+                        {
+                            Key = p.ProcessName,
+                            Text = p.MainWindowTitle,
+                            Hwnd = p.MainWindowHandle,
+                            Target = new(true, null)
+                        };
+                        return c;
+                    }
+                }
+                catch { }
+                finally { p.Dispose(); }
+            }
+            return null;
+        }
+    }
+
+
 
     public sealed class GameOptions
     {
@@ -693,7 +892,7 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// For video HDR: the display a window is on (by its HMONITOR). Returns its key if that display is
+        /// For HDR: the display a window is on (by its HMONITOR). Returns its key if that display is
         /// HDR-capable and one of the monitors allowed in Settings; otherwise null with the reason.
         /// </summary>
         public static string? ResolveVideoMonitor(IntPtr hMonitor, MonitorFilter allowed, out string problem)
@@ -719,7 +918,7 @@ namespace SmartHdrManager
                     continue;   // cloned displays share a source: keep looking for an HDR-capable one
                 if (!matches(path))
                 {
-                    problem = "该视频所在的显示器未在 设置 › 显示器 中开启切换";
+                    problem = "该显示器未在 设置 › 显示器 中开启切换";
                     return null;
                 }
                 return MonitorKey(path);
