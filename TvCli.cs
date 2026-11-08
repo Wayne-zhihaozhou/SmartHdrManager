@@ -24,7 +24,6 @@ namespace SmartHdrManager
         private static string? _localAddr;
         private static volatile bool _connected;
         private static readonly SemaphoreSlim _semaphore = new(1, 1);
-        private static int _msgId;
 
         public static bool IsRunning
         {
@@ -187,7 +186,7 @@ namespace SmartHdrManager
                 }
 
                 if (!brightnessResp.TryGetProperty("payload", out var bp2) ||
-                    !bp2.TryGetProperty("returnValue", out var rv) || rv.GetInt32() != 1)
+                    !bp2.TryGetProperty("returnValue", out var rv) || !IsReturnValueTrue(rv))
                 {
                     return (false, "读取亮度返回异常");
                 }
@@ -246,7 +245,7 @@ namespace SmartHdrManager
                     return null;
                 }
 
-                if (!resp.TryGetProperty("payload", out var p) || !p.TryGetProperty("returnValue", out var rv) || rv.GetInt32() != 1)
+                if (!resp.TryGetProperty("payload", out var p) || !p.TryGetProperty("returnValue", out var rv) || !IsReturnValueTrue(rv))
                 {
                     HdrEngine.WriteFileLog($"[TV] 读取亮度返回异常: {resp}");
                     return null;
@@ -320,29 +319,26 @@ namespace SmartHdrManager
                 
                 var createResp = await client.RequestAsync("ssap://system.notifications/createAlert", alertPayload, 8000, CancellationToken.None).ConfigureAwait(false);
 
-                if (createResp.TryGetProperty("type", out var t) && t.GetString() == "error")
+                var respType = createResp.TryGetProperty("type", out var t) ? t.GetString() : null;
+                if (respType == "error")
                 {
                     var errMsg = createResp.ToString();
                     HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert 失败: {errMsg}");
                     return false;
                 }
 
+                string? alertId = null;
                 if (createResp.TryGetProperty("payload", out var p) && p.TryGetProperty("alertId", out var aid) && aid.ValueKind == JsonValueKind.String)
                 {
-                    var alertId = aid.GetString();
-                    if (!string.IsNullOrEmpty(alertId))
-                    {
-                        HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 关闭提示框 alertId={alertId}");
-                        var msgId = Interlocked.Increment(ref _msgId).ToString();
-                        var closeAlertJson = System.Text.Json.JsonSerializer.Serialize(new
-                        {
-                            id = msgId,
-                            type = "closeAlert",
-                            payload = new { alertId }
-                        });
-                        HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] closeAlert JSON: {closeAlertJson}");
-                        await client.SendCustomJsonAsync(closeAlertJson, CancellationToken.None).ConfigureAwait(false);
-                    }
+                    alertId = aid.GetString();
+                }
+
+                if (!string.IsNullOrEmpty(alertId))
+                {
+                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 关闭提示框 alertId={alertId}");
+                    var closeAlertPayload = new Dictionary<string, object> { ["alertId"] = alertId };
+                    await client.RequestAsync("ssap://system.notifications/closeAlert", closeAlertPayload, 5000, CancellationToken.None).ConfigureAwait(false);
+                    HdrEngine.WriteFileLog("[TV-BRIGHTNESS] closeAlert 已发送");
                 }
 
                 // 等待写入生效
@@ -355,7 +351,7 @@ namespace SmartHdrManager
                 {
                     var readResp = await client.RequestAsync("ssap://settings/getSystemSettings", new Dictionary<string, object> { ["category"] = PictureCategory, ["keys"] = new[] { BrightnessKey } }, 8000, CancellationToken.None).ConfigureAwait(false);
                     int? readVal = null;
-                    if (readResp.TryGetProperty("payload", out var rp) && rp.TryGetProperty("returnValue", out var rv) && rv.GetInt32() == 1)
+                    if (readResp.TryGetProperty("payload", out var rp) && rp.TryGetProperty("returnValue", out var rv) && IsReturnValueTrue(rv))
                     {
                         if (rp.TryGetProperty("settings", out var s) && s.TryGetProperty(BrightnessKey, out var val))
                         {
@@ -456,6 +452,15 @@ namespace SmartHdrManager
             {
                 _semaphore.Release();
             }
+        }
+
+        /// <summary>判断 returnValue 是否为真（支持 JSON 布尔 true 或数字 1）。</summary>
+        private static bool IsReturnValueTrue(JsonElement elem)
+        {
+            if (elem.ValueKind == JsonValueKind.True) return true;
+            if (elem.ValueKind == JsonValueKind.Number && elem.GetInt32() == 1) return true;
+            if (elem.ValueKind == JsonValueKind.String && int.TryParse(elem.GetString(), out var n) && n == 1) return true;
+            return false;
         }
 
         /// <summary>停止连接。</summary>
