@@ -535,6 +535,66 @@ namespace SmartHdrManager
             var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
             Add(autoSwitchRow, 68);
 
+            // ---- Brightness Buttons ----
+            Section("亮度调节", "快速设置电视亮度。");
+
+            var brightnessPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
+            var btnBrightness0 = new ModernButton { Text = "亮度 0", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
+            var btnBrightness100 = new ModernButton { Text = "亮度 100", AutoSize = true };
+            var brightnessStatusLabel = new Label { UseMnemonic = false, Text = "就绪", Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Left, AutoSize = true };
+            brightnessPanel.Controls.Add(btnBrightness0);
+            brightnessPanel.Controls.Add(btnBrightness100);
+            brightnessPanel.Controls.Add(brightnessStatusLabel);
+            Add(brightnessPanel, 52);
+
+            btnBrightness0.Click += async (_, _) =>
+            {
+                btnBrightness0.Enabled = false;
+                btnBrightness100.Enabled = false;
+                brightnessStatusLabel.Text = "设置中...";
+                brightnessStatusLabel.ForeColor = Theme.Muted;
+                try
+                {
+                    var result = await TvCli.SetBrightnessAsync(0);
+                    brightnessStatusLabel.Text = result ? "设置成功" : "设置失败";
+                    brightnessStatusLabel.ForeColor = result ? Color.Green : Color.Red;
+                }
+                catch (Exception ex)
+                {
+                    brightnessStatusLabel.Text = $"失败: {ex.Message}";
+                    brightnessStatusLabel.ForeColor = Color.Red;
+                }
+                finally
+                {
+                    btnBrightness0.Enabled = true;
+                    btnBrightness100.Enabled = true;
+                }
+            };
+
+            btnBrightness100.Click += async (_, _) =>
+            {
+                btnBrightness0.Enabled = false;
+                btnBrightness100.Enabled = false;
+                brightnessStatusLabel.Text = "设置中...";
+                brightnessStatusLabel.ForeColor = Theme.Muted;
+                try
+                {
+                    var result = await TvCli.SetBrightnessAsync(100);
+                    brightnessStatusLabel.Text = result ? "设置成功" : "设置失败";
+                    brightnessStatusLabel.ForeColor = result ? Color.Green : Color.Red;
+                }
+                catch (Exception ex)
+                {
+                    brightnessStatusLabel.Text = $"失败: {ex.Message}";
+                    brightnessStatusLabel.ForeColor = Color.Red;
+                }
+                finally
+                {
+                    btnBrightness0.Enabled = true;
+                    btnBrightness100.Enabled = true;
+                }
+            };
+
             page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             // ---- Wire events ----

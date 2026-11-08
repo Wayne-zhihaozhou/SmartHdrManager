@@ -250,19 +250,16 @@ namespace SmartHdrManager
         private readonly Action _onAdd;
         private readonly Action _onIgnore;
         private readonly Action _onOverride;
-        private readonly Action<int>? _onBrightnessHotkey; // TV brightness hotkey callback
 
         public bool Registered { get; }           // H and I shortcuts
         public bool OverrideRegistered { get; }   // O shortcut (registered on its own, so a conflict only affects it)
-        public bool TvHotkeysRegistered { get; private set; }   // TV brightness shortcuts
 
         /// <param name="modifiers">HotkeySettings.ModifierFlags(...): Win+Alt (default) or Ctrl+Alt</param>
-        public GlobalHotkeys(uint modifiers, Action onAdd, Action onIgnore, Action onOverride, Action<int>? onBrightnessHotkey = null)
+        public GlobalHotkeys(uint modifiers, Action onAdd, Action onIgnore, Action onOverride)
         {
             _onAdd = onAdd;
             _onIgnore = onIgnore;
             _onOverride = onOverride;
-            _onBrightnessHotkey = onBrightnessHotkey;
 
             CreateHandle(new CreateParams { Parent = HWND_MESSAGE });
 
@@ -277,24 +274,18 @@ namespace SmartHdrManager
                 if (add) UnregisterHotKey(Handle, ID_ADD);
                 if (ignore) UnregisterHotKey(Handle, ID_IGNORE);
             }
-
-            // Register TV brightness hotkeys: Alt+↑/↓ + Alt+0-9
-            if (_onBrightnessHotkey != null)
-            {
-                TvHotkeysRegistered = RegisterTvHotkeys(modifiers);
-            }
         }
 
         private bool RegisterTvHotkeys(uint modifiers)
         {
-            string combo = "Alt";
-            HdrEngine.WriteFileLog($"[TV-HOTKEY] register begin mods=0x{HotkeySettings.MOD_ALT:X} combo={combo} handle={Handle}");
+            string combo = ModifierText(modifiers);
+            HdrEngine.WriteFileLog($"[TV-HOTKEY] register begin mods=0x{modifiers:X} combo={combo} handle={Handle}");
             bool allOk = true;
-            allOk &= RegisterTvKey(2001, HotkeySettings.MOD_ALT, 0x26, combo, "step_up");
-            allOk &= RegisterTvKey(2002, HotkeySettings.MOD_ALT, 0x28, combo, "step_down");
+            allOk &= RegisterTvKey(2001, modifiers, 0x26, combo, "step_up");
+            allOk &= RegisterTvKey(2002, modifiers, 0x28, combo, "step_down");
             for (int i = 0; i <= 9; i++)
             {
-                RegisterTvKey(2010 + i, HotkeySettings.MOD_ALT, (uint)(0x30 + i), combo, $"set_{i * 10}");
+                RegisterTvKey(2010 + i, modifiers, (uint)(0x30 + i), combo, $"set_{i * 10}");
             }
             HdrEngine.WriteFileLog($"[TV-HOTKEY] register end allOk={allOk} combo={combo}");
             return allOk;
@@ -327,47 +318,10 @@ namespace SmartHdrManager
                 if (id == ID_ADD) _onAdd();
                 else if (id == ID_IGNORE) _onIgnore();
                 else if (id == ID_OVERRIDE) _onOverride();
-                else if ((id is 2001 or 2002) || (id >= 2010 && id <= 2019)) DispatchTvBrightness(id);
-                else HdrEngine.WriteFileLog($"[TV-HOTKEY] unmapped wm_hotkey id={id}");
+                else HdrEngine.WriteFileLog($"[HOTKEY] unmapped wm_hotkey id={id}");
                 return;
             }
             base.WndProc(ref m);
-        }
-
-        private void DispatchTvBrightness(int id)
-        {
-            try
-            {
-                int arg;
-                string name;
-                if (id == 2001) { arg = 1; name = "step_up"; }
-                else if (id == 2002) { arg = -1; name = "step_down"; }
-                else if (id >= 2010 && id <= 2019)
-                {
-                    arg = (id - 2010) * 10; // id=2010 -> 0, id=2011 -> 10, ..., id=2019 -> 90
-                    name = $"set_{arg}";
-                }
-                else
-                {
-                    HdrEngine.WriteFileLog($"[TV-HOTKEY] 未识别的快捷键 ID: {id}");
-                    return;
-                }
-                
-                HdrEngine.WriteFileLog($"[TV-HOTKEY] 快捷键触发 id={id} name={name} arg={arg} handler={_onBrightnessHotkey != null}");
-                
-                if (_onBrightnessHotkey == null)
-                {
-                    HdrEngine.WriteFileLog("[TV-HOTKEY] 错误: 亮度快捷键回调函数未设置");
-                    return;
-                }
-                
-                _onBrightnessHotkey(arg);
-                HdrEngine.WriteFileLog($"[TV-HOTKEY] 回调执行成功");
-            }
-            catch (Exception ex)
-            {
-                HdrEngine.WriteFileLog($"[TV-HOTKEY] 处理快捷键异常: {ex.Message}\n{ex.StackTrace}");
-            }
         }
 
         public void Dispose()
@@ -379,12 +333,6 @@ namespace SmartHdrManager
                 UnregisterHotKey(Handle, ID_IGNORE);
             }
             if (OverrideRegistered) UnregisterHotKey(Handle, ID_OVERRIDE);
-            if (TvHotkeysRegistered)
-            {
-                UnregisterHotKey(Handle, 2001);
-                UnregisterHotKey(Handle, 2002);
-                for (int i = 0; i <= 9; i++) UnregisterHotKey(Handle, 2010 + i);
-            }
             DestroyHandle();
         }
     }

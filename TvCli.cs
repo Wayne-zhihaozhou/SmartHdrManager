@@ -21,10 +21,16 @@ namespace SmartHdrManager
         private static readonly object _lock = new();
         private static string? _tvIp;
         private static string? _localAddr;
-        private static bool _connected;
+        private static volatile bool _connected;
         private static readonly SemaphoreSlim _semaphore = new(1, 1);
 
-        public static bool IsRunning => _connected;
+        public static bool IsRunning
+        {
+            get
+            {
+                lock (_lock) { return _connected; }
+            }
+        }
 
         /// <summary>初始化电视连接。</summary>
         public static void Init(string tvIp, string localAddr)
@@ -93,7 +99,10 @@ namespace SmartHdrManager
             try
             {
                 await _client.ConnectAsync(ct).ConfigureAwait(false);
-                _connected = true;
+                lock (_lock)
+                {
+                    _connected = true;
+                }
             }
             catch { /* 重连失败在日志中记录 */ }
         }
@@ -127,7 +136,7 @@ namespace SmartHdrManager
             var ok = await ConnectInternalAsync(ct).ConfigureAwait(false);
             if (ok)
             {
-                _connected = true;
+                lock (_lock) { _connected = true; }
                 HdrEngine.WriteFileLog("[TV-CONN] 重连成功");
                 return _client;
             }
