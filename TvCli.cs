@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -300,12 +301,16 @@ namespace SmartHdrManager
                     ["settings"] = new Dictionary<string, object> { [BrightnessKey] = v },
                 };
 
+                var btnObj = new Dictionary<string, object> { ["label"] = "", ["onClick"] = LunaSetSystemSettings, ["params"] = paramsObj };
+                var onCloseObj = new Dictionary<string, object> { ["uri"] = LunaSetSystemSettings, ["params"] = paramsObj };
+                var onFailObj = new Dictionary<string, object> { ["uri"] = LunaSetSystemSettings, ["params"] = paramsObj };
+
                 var alertPayload = new Dictionary<string, object>
                 {
                     ["message"] = " ",
-                    ["buttons"] = new[] { new { label = "", onClick = LunaSetSystemSettings, parameters = paramsObj } },
-                    ["onclose"] = new { uri = LunaSetSystemSettings, parameters = paramsObj },
-                    ["onfail"] = new { uri = LunaSetSystemSettings, parameters = paramsObj },
+                    ["buttons"] = new[] { btnObj },
+                    ["onclose"] = onCloseObj,
+                    ["onfail"] = onFailObj,
                 };
 
                 HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 发送亮度设置请求，值={v}");
