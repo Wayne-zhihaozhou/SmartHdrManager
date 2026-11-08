@@ -515,7 +515,7 @@ namespace SmartHdrManager
             localAddrRow.Controls.Add(localAddrLabel);
             Add(localAddrRow, 68);
 
-            var _tvEnabledSwitch = new ToggleSwitch();
+            var _tvEnabledSwitch = new ToggleSwitch { Checked = true };
             var tvEnabledRow = SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _tvEnabledSwitch);
             Add(tvEnabledRow, 68);
 
@@ -531,7 +531,7 @@ namespace SmartHdrManager
             // ---- Auto Switch ----
             Section("自动切换", "根据前台窗口自动调节电视亮度。");
 
-            var _autoSwitchEnabled = new ToggleSwitch();
+            var _autoSwitchEnabled = new ToggleSwitch { Checked = true };
             var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
             Add(autoSwitchRow, 68);
 
