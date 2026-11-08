@@ -35,22 +35,10 @@ namespace SmartHdrManager
             set => _cfg.AutoSwitchEnabled = value;
         }
 
-        public static int HotkeyStep
-        {
-            get => _cfg.HotkeyStep;
-            set => _cfg.HotkeyStep = value;
-        }
-
         public static List<BrightnessRule> Rules
         {
             get => _cfg.Rules;
             set => _cfg.Rules = value;
-        }
-
-        public static BrightnessOsdSettings Osd
-        {
-            get => _cfg.Osd;
-            set => _cfg.Osd = value;
         }
 
         public static void LoadFrom(AppConfig config)

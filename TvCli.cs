@@ -44,17 +44,31 @@ namespace SmartHdrManager
                     await ReconnectInternalAsync(ct);
                 });
 
-                // 尝试连接
-                ConnectInternalAsync(CancellationToken.None).Wait(10000);
-                _connected = IsRunning;
-                if (_connected)
+                // 后台异步连接，不阻塞程序启动
+                Task.Run(async () =>
                 {
-                    HdrEngine.WriteFileLog($"[TV] 电视已连接: {tvIp} ({_client.TvInfo?.ModelName ?? ""})");
-                }
-                else
-                {
-                    HdrEngine.WriteFileLog($"[TV] 电视连接失败: {tvIp}");
-                }
+                    try
+                    {
+                        var ok = await ConnectInternalAsync(CancellationToken.None);
+                        lock (_lock)
+                        {
+                            _connected = ok;
+                        }
+                        if (ok)
+                        {
+                            HdrEngine.WriteFileLog($"[TV] 电视已连接: {tvIp} ({_client?.TvInfo?.ModelName ?? ""})");
+                        }
+                        else
+                        {
+                            HdrEngine.WriteFileLog($"[TV] 电视连接失败: {tvIp}（将在后台自动重连）");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        HdrEngine.WriteFileLog($"[TV] 电视连接异常: {ex.Message}");
+                        lock (_lock) { _connected = false; }
+                    }
+                });
             }
         }
 
@@ -63,7 +77,7 @@ namespace SmartHdrManager
             if (_client == null || _tvIp == null) return false;
             try
             {
-                await _client.ConnectAsync(ct);
+                await _client.ConnectAsync(ct).ConfigureAwait(false);
                 return true;
             }
             catch (Exception ex)
@@ -78,7 +92,7 @@ namespace SmartHdrManager
             if (_client == null || _tvIp == null) return;
             try
             {
-                await _client.ConnectAsync(ct);
+                await _client.ConnectAsync(ct).ConfigureAwait(false);
                 _connected = true;
             }
             catch { /* 重连失败在日志中记录 */ }
@@ -96,7 +110,7 @@ namespace SmartHdrManager
                 if (_client.Connected) return _client;
             }
 
-            var ok = await ConnectInternalAsync(ct);
+            var ok = await ConnectInternalAsync(ct).ConfigureAwait(false);
             if (ok)
             {
                 _connected = true;
@@ -105,13 +119,89 @@ namespace SmartHdrManager
             return null;
         }
 
+        /// <summary>测试与电视的连接，返回详细结果。</summary>
+        public static async Task<(bool success, string message)> TestConnectionAsync(string tvIp, string localAddr)
+        {
+            if (string.IsNullOrWhiteSpace(tvIp))
+                return (false, "电视 IP 地址不能为空");
+
+            // 加载已保存的 client-key，避免重复配对
+            var savedKey = ClientKeyStore.Load(tvIp);
+            var client = new LgeTvClient(tvIp, localAddr, savedKey);
+            try
+            {
+                await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
+
+                var sysInfoPayload = new Dictionary<string, object>();
+                var sysResp = await client.RequestAsync("ssap://system/getSystemInfo", sysInfoPayload, 6000, CancellationToken.None).ConfigureAwait(false);
+
+                if (sysResp.TryGetProperty("type", out var t) && t.GetString() == "error")
+                {
+                    var errMsg = sysResp.TryGetProperty("payload", out var p) && p.TryGetProperty("errorText", out var et)
+                        ? et.GetString() ?? "未知错误"
+                        : "未知错误";
+                    return (false, $"电视响应错误: {errMsg}");
+                }
+
+                var brightnessPayload = new Dictionary<string, object>
+                {
+                    ["category"] = PictureCategory,
+                    ["keys"] = new[] { BrightnessKey },
+                };
+                var brightnessResp = await client.RequestAsync("ssap://settings/getSystemSettings", brightnessPayload, 6000, CancellationToken.None).ConfigureAwait(false);
+
+                if (brightnessResp.TryGetProperty("type", out var bt) && bt.GetString() == "error")
+                {
+                    var errMsg = brightnessResp.TryGetProperty("payload", out var bp) && bp.TryGetProperty("errorText", out var bet)
+                        ? bet.GetString() ?? "未知错误"
+                        : "未知错误";
+                    return (false, $"读取亮度失败: {errMsg}");
+                }
+
+                if (!brightnessResp.TryGetProperty("payload", out var bp2) ||
+                    !bp2.TryGetProperty("returnValue", out var rv) || rv.GetInt32() != 1)
+                {
+                    return (false, "读取亮度返回异常");
+                }
+
+                if (!bp2.TryGetProperty("settings", out var s) || !s.TryGetProperty(BrightnessKey, out var val))
+                    return (false, "电视未返回亮度信息");
+
+                int brightness;
+                if (val.ValueKind == JsonValueKind.Number)
+                    brightness = val.GetInt32();
+                else if (val.ValueKind == JsonValueKind.String && int.TryParse(val.GetString(), out var n))
+                    brightness = n;
+                else
+                    return (false, "亮度值格式异常");
+
+                return (true, $"已连接！当前亮度: {brightness}");
+            }
+            catch (TimeoutException)
+            {
+                return (false, "连接超时——请检查电视 IP 是否正确，电视是否与同一网络");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return (false, $"连接失败: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"连接失败: {ex.Message}");
+            }
+            finally
+            {
+                client.Dispose();
+            }
+        }
+
         /// <summary>获取当前亮度。</summary>
         public static async Task<int?> GetBrightnessAsync()
         {
-            await _semaphore.WaitAsync();
+            await _semaphore.WaitAsync().ConfigureAwait(false);
             try
             {
-                var client = await EnsureConnectedAsync(CancellationToken.None);
+                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
                 if (client == null) return null;
 
                 var payload = new Dictionary<string, object>
@@ -120,7 +210,7 @@ namespace SmartHdrManager
                     ["keys"] = new[] { BrightnessKey },
                 };
 
-                var resp = await client.RequestAsync("ssap://settings/getSystemSettings", payload, 8000, CancellationToken.None);
+                var resp = await client.RequestAsync("ssap://settings/getSystemSettings", payload, 8000, CancellationToken.None).ConfigureAwait(false);
 
                 if (resp.TryGetProperty("type", out var t) && t.GetString() == "error")
                 {
@@ -157,10 +247,10 @@ namespace SmartHdrManager
         {
             if (value < 0 || value > 100) return false;
 
-            await _semaphore.WaitAsync();
+            await _semaphore.WaitAsync().ConfigureAwait(false);
             try
             {
-                var client = await EnsureConnectedAsync(CancellationToken.None);
+                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
                 if (client == null) return false;
 
                 var v = value.ToString();
@@ -178,7 +268,7 @@ namespace SmartHdrManager
                     ["onfail"] = new { uri = LunaSetSystemSettings, parameters = paramsObj },
                 };
 
-                var createResp = await client.RequestAsync("ssap://system.notifications/createAlert", alertPayload, 8000, CancellationToken.None);
+                var createResp = await client.RequestAsync("ssap://system.notifications/createAlert", alertPayload, 8000, CancellationToken.None).ConfigureAwait(false);
 
                 if (createResp.TryGetProperty("type", out var t) && t.GetString() == "error")
                 {
@@ -191,19 +281,28 @@ namespace SmartHdrManager
                     var alertId = aid.GetString();
                     if (!string.IsNullOrEmpty(alertId))
                     {
-                        await client.RequestAsync("ssap://system.notifications/closeAlert", new Dictionary<string, object> { ["alertId"] = alertId }, 3000, CancellationToken.None);
+                        await client.RequestAsync("ssap://system.notifications/closeAlert", new Dictionary<string, object> { ["alertId"] = alertId }, 3000, CancellationToken.None).ConfigureAwait(false);
                     }
                 }
 
                 // 等待写入生效
-                await Task.Delay(300, CancellationToken.None);
+                await Task.Delay(300, CancellationToken.None).ConfigureAwait(false);
 
-                // 读回验证
+                // 读回验证（内联读取逻辑，避免在已持有信号量时再次获取导致死锁）
                 for (int i = 0; i < 3; i++)
                 {
-                    var read = await GetBrightnessAsync();
-                    if (read == value) return true;
-                    await Task.Delay(250, CancellationToken.None);
+                    var readResp = await client.RequestAsync("ssap://settings/getSystemSettings", new Dictionary<string, object> { ["category"] = PictureCategory, ["keys"] = new[] { BrightnessKey } }, 8000, CancellationToken.None).ConfigureAwait(false);
+                    int? readVal = null;
+                    if (readResp.TryGetProperty("payload", out var rp) && rp.TryGetProperty("returnValue", out var rv) && rv.GetInt32() == 1)
+                    {
+                        if (rp.TryGetProperty("settings", out var s) && s.TryGetProperty(BrightnessKey, out var val))
+                        {
+                            if (val.ValueKind == JsonValueKind.Number) readVal = val.GetInt32();
+                            else if (val.ValueKind == JsonValueKind.String && int.TryParse(val.GetString(), out var n)) readVal = n;
+                        }
+                    }
+                    if (readVal == value) return true;
+                    await Task.Delay(250, CancellationToken.None).ConfigureAwait(false);
                 }
 
                 HdrEngine.WriteFileLog($"[TV] 亮度写入后读回不符: 期望 {value}");
@@ -223,22 +322,23 @@ namespace SmartHdrManager
         /// <summary>步进调整亮度。</summary>
         public static async Task<(int from, int to)> StepBrightnessAsync(int delta)
         {
-            var current = await GetBrightnessAsync();
+            var current = await GetBrightnessAsync().ConfigureAwait(false);
             if (current == null) return (-1, -1);
             var target = Math.Max(0, Math.Min(100, current.Value + delta));
-            var ok = await SetBrightnessAsync(target);
+            var ok = await SetBrightnessAsync(target).ConfigureAwait(false);
             return (current.Value, ok ? target : -1);
         }
 
-        /// <summary>执行配对。</summary>
+        /// <summary>执行配对（会在电视上弹出确认请求，用户需在电视上确认）。</summary>
         public static async Task<bool> PairAsync()
         {
-            await _semaphore.WaitAsync();
+            await _semaphore.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (_client == null || _tvIp == null) return false;
+                if (_tvIp == null) return false;
+                // 重新配对：不使用已保存的 key，强制电视弹出确认请求
                 var client = new LgeTvClient(_tvIp, _localAddr);
-                await client.ConnectAsync();
+                await client.ConnectAsync().ConfigureAwait(false);
                 // 配对信息已保存在 client-key 中
                 ClientKeyStore.Save(_tvIp, client.ClientKey!);
                 HdrEngine.WriteFileLog($"[TV] 配对成功，已保存 client-key");
@@ -259,10 +359,10 @@ namespace SmartHdrManager
         /// <summary>获取电视信息。</summary>
         public static async Task<string?> GetInfoAsync()
         {
-            await _semaphore.WaitAsync();
+            await _semaphore.WaitAsync().ConfigureAwait(false);
             try
             {
-                var client = await EnsureConnectedAsync(CancellationToken.None);
+                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
                 if (client == null) return null;
                 return client.TvInfo?.ToString();
             }

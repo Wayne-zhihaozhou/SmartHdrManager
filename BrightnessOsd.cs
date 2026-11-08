@@ -7,6 +7,7 @@ namespace SmartHdrManager
     /// <summary>
     /// 屏幕右上角 OSD 提示：亮度调节时显示。
     /// 使用 TopMost + Transparent + 淡入淡出动画。
+    /// 所有参数写死，无需配置。
     /// </summary>
     public static class BrightnessOsd
     {
@@ -18,10 +19,18 @@ namespace SmartHdrManager
         private static bool _isVisible;
         private static int _lastBrightness;
 
+        // 写死参数
         private const int FADE_INTERVAL = 16;   // ~60fps
         private const int FADE_STEP = 25;        // alpha step per frame
         private const int MAX_ALPHA = 230;       // max opacity (not fully opaque)
         private const int MIN_ALPHA = 0;
+        private const int FONT_SIZE = 18;
+        private const int DISPLAY_MS = 2000;
+        private const int PADDING_X = 20;
+        private const int MARGIN = 16;
+        private const string TITLE = "亮度";
+        private static readonly Color BG_COLOR = Color.FromArgb(0, 0, 0);
+        private static readonly Color FG_COLOR = Color.White;
 
         public static void Show(int brightness, string? title = null)
         {
@@ -42,11 +51,10 @@ namespace SmartHdrManager
                 _isVisible = false;
             }
 
-            var settings = TvConfig.Osd;
-            _label!.Text = $"{title ?? settings.Title}: {brightness}";
-            _label.Font = new Font("Segoe UI", Math.Max(10, settings.FontSize * 2f / 3f), FontStyle.Regular);
-            _panel!.BackColor = settings.BackgroundColor;
-            _label.ForeColor = settings.ForegroundColor;
+            _label!.Text = $"{title ?? TITLE}: {brightness}";
+            _label.Font = new Font("Segoe UI", Math.Max(10, FONT_SIZE * 2f / 3f), FontStyle.Regular);
+            _panel!.BackColor = BG_COLOR;
+            _label.ForeColor = FG_COLOR;
 
             // Position: top-right of primary monitor
             var screen = Screen.PrimaryScreen;
@@ -54,8 +62,8 @@ namespace SmartHdrManager
             {
                 int dpiScale = (int)(screen.Bounds.Width * 96.0 / screen.Bounds.Width);
                 if (dpiScale == 0) dpiScale = 96; // fallback
-                int margin = dpiScale / 72 * settings.Margin;
-                int padding = dpiScale / 72 * settings.PaddingX;
+                int margin = dpiScale / 72 * MARGIN;
+                int padding = dpiScale / 72 * PADDING_X;
                 int height = dpiScale / 72 * 50;
                 int width = _label.PreferredSize.Width + padding * 2 + dpiScale / 72 * 60; // bar width
 
@@ -78,7 +86,7 @@ namespace SmartHdrManager
             _fadeTimer.Start();
 
             // Auto dismiss
-            _dismissTimer = new Timer { Interval = settings.DisplayMs };
+            _dismissTimer = new Timer { Interval = DISPLAY_MS };
             _dismissTimer.Tick += (_, _) => FadeOut();
             _dismissTimer.Start();
         }
@@ -162,7 +170,7 @@ namespace SmartHdrManager
                 _fadeTimer = null;
             }
             // Update panel background alpha
-            _panel.BackColor = Color.FromArgb((int)_form.Opacity * 255, TvConfig.Osd.BackgroundColor);
+            _panel.BackColor = Color.FromArgb((int)_form.Opacity * 255, BG_COLOR);
         }
 
         private static void FadeOut()
@@ -178,7 +186,7 @@ namespace SmartHdrManager
                 _dismissTimer = null;
                 _form.Hide();
             }
-            _panel!.BackColor = Color.FromArgb((int)(_form.Opacity * 255), TvConfig.Osd.BackgroundColor);
+            _panel!.BackColor = Color.FromArgb((int)(_form.Opacity * 255), BG_COLOR);
         }
 
         public static void ForceHide()

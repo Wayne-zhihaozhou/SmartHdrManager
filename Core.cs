@@ -101,12 +101,12 @@ namespace SmartHdrManager
     // =========================================================================
     public class BrightnessConfig
     {
+        public const int HotkeyStep = 5;  // 写死步进值，不可配置
+
         public string TvIp { get; set; } = "192.168.1.4";
         public string LocalAddr { get; set; } = "192.168.1.5";
         public bool Enabled { get; set; } = true;
         public bool AutoSwitchEnabled { get; set; } = true;
-        public int HotkeyStep { get; set; } = 5;
-        public BrightnessOsdSettings Osd { get; set; } = new();
         public List<BrightnessRule> Rules { get; set; } = new();
     }
 
@@ -132,41 +132,6 @@ namespace SmartHdrManager
             if (TitleKeywords.Count > 0) parts.Add($"标题关键词({TitleKeywords.Count}个)");
             if (parts.Count == 0) return "其他(兜底)";
             return string.Join(" 或 ", parts);
-        }
-    }
-
-    public class BrightnessOsdSettings
-    {
-        public string Title { get; set; } = "亮度";
-        public int FontSize { get; set; } = 18;
-        public int DisplayMs { get; set; } = 2000;
-        public int PaddingX { get; set; } = 20;
-        public int PaddingY { get; set; } = 8;
-        public int Gap { get; set; } = 14;
-        public int Margin { get; set; } = 16;
-        public string Background { get; set; } = "#000000";
-        public string Foreground { get; set; } = "#FFFFFF";
-
-        /// <summary>从 Background 字符串解析的 Color。</summary>
-        public System.Drawing.Color BackgroundColor => ParseColor(Background, System.Drawing.Color.Black);
-        /// <summary>从 Foreground 字符串解析的 Color。</summary>
-        public System.Drawing.Color ForegroundColor => ParseColor(Foreground, System.Drawing.Color.White);
-
-        private static System.Drawing.Color ParseColor(string hex, System.Drawing.Color defaultValue)
-        {
-            if (string.IsNullOrEmpty(hex)) return defaultValue;
-            try
-            {
-                if (hex.StartsWith("#") && hex.Length == 7)
-                {
-                    var r = byte.Parse(hex.Substring(1, 2), System.Globalization.NumberStyles.HexNumber);
-                    var g = byte.Parse(hex.Substring(3, 2), System.Globalization.NumberStyles.HexNumber);
-                    var b = byte.Parse(hex.Substring(5, 2), System.Globalization.NumberStyles.HexNumber);
-                    return System.Drawing.Color.FromArgb(r, g, b);
-                }
-            }
-            catch { }
-            return defaultValue;
         }
     }
 

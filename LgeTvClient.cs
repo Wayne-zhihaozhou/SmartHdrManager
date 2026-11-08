@@ -81,15 +81,15 @@ namespace SmartHdrManager
         {
             if (Connected) return;
 
-            await CloseInternalAsync();
+            await CloseInternalAsync().ConfigureAwait(false);
             _closed = false;
 
             // 1. 建立 WebSocket 连接
-            await _connectAsync(ct);
+            await _connectAsync(ct).ConfigureAwait(false);
             _startReceiveLoop();
 
             // 2. hello
-            var helloMsg = await _waitForMsgAsync("hello", new Dictionary<string, object>(), HelloTimeoutMs, ct);
+            var helloMsg = await _waitForMsgAsync("hello", new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
             TvInfo = null;
             if (helloMsg.TryGetProperty("payload", out var payload) && payload.ValueKind == JsonValueKind.Object)
             {
@@ -99,13 +99,14 @@ namespace SmartHdrManager
             }
 
             // 3. getSystemInfo（新固件要求）
-            try { await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(), 6000, ct); } catch { /* 某些固件允许跳过 */ }
+            try { await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(), 6000, ct).ConfigureAwait(false); } catch { /* 某些固件允许跳过 */ }
 
             // 4. register
             var regPayload = new Dictionary<string, object>
             {
                 ["forcePairing"] = false,
-                ["pairingType"] = "PROMPT",
+                // 已有 client-key 时用 NONE 静默配对；没有时才弹 PROMPT 请求用户确认
+                ["pairingType"] = ClientKey != null ? "NONE" : "PROMPT",
                 ["manifest"] = new Dictionary<string, object>
                 {
                     ["appVersion"] = "1.1",
@@ -116,7 +117,7 @@ namespace SmartHdrManager
             if (ClientKey != null)
                 regPayload["client-key"] = ClientKey;
 
-            var regMsg = await _waitForMsgAsync("register", regPayload, RegisterTimeoutMs, ct);
+            var regMsg = await _waitForMsgAsync("register", regPayload, RegisterTimeoutMs, ct).ConfigureAwait(false);
 
             if (regMsg.GetProperty("type").GetString() == "error")
             {
@@ -149,7 +150,7 @@ namespace SmartHdrManager
                     if (url.StartsWith("wss:"))
                         ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
 
-                    await ws.ConnectAsync(new Uri(url), ct);
+                    await ws.ConnectAsync(new Uri(url), ct).ConfigureAwait(false);
                     _ws = ws;
                     return;
                 }
@@ -177,16 +178,16 @@ namespace SmartHdrManager
                 {
                     if (_ws == null || _ws.State != WebSocketState.Open)
                     {
-                        await Task.Delay(500, ct);
+                        await Task.Delay(500, ct).ConfigureAwait(false);
                         continue;
                     }
 
                     var buffer = new byte[65536];
-                    var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                    var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct).ConfigureAwait(false);
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", ct);
+                        await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", ct).ConfigureAwait(false);
                         _failAll(new InvalidOperationException("连接已关闭"));
                         _closed = true;
                         break;
@@ -201,7 +202,7 @@ namespace SmartHdrManager
                         lock (_lock)
                         {
                             var type = parsed.TryGetProperty("type", out var tp) ? tp.GetString() : null;
-                            if (type == "hello" || type == "registered" || type == "response" || type == "error")
+                            if (type == "hello" || type == "registered" || type == "response" || type == "error" || type == "register")
                             {
                                 _incomingMessages.Enqueue(parsed);
                                 _messageAvailable.Release();
@@ -227,7 +228,7 @@ namespace SmartHdrManager
                 catch (Exception ex)
                 {
                     HdrEngine.WriteFileLog($"[TV] 接收异常: {ex.Message}");
-                    await Task.Delay(1000, ct);
+                    await Task.Delay(1000, ct).ConfigureAwait(false);
                 }
             }
         }
@@ -239,7 +240,7 @@ namespace SmartHdrManager
 
             // 发送消息
             var msg = new Dictionary<string, object> { ["type"] = expectedType, ["payload"] = payload };
-            await SendRawAsync(JsonSerializer.Serialize(msg), ct);
+            await SendRawAsync(JsonSerializer.Serialize(msg), ct).ConfigureAwait(false);
 
             // 等待响应（轮询队列）
             while (!ct.IsCancellationRequested)
@@ -292,11 +293,11 @@ namespace SmartHdrManager
                 _pending[id] = tcs;
             }
 
-            await SendRawAsync(JsonSerializer.Serialize(msg), ct);
+            await SendRawAsync(JsonSerializer.Serialize(msg), ct).ConfigureAwait(false);
 
             try
             {
-                return await tcs.Task.WaitAsync(ct);
+                return await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
             }
             finally
             {
@@ -310,7 +311,7 @@ namespace SmartHdrManager
             if (_ws == null || _ws.State != WebSocketState.Open)
                 throw new InvalidOperationException("未连接");
             var bytes = Encoding.UTF8.GetBytes(json);
-            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct);
+            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
         }
 
         private void _failAll(Exception ex)

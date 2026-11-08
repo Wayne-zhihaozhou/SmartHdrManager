@@ -173,14 +173,14 @@ namespace SmartHdrManager
 
             if (wParam == 1)
             {
-                var (from, to) = await TvCli.StepBrightnessAsync(TvConfig.HotkeyStep);
+                var (from, to) = await TvCli.StepBrightnessAsync(BrightnessConfig.HotkeyStep);
                 if (to < 0) return;
                 brightness = to;
                 title = "亮度 ↑";
             }
             else if (wParam == -1)
             {
-                var (from, to) = await TvCli.StepBrightnessAsync(-TvConfig.HotkeyStep);
+                var (from, to) = await TvCli.StepBrightnessAsync(-BrightnessConfig.HotkeyStep);
                 if (to < 0) return;
                 brightness = to;
                 title = "亮度 ↓";
