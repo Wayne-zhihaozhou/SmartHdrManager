@@ -213,7 +213,7 @@ namespace SmartHdrManager
                                 if (parsed.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
                                 {
                                     var id = idProp.GetString();
-                                    if (_pending.TryGetValue(id, out var tcs))
+                                    if (id != null && _pending.TryGetValue(id, out var tcs))
                                     {
                                         _pending.Remove(id);
                                         tcs.TrySetResult(parsed);

@@ -58,7 +58,7 @@ namespace SmartHdrManager
 
             // Position: top-right of primary monitor
             var screen = Screen.PrimaryScreen;
-            if (screen != null)
+            if (screen != null && _form != null)
             {
                 int dpiScale = (int)(screen.Bounds.Width * 96.0 / screen.Bounds.Width);
                 if (dpiScale == 0) dpiScale = 96; // fallback
