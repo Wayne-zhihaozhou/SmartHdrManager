@@ -287,14 +287,14 @@ namespace SmartHdrManager
 
         private bool RegisterTvHotkeys(uint modifiers)
         {
-            string combo = ModifierText(modifiers);
-            HdrEngine.WriteFileLog($"[TV-HOTKEY] register begin mods=0x{modifiers:X} combo={combo} handle={Handle}");
+            string combo = "Alt";
+            HdrEngine.WriteFileLog($"[TV-HOTKEY] register begin mods=0x{HotkeySettings.MOD_ALT:X} combo={combo} handle={Handle}");
             bool allOk = true;
-            allOk &= RegisterTvKey(2001, modifiers, 0x26, combo, "step_up");
-            allOk &= RegisterTvKey(2002, modifiers, 0x28, combo, "step_down");
+            allOk &= RegisterTvKey(2001, HotkeySettings.MOD_ALT, 0x26, combo, "step_up");
+            allOk &= RegisterTvKey(2002, HotkeySettings.MOD_ALT, 0x28, combo, "step_down");
             for (int i = 0; i <= 9; i++)
             {
-                RegisterTvKey(2010 + i, modifiers, (uint)(0x30 + i), combo, $"set_{i * 10}");
+                RegisterTvKey(2010 + i, HotkeySettings.MOD_ALT, (uint)(0x30 + i), combo, $"set_{i * 10}");
             }
             HdrEngine.WriteFileLog($"[TV-HOTKEY] register end allOk={allOk} combo={combo}");
             return allOk;
