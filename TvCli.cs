@@ -301,7 +301,7 @@ namespace SmartHdrManager
                     ["settings"] = new Dictionary<string, object> { [BrightnessKey] = v },
                 };
 
-                var btnObj = new Dictionary<string, object> { ["label"] = "", ["onClick"] = LunaSetSystemSettings, ["params"] = paramsObj };
+                var btnObj = new Dictionary<string, object> { ["label"] = " ", ["onClick"] = LunaSetSystemSettings, ["params"] = paramsObj };
                 var onCloseObj = new Dictionary<string, object> { ["uri"] = LunaSetSystemSettings, ["params"] = paramsObj };
                 var onFailObj = new Dictionary<string, object> { ["uri"] = LunaSetSystemSettings, ["params"] = paramsObj };
 
@@ -319,31 +319,45 @@ namespace SmartHdrManager
                 
                 var createResp = await client.RequestAsync("ssap://system.notifications/createAlert", alertPayload, 8000, CancellationToken.None).ConfigureAwait(false);
 
-                var respType = createResp.TryGetProperty("type", out var t) ? t.GetString() : null;
-                if (respType == "error")
+                // 匹配 pc-control-tv: 同时检查 type=error 和 returnValue !== true
+                var createType = createResp.TryGetProperty("type", out var ct) ? ct.GetString() : null;
+                if (createType == "error")
                 {
-                    var errMsg = createResp.ToString();
+                    var errMsg = createResp.TryGetProperty("payload", out var ep) && ep.TryGetProperty("errorText", out var et)
+                        ? et.GetString() ?? "未知错误"
+                        : (createResp.TryGetProperty("error", out var er) ? er.GetString() ?? "未知错误" : createResp.ToString());
                     HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert 失败: {errMsg}");
+                    return false;
+                }
+                if (createResp.TryGetProperty("payload", out var cp) && cp.TryGetProperty("returnValue", out var rv2) && !IsReturnValueTrue(rv2))
+                {
+                    var errMsg = cp.TryGetProperty("errorText", out var et2) ? et2.GetString() ?? "未知错误" : "returnValue = false";
+                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert returnValue=false: {errMsg}");
                     return false;
                 }
 
                 string? alertId = null;
-                if (createResp.TryGetProperty("payload", out var p) && p.TryGetProperty("alertId", out var aid) && aid.ValueKind == JsonValueKind.String)
+                if (createResp.TryGetProperty("payload", out var p) && p.TryGetProperty("alertId", out var aid))
                 {
-                    alertId = aid.GetString();
+                    if (aid.ValueKind == JsonValueKind.String)
+                        alertId = aid.GetString();
+                    else if (aid.ValueKind == JsonValueKind.Number)
+                        alertId = aid.GetInt32().ToString();
                 }
 
+                // closeAlert 使用单向发送（不等待响应），匹配 pc-control-tv 行为
+                // closeAlert 是清理操作，亮度已由 createAlert 的 onclose/onfail 回调设置
                 if (!string.IsNullOrEmpty(alertId))
                 {
                     HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 关闭提示框 alertId={alertId}");
-                    var closeAlertPayload = new Dictionary<string, object> { ["alertId"] = alertId };
-                    await client.RequestAsync("ssap://system.notifications/closeAlert", closeAlertPayload, 5000, CancellationToken.None).ConfigureAwait(false);
-                    HdrEngine.WriteFileLog("[TV-BRIGHTNESS] closeAlert 已发送");
+                    var closeAlertJson = $"{{\"alertId\":\"{alertId}\"}}";
+                    await client.SendCustomJsonAsync(closeAlertJson, CancellationToken.None).ConfigureAwait(false);
+                    HdrEngine.WriteFileLog("[TV-BRIGHTNESS] closeAlert 已发送（单向，不等待响应）");
                 }
 
-                // 等待写入生效
-                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 等待 300ms 让亮度设置生效");
-                await Task.Delay(300, CancellationToken.None).ConfigureAwait(false);
+                // 等待写入生效（匹配 pc-control-tv 的 250ms）
+                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 等待 250ms 让亮度设置生效");
+                await Task.Delay(250, CancellationToken.None).ConfigureAwait(false);
 
                 // 读回验证（内联读取逻辑，避免在已持有信号量时再次获取导致死锁）
                 HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 开始读回验证");
