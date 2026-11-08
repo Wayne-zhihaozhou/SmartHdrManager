@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -194,7 +194,7 @@ namespace SmartHdrManager
             if (_commands.TakeLaunchHold())
             {
                 var st = _engine.Status;
-                if (_engine.Paused || _engine.OverrideMode == HdrOverride.ForceSdr || st.BlockedBy != null)
+                if (_engine.Paused || _engine.OverrideMode == HdrOverride.ForceSdr || st.BlockedBy)
                     _commands.RefuseLaunch();
                 else
                     _engine.HoldHdrForLaunch();

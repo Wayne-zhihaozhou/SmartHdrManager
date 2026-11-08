@@ -686,7 +686,7 @@ namespace SmartHdrManager
             {
                 detail = "在恢复前不会自动切换 HDR。";
             }
-            else if (s.BlockedBy != null)
+            else if (s.BlockedBy)
             {
                 detail = $"HDR 已被阻止 – {s.BlockedBy} 正在运行（程序 › 录制与直播）";
             }

@@ -216,8 +216,7 @@ namespace SmartHdrManager
         private long _nextProcessScanMs;
         private string? _activeHdrGameProcess;
 
-        // "No HDR while recording app is running" (legacy field, kept for config compat)
-        private string? _blockedBy;          // set every tick while automatic HDR is blocked
+
 
         // "Launch with HDR" (SmartHdrManager.exe --launch): a launcher process keeps signalling while its game runs
         private const int LaunchHoldMs = 6000;   // the launcher signals every 2 s; HDR is held 6 s after the last signal
@@ -918,7 +917,7 @@ namespace SmartHdrManager
 
             _waitingGame = null;
             _holdMsLeft = 0;
-            _blockedBy = null;
+
             if (mode == HdrOverride.None && !Paused)
                 Decide(s, now, procName, title, isFullscreen);
             else if (mode != HdrOverride.None)
@@ -1360,6 +1359,7 @@ namespace SmartHdrManager
         {
             _restoreHdr = true;
             _restoreFor = what;
+            _restoreAtMs = Now;
             Log("SDR", $"之前 HDR 是开启的（不是本程序开启的）– '{what}' 不再活动后恢复开启。");
         }
 
