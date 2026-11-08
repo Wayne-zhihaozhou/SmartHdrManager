@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+publish/
+publish-standalone/
+*.exe
+*.zip
+
+# Personal files - never upload
+backup_*/
+*.bak
+config.json
+config.json.old
+portable.txt
+*.log
+log.txt
+
+# Editors
+.vs/
+.vscode/
+*.user
+*.suo

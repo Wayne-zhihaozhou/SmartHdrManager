@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe = no console window at all (nothing to hide from the taskbar / Alt-Tab) -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- 64-bit only (GetWindowLongPtr/SetWindowLongPtr exist in 64-bit processes only).
+         x64 by default; ARM64 when built with -r win-arm64 (Windows on ARM). -->
+    <PlatformTarget>x64</PlatformTarget>
+    <PlatformTarget Condition="'$(RuntimeIdentifier)' == 'win-arm64'">ARM64</PlatformTarget>
+    <RootNamespace>SmartHdrManager</RootNamespace>
+    <AssemblyName>SmartHdrManager</AssemblyName>
+    <Version>2.6.2</Version>
+    <!-- Shown in the exe's Properties › Details -->
+    <Product>Smart HDR Manager</Product>
+    <Authors>VantaCode420</Authors>
+    <Company>VantaCode420</Company>
+    <Copyright>Copyright (c) 2026 VantaCode420</Copyright>
+    <Description>Smart HDR Manager</Description>
+    <!-- .exe icon (Explorer, taskbar pins, shortcuts): same HDR design as the window/tray icons -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Framework-dependent builds also run on a newer major .NET if .NET 10 is not installed -->
+    <RollForward>Major</RollForward>
+    <!-- Lighter runtime footprint for an always-running tray app -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- "Check for updates" picks the package that fits this copy: standalone (self-contained) or the small one -->
+  <ItemGroup>
+    <AssemblyMetadata Include="BuildFlavor" Value="standalone" Condition="'$(SelfContained)' == 'true'" />
+    <AssemblyMetadata Include="BuildFlavor" Value="small" Condition="'$(SelfContained)' != 'true'" />
+  </ItemGroup>
+
+</Project>
