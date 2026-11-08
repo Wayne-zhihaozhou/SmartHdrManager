@@ -49,6 +49,7 @@ dotnet clean SmartHdrManager.csproj
 ## 编译规范
 
 - **仅允许 Release 配置**，禁止 Debug 配置
+- **每次代码修改后必须重新编译**，确保代码能正确构建
 
 ## 代码规范
 

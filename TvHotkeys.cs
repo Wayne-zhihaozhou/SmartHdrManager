@@ -56,22 +56,34 @@ namespace SmartHdrManager
         /// <summary>注册所有快捷键。</summary>
         public static void Register(IntPtr hwnd, Action<int> onHotkey)
         {
-            if (_isRegistered) Unregister();
-
-            _onHotkey = onHotkey;
-
-            // 注册 Alt+↑/↓
-            RegisterKey(hwnd, HK_STEP_UP, MOD_ALT, VK_UP);
-            RegisterKey(hwnd, HK_STEP_DOWN, MOD_ALT, VK_DOWN);
-
-            // 注册 Alt+数字键
-            for (int i = 0; i <= 9; i++)
+            try
             {
-                RegisterKey(hwnd, HK_SET_0 + i, MOD_ALT, (uint)(VK_0 + i));
-            }
+                if (_isRegistered) Unregister();
 
-            _isRegistered = true;
-            HdrEngine.WriteFileLog("[TV] 快捷键已注册: Alt+↑/↓ 步进, Alt+0-9 直接设亮度");
+                _onHotkey = onHotkey;
+                _registeredIds.Clear();
+
+                // 注册 Alt+↑/↓
+                bool okUp = RegisterKey(hwnd, HK_STEP_UP, MOD_ALT, VK_UP);
+                bool okDown = RegisterKey(hwnd, HK_STEP_DOWN, MOD_ALT, VK_DOWN);
+                HdrEngine.WriteFileLog($"[TV] 注册 Alt+↑: {(okUp ? "成功" : "失败")}, Alt+↓: {(okDown ? "成功" : "失败")}");
+
+                // 注册 Alt+数字键
+                for (int i = 0; i <= 9; i++)
+                {
+                    int id = HK_SET_0 + i;
+                    uint vk = (uint)(VK_0 + i);
+                    bool ok = RegisterKey(hwnd, id, MOD_ALT, vk);
+                    HdrEngine.WriteFileLog($"[TV] 注册 Alt+{i} (id={id}, vk={vk}): {(ok ? "成功" : "失败")}");
+                }
+
+                _isRegistered = true;
+                HdrEngine.WriteFileLog($"[TV] 快捷键注册完成，共注册 {_registeredIds.Count} 个快捷键");
+            }
+            catch (Exception ex)
+            {
+                HdrEngine.WriteFileLog($"[TV] 注册快捷键异常: {ex.Message}");
+            }
         }
 
         /// <summary>注销所有快捷键。</summary>

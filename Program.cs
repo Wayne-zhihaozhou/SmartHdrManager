@@ -165,34 +165,69 @@ namespace SmartHdrManager
         /// <summary>TV 亮度快捷键回调：wParam 为亮度值（0-90）或 ±1（步进）。</summary>
         private async void OnBrightnessHotkey(int wParam)
         {
-            // Check if TV is enabled
-            if (!TvConfig.Enabled) return;
-
-            int brightness;
-            string title;
-
-            if (wParam == 1)
+            try
             {
-                var (from, to) = await TvCli.StepBrightnessAsync(BrightnessConfig.HotkeyStep);
-                if (to < 0) return;
-                brightness = to;
-                title = "亮度 ↑";
-            }
-            else if (wParam == -1)
-            {
-                var (from, to) = await TvCli.StepBrightnessAsync(-BrightnessConfig.HotkeyStep);
-                if (to < 0) return;
-                brightness = to;
-                title = "亮度 ↓";
-            }
-            else
-            {
-                brightness = wParam;
-                title = $"亮度 {brightness}";
-            }
+                string kind = wParam switch { 1 => "step_up", -1 => "step_down", _ => $"set_{wParam}" };
+                HdrEngine.WriteFileLog($"[TV-BRIGHT] 快捷键触发 kind={kind} wParam={wParam}");
+                HdrEngine.WriteFileLog($"[TV-BRIGHT] TvConfig.Enabled={TvConfig.Enabled}, TvCli.IsRunning={TvCli.IsRunning}");
+                
+                if (!TvConfig.Enabled)
+                {
+                    HdrEngine.WriteFileLog("[TV-BRIGHT] 电视控制未启用，忽略快捷键");
+                    return;
+                }
 
-            // Show OSD
-            BrightnessOsd.Show(brightness, title);
+                int brightness;
+                string title;
+
+                if (wParam == 1)
+                {
+                    HdrEngine.WriteFileLog("[TV-BRIGHT] 执行亮度增加步进");
+                    var (from, to) = await TvCli.StepBrightnessAsync(BrightnessConfig.HotkeyStep);
+                    if (to < 0)
+                    {
+                        HdrEngine.WriteFileLog("[TV-BRIGHT] 步进调整失败");
+                        return;
+                    }
+                    brightness = to;
+                    title = "亮度 ↑";
+                    HdrEngine.WriteFileLog($"[TV-BRIGHT] 步进调整成功: {from} -> {brightness}");
+                }
+                else if (wParam == -1)
+                {
+                    HdrEngine.WriteFileLog("[TV-BRIGHT] 执行亮度减少步进");
+                    var (from, to) = await TvCli.StepBrightnessAsync(-BrightnessConfig.HotkeyStep);
+                    if (to < 0)
+                    {
+                        HdrEngine.WriteFileLog("[TV-BRIGHT] 步进调整失败");
+                        return;
+                    }
+                    brightness = to;
+                    title = "亮度 ↓";
+                    HdrEngine.WriteFileLog($"[TV-BRIGHT] 步进调整成功: {from} -> {brightness}");
+                }
+                else
+                {
+                    brightness = wParam;
+                    title = $"亮度 {brightness}";
+                    HdrEngine.WriteFileLog($"[TV-BRIGHT] 执行直接设置亮度: {brightness}");
+                }
+
+                // Show OSD
+                try
+                {
+                    BrightnessOsd.Show(brightness, title);
+                    HdrEngine.WriteFileLog($"[TV-BRIGHT] OSD 显示成功");
+                }
+                catch (Exception osdEx)
+                {
+                    HdrEngine.WriteFileLog($"[TV-BRIGHT] OSD 显示失败: {osdEx.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                HdrEngine.WriteFileLog($"[TV-BRIGHT] 快捷键处理异常: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         // No notification when the window goes to the tray (2.6): the tray icon itself shows that the app still runs

@@ -94,6 +94,10 @@ namespace SmartHdrManager
             _setOverride = setOverride;
             _applyHotkeys = applyHotkeys;
             _exitApp = exitApp;
+            
+            // 从引擎配置加载 TvConfig，确保快捷键回调读取正确的启用状态
+            TvConfig.LoadFrom(engine.Read(c => c));
+            
             _hotkeyChoice.AddTab("Win+Alt");
             _hotkeyChoice.AddTab("Ctrl+Alt");
             _hotkeyChoice.AddTab("关闭");
@@ -604,6 +608,9 @@ namespace SmartHdrManager
             bc.Enabled = _tvPageControls.enabled.Checked;
             bc.AutoSwitchEnabled = _tvPageControls.autoSwitch.Checked;
             _engine.Update(c => c.Brightness = bc);
+            
+            // 同步更新 TvConfig 静态字段，确保快捷键回调读取最新值
+            TvConfig.LoadFrom(config);
         }
 
         private Control BuildLogPage()

@@ -287,16 +287,36 @@ namespace SmartHdrManager
 
         private bool RegisterTvHotkeys(uint modifiers)
         {
+            string combo = ModifierText(modifiers);
+            HdrEngine.WriteFileLog($"[TV-HOTKEY] register begin mods=0x{modifiers:X} combo={combo} handle={Handle}");
             bool allOk = true;
-            // Alt+↑/↓ for step
-            allOk &= RegisterHotKey(Handle, 2001, modifiers | MOD_NOREPEAT, 0x26); // VK_UP
-            allOk &= RegisterHotKey(Handle, 2002, modifiers | MOD_NOREPEAT, 0x28); // VK_DOWN
-            // Alt+0-9 for direct brightness (0=100, 1=10, 2=20, ..., 9=90)
+            allOk &= RegisterTvKey(2001, modifiers, 0x26, combo, "step_up");
+            allOk &= RegisterTvKey(2002, modifiers, 0x28, combo, "step_down");
             for (int i = 0; i <= 9; i++)
             {
-                RegisterHotKey(Handle, 2010 + i, modifiers | MOD_NOREPEAT, (uint)(0x30 + i));
+                RegisterTvKey(2010 + i, modifiers, (uint)(0x30 + i), combo, $"set_{i * 10}");
             }
+            HdrEngine.WriteFileLog($"[TV-HOTKEY] register end allOk={allOk} combo={combo}");
             return allOk;
+        }
+
+        private bool RegisterTvKey(int id, uint modifiers, uint vk, string combo, string name)
+        {
+            bool ok = RegisterHotKey(Handle, id, modifiers | MOD_NOREPEAT, vk);
+            if (ok)
+                HdrEngine.WriteFileLog($"[TV-HOTKEY] ok id={id} key={combo}vk=0x{vk:X2} name={name}");
+            else
+                HdrEngine.WriteFileLog($"[TV-HOTKEY] FAIL id={id} key={combo}vk=0x{vk:X2} name={name} err={Marshal.GetLastWin32Error()}");
+            return ok;
+        }
+
+        private static string ModifierText(uint modifiers)
+        {
+            string s = string.Empty;
+            if ((modifiers & HotkeySettings.MOD_WIN) != 0) s += "Win+";
+            if ((modifiers & HotkeySettings.MOD_CONTROL) != 0) s += "Ctrl+";
+            if ((modifiers & HotkeySettings.MOD_ALT) != 0) s += "Alt+";
+            return s.Length == 0 ? "None+" : s;
         }
 
         protected override void WndProc(ref Message m)
@@ -307,13 +327,47 @@ namespace SmartHdrManager
                 if (id == ID_ADD) _onAdd();
                 else if (id == ID_IGNORE) _onIgnore();
                 else if (id == ID_OVERRIDE) _onOverride();
-                // TV brightness hotkeys
-                else if (id == 2001) _onBrightnessHotkey?.Invoke(1);   // step up
-                else if (id == 2002) _onBrightnessHotkey?.Invoke(-1);  // step down
-                else if (id >= 2010 && id <= 2019) _onBrightnessHotkey?.Invoke((id - 2010) * 10); // direct set
+                else if ((id is 2001 or 2002) || (id >= 2010 && id <= 2019)) DispatchTvBrightness(id);
+                else HdrEngine.WriteFileLog($"[TV-HOTKEY] unmapped wm_hotkey id={id}");
                 return;
             }
             base.WndProc(ref m);
+        }
+
+        private void DispatchTvBrightness(int id)
+        {
+            try
+            {
+                int arg;
+                string name;
+                if (id == 2001) { arg = 1; name = "step_up"; }
+                else if (id == 2002) { arg = -1; name = "step_down"; }
+                else if (id >= 2010 && id <= 2019)
+                {
+                    arg = (id - 2010) * 10; // id=2010 -> 0, id=2011 -> 10, ..., id=2019 -> 90
+                    name = $"set_{arg}";
+                }
+                else
+                {
+                    HdrEngine.WriteFileLog($"[TV-HOTKEY] 未识别的快捷键 ID: {id}");
+                    return;
+                }
+                
+                HdrEngine.WriteFileLog($"[TV-HOTKEY] 快捷键触发 id={id} name={name} arg={arg} handler={_onBrightnessHotkey != null}");
+                
+                if (_onBrightnessHotkey == null)
+                {
+                    HdrEngine.WriteFileLog("[TV-HOTKEY] 错误: 亮度快捷键回调函数未设置");
+                    return;
+                }
+                
+                _onBrightnessHotkey(arg);
+                HdrEngine.WriteFileLog($"[TV-HOTKEY] 回调执行成功");
+            }
+            catch (Exception ex)
+            {
+                HdrEngine.WriteFileLog($"[TV-HOTKEY] 处理快捷键异常: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         public void Dispose()

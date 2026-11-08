@@ -101,21 +101,38 @@ namespace SmartHdrManager
         /// <summary>确保连接，失败则尝试重连。</summary>
         private static async Task<LgeTvClient?> EnsureConnectedAsync(CancellationToken ct)
         {
-            if (_client == null || _tvIp == null) return null;
+            if (_client == null || _tvIp == null)
+            {
+                HdrEngine.WriteFileLog($"[TV-CONN] 无法确保连接: _client={_client != null}, _tvIp={_tvIp ?? "null"}");
+                return null;
+            }
 
-            if (_client.Connected) return _client;
+            if (_client.Connected)
+            {
+                HdrEngine.WriteFileLog("[TV-CONN] 电视已连接");
+                return _client;
+            }
 
+            HdrEngine.WriteFileLog($"[TV-CONN] 电视未连接，尝试重连: _tvIp={_tvIp}");
+            
             lock (_lock)
             {
-                if (_client.Connected) return _client;
+                if (_client.Connected)
+                {
+                    HdrEngine.WriteFileLog("[TV-CONN] 在锁内检测到已连接");
+                    return _client;
+                }
             }
 
             var ok = await ConnectInternalAsync(ct).ConfigureAwait(false);
             if (ok)
             {
                 _connected = true;
+                HdrEngine.WriteFileLog("[TV-CONN] 重连成功");
                 return _client;
             }
+            
+            HdrEngine.WriteFileLog("[TV-CONN] 重连失败");
             return null;
         }
 
@@ -245,13 +262,27 @@ namespace SmartHdrManager
         /// <summary>设置亮度 0-100。</summary>
         public static async Task<bool> SetBrightnessAsync(int value)
         {
-            if (value < 0 || value > 100) return false;
+            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 请求设置亮度: {value}");
+            
+            if (value < 0 || value > 100)
+            {
+                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 亮度值超出范围: {value} (有效范围 0-100)");
+                return false;
+            }
 
             await _semaphore.WaitAsync().ConfigureAwait(false);
             try
             {
+                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 获取信号量成功");
+                
                 var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                if (client == null) return false;
+                if (client == null)
+                {
+                    HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 错误: 无法获取电视客户端连接");
+                    return false;
+                }
+                
+                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 电视客户端已连接: {client.Connected}");
 
                 var v = value.ToString();
                 var paramsObj = new Dictionary<string, object>
@@ -268,11 +299,14 @@ namespace SmartHdrManager
                     ["onfail"] = new { uri = LunaSetSystemSettings, parameters = paramsObj },
                 };
 
+                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 发送亮度设置请求，值={v}");
+                
                 var createResp = await client.RequestAsync("ssap://system.notifications/createAlert", alertPayload, 8000, CancellationToken.None).ConfigureAwait(false);
 
                 if (createResp.TryGetProperty("type", out var t) && t.GetString() == "error")
                 {
-                    HdrEngine.WriteFileLog($"[TV] createAlert 失败: {createResp}");
+                    var errMsg = createResp.ToString();
+                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert 失败: {errMsg}");
                     return false;
                 }
 
@@ -281,14 +315,17 @@ namespace SmartHdrManager
                     var alertId = aid.GetString();
                     if (!string.IsNullOrEmpty(alertId))
                     {
+                        HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 关闭提示框 alertId={alertId}");
                         await client.RequestAsync("ssap://system.notifications/closeAlert", new Dictionary<string, object> { ["alertId"] = alertId }, 3000, CancellationToken.None).ConfigureAwait(false);
                     }
                 }
 
                 // 等待写入生效
+                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 等待 300ms 让亮度设置生效");
                 await Task.Delay(300, CancellationToken.None).ConfigureAwait(false);
 
                 // 读回验证（内联读取逻辑，避免在已持有信号量时再次获取导致死锁）
+                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 开始读回验证");
                 for (int i = 0; i < 3; i++)
                 {
                     var readResp = await client.RequestAsync("ssap://settings/getSystemSettings", new Dictionary<string, object> { ["category"] = PictureCategory, ["keys"] = new[] { BrightnessKey } }, 8000, CancellationToken.None).ConfigureAwait(false);
@@ -301,20 +338,26 @@ namespace SmartHdrManager
                             else if (val.ValueKind == JsonValueKind.String && int.TryParse(val.GetString(), out var n)) readVal = n;
                         }
                     }
-                    if (readVal == value) return true;
+                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 读回验证第{i+1}次: 期望={value}, 实际={readVal ?? -1}");
+                    if (readVal == value)
+                    {
+                        HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 亮度设置成功: {value}");
+                        return true;
+                    }
                     await Task.Delay(250, CancellationToken.None).ConfigureAwait(false);
                 }
 
-                HdrEngine.WriteFileLog($"[TV] 亮度写入后读回不符: 期望 {value}");
+                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 亮度写入后读回不符: 期望 {value}");
                 return false;
             }
             catch (Exception ex)
             {
-                HdrEngine.WriteFileLog($"[TV] 设置亮度异常: {ex.Message}");
+                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 设置亮度异常: {ex.Message}\n{ex.StackTrace}");
                 return false;
             }
             finally
             {
+                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 释放信号量");
                 _semaphore.Release();
             }
         }
@@ -322,10 +365,23 @@ namespace SmartHdrManager
         /// <summary>步进调整亮度。</summary>
         public static async Task<(int from, int to)> StepBrightnessAsync(int delta)
         {
+            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 步进调整亮度: delta={delta}");
+            
             var current = await GetBrightnessAsync().ConfigureAwait(false);
-            if (current == null) return (-1, -1);
+            if (current == null)
+            {
+                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 获取当前亮度失败，无法步进调整");
+                return (-1, -1);
+            }
+            
+            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 当前亮度: {current.Value}");
+            
             var target = Math.Max(0, Math.Min(100, current.Value + delta));
+            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 目标亮度: {target}");
+            
             var ok = await SetBrightnessAsync(target).ConfigureAwait(false);
+            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 步进调整结果: {(ok ? "成功" : "失败")}");
+            
             return (current.Value, ok ? target : -1);
         }
 
