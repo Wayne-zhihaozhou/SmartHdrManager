@@ -10,19 +10,34 @@ using System.Threading.Tasks;
 namespace SmartHdrManager
 {
     /// <summary>
-    /// LG webOS TV SSAP 客户端（纯 C# 实现，替代 Node.js 依赖）。
-    /// 原理: WebSocket (wss:3001 / ws:3000) → hello → getSystemInfo → register → request/response
-    /// 使用独立消息接收循环处理 incoming 消息。
+    /// LG webOS 电视 SSAP 客户端（纯 C# 实现）。
+    /// 握手流程：WebSocket(wss:3001/ws:3000) → hello → getSystemInfo → register。
+    /// 所有入站消息由单一接收循环按 type + id 分发：握手等待者拿 hello/registered，
+    /// 请求等待者拿 response/error，避免响应被错误路由导致请求必然超时。
     /// </summary>
     public sealed class LgeTvClient : IDisposable
     {
-        private const int DefaultPortWss = 3001;
-        private const int DefaultPortWs = 3000;
+        private const int SecurePort = 3001;
+        private const int PlainPort = 3000;
+        private const int ConnectTimeoutMs = 8000;
         private const int RequestTimeoutMs = 8000;
         private const int HelloTimeoutMs = 6000;
         private const int RegisterTimeoutMs = 30000;
+        private const int ShutdownTimeoutMs = 1000;
+        private const int ReceiveBufferSize = 8192;
+        private const int MaxMessageBytes = 4 * 1024 * 1024;
 
-        private static readonly string[] RegisterPermissions = {
+        private const string HelloType = "hello";
+        private const string RegisteredType = "registered";
+        private const string RegisterType = "register";
+        private const string RequestType = "request";
+        private const string ResponseType = "response";
+        private const string ErrorType = "error";
+        private const string ClientKeyField = "client-key";
+        private const string ClientKeyAltField = "clientKey";
+
+        private static readonly string[] RegisterPermissions =
+        {
             "APP_TO_APP", "CLOSE", "CONTROL_AUDIO", "CONTROL_DISPLAY",
             "CONTROL_INPUT_JOYSTICK", "CONTROL_INPUT_MEDIA_PLAYBACK",
             "CONTROL_INPUT_MEDIA_RECORDING", "CONTROL_INPUT_TEXT",
@@ -39,74 +54,122 @@ namespace SmartHdrManager
 
         private readonly string _host;
         private readonly string? _localAddress;
-        private readonly string? _initialClientKey;
         private readonly bool _secureFirst;
-
-        private ClientWebSocket? _ws;
-        private readonly object _lock = new();
+        private readonly SemaphoreSlim _connectGate = new(1, 1);
+        private readonly object _sync = new();
         private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new();
-        private readonly Queue<JsonElement> _incomingMessages = new();
-        private readonly SemaphoreSlim _messageAvailable = new(0, 1);
-        private Task? _receiveLoop;
+
+        private ClientWebSocket? _socket;
+        private JsonElement? _bufferedHello;
+        private TaskCompletionSource<JsonElement>? _helloWaiter;
+        private TaskCompletionSource<JsonElement>? _registeredWaiter;
         private CancellationTokenSource? _receiveCts;
-        private int _msgId;
+        private int _nextId;
         private bool _disposed;
-        private bool _closed;
+
+        /// <param name="host">电视 IP。</param>
+        /// <param name="localAddress">绑定的本机源地址（可为空）。</param>
+        /// <param name="secureFirst">是否先尝试 wss:3001。</param>
+        public LgeTvClient(string host, string? localAddress = null, bool secureFirst = true)
+        {
+            _host = host;
+            _localAddress = localAddress;
+            _secureFirst = secureFirst;
+        }
+
+        public string Host => _host;
+
+        /// <summary>已配对凭证；首次注册后由电视下发，需要持久化才能免配对弹窗。</summary>
+        public string? ClientKey { get; set; }
+
+        public TvDeviceInfo? TvInfo { get; private set; }
 
         public bool Connected
         {
             get
             {
-                lock (_lock)
+                lock (_sync) return _socket != null && _socket.State == WebSocketState.Open;
+            }
+        }
+
+        /// <summary>连接并完成 hello + getSystemInfo + register 握手。</summary>
+        public async Task ConnectAsync(CancellationToken ct = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            await _connectGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (Connected) return;
+                await CloseSocketAsync().ConfigureAwait(false);
+
+                var socket = await OpenSocketAsync(ct).ConfigureAwait(false);
+                StartReceiveLoop(socket);
+
+                var hello = await SendHandshakeAsync(HelloType, new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
+                TvInfo = ReadTvInfo(hello);
+
+                try
                 {
-                    return _ws != null && _ws.State == WebSocketState.Open;
+                    await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    HdrEngine.WriteFileLog($"[TV] getSystemInfo 未返回（部分固件允许跳过）: {ex.Message}");
+                }
+
+                var registered = await SendHandshakeAsync(RegisterType, BuildRegisterPayload(), RegisterTimeoutMs, ct).ConfigureAwait(false);
+                ClientKey = ReadClientKey(registered) ?? ClientKey;
+            }
+            finally
+            {
+                _connectGate.Release();
+            }
+        }
+
+        /// <summary>发送 SSAP 请求并等待对应 id 的响应。</summary>
+        public async Task<JsonElement> RequestAsync(string uri, Dictionary<string, object>? payload = null, int timeoutMs = RequestTimeoutMs, CancellationToken ct = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            var id = Interlocked.Increment(ref _nextId).ToString();
+            var waiter = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_sync)
+            {
+                _pending[id] = waiter;
+            }
+
+            try
+            {
+                var message = new Dictionary<string, object>
+                {
+                    ["id"] = id,
+                    ["type"] = RequestType,
+                    ["uri"] = uri,
+                    ["payload"] = payload ?? new Dictionary<string, object>(),
+                };
+                await SendRawAsync(JsonSerializer.Serialize(message), ct).ConfigureAwait(false);
+                return await waiter.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException($"请求超时: {uri}");
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    _pending.Remove(id);
                 }
             }
         }
 
-        public string? ClientKey { get; private set; }
-        public TvDeviceInfo? TvInfo { get; private set; }
-
-        public LgeTvClient(string host, string? localAddress = null, string? clientKey = null, bool secureFirst = true)
+        private Dictionary<string, object> BuildRegisterPayload()
         {
-            _host = host;
-            _localAddress = localAddress;
-            _initialClientKey = clientKey;
-            _secureFirst = secureFirst;
-            ClientKey = clientKey;
-        }
-
-        /// <summary>连接并完成握手（hello + getSystemInfo + register）。</summary>
-        public async Task ConnectAsync(CancellationToken ct = default)
-        {
-            if (Connected) return;
-
-            await CloseInternalAsync().ConfigureAwait(false);
-            _closed = false;
-
-            // 1. 建立 WebSocket 连接
-            await _connectAsync(ct).ConfigureAwait(false);
-            _startReceiveLoop();
-
-            // 2. hello
-            var helloMsg = await _waitForMsgAsync("hello", new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
-            TvInfo = null;
-            if (helloMsg.TryGetProperty("payload", out var payload) && payload.ValueKind == JsonValueKind.Object)
-            {
-                TvInfo = new TvDeviceInfo(
-                    payload.TryGetProperty("modelName", out var m) ? m.GetString() : null,
-                    payload.TryGetProperty("deviceOSVersion", out var v) ? v.GetString() : null);
-            }
-
-            // 3. getSystemInfo（新固件要求）
-            try { await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(), 6000, ct).ConfigureAwait(false); } catch { /* 某些固件允许跳过 */ }
-
-            // 4. register
-            var regPayload = new Dictionary<string, object>
+            var payload = new Dictionary<string, object>
             {
                 ["forcePairing"] = false,
-                // 已有 client-key 时用 NONE 静默配对；没有时才弹 PROMPT 请求用户确认
-                ["pairingType"] = ClientKey != null ? "NONE" : "PROMPT",
+                ["pairingType"] = "PROMPT",
                 ["manifest"] = new Dictionary<string, object>
                 {
                     ["appVersion"] = "1.1",
@@ -114,293 +177,399 @@ namespace SmartHdrManager
                     ["permissions"] = RegisterPermissions,
                 },
             };
-            if (ClientKey != null)
-                regPayload["client-key"] = ClientKey;
-
-            var regMsg = await _waitForMsgAsync("register", regPayload, RegisterTimeoutMs, ct).ConfigureAwait(false);
-
-            if (regMsg.GetProperty("type").GetString() == "error")
-            {
-                var errMsg = regMsg.TryGetProperty("payload", out var rp) && rp.TryGetProperty("errorText", out var et)
-                    ? et.GetString() ?? regMsg.GetProperty("payload").ToString()
-                    : regMsg.TryGetProperty("error", out var e) ? e.GetString() ?? "" : "";
-                throw new InvalidOperationException($"配对被拒绝: {errMsg}");
-            }
-
-            var newKey = regMsg.TryGetProperty("payload", out var rpp)
-                ? (rpp.TryGetProperty("client-key", out var ck) ? ck.GetString()
-                : (rpp.TryGetProperty("clientKey", out var ck2) ? ck2.GetString() : null))
-                : null;
-            ClientKey = newKey ?? ClientKey;
+            if (!string.IsNullOrEmpty(ClientKey))
+                payload[ClientKeyField] = ClientKey!;
+            return payload;
         }
 
-        private async Task _connectAsync(CancellationToken ct)
+        private async Task<ClientWebSocket> OpenSocketAsync(CancellationToken ct)
         {
-            var urls = _secureFirst
-                ? new[] { $"wss://{_host}:{DefaultPortWss}", $"ws://{_host}:{DefaultPortWs}" }
-                : new[] { $"ws://{_host}:{DefaultPortWs}", $"wss://{_host}:{DefaultPortWss}" };
+            var secureUrl = $"wss://{_host}:{SecurePort}";
+            var plainUrl = $"ws://{_host}:{PlainPort}";
+            var urls = _secureFirst ? new[] { secureUrl, plainUrl } : new[] { plainUrl, secureUrl };
 
-            Exception? lastErr = null;
+            Exception? lastError = null;
             foreach (var url in urls)
             {
-                if (ct.IsCancellationRequested) break;
-                var ws = new ClientWebSocket();
+                ct.ThrowIfCancellationRequested();
+                var socket = new ClientWebSocket();
+                if (url.StartsWith("wss:", StringComparison.Ordinal))
+                    socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+
                 try
                 {
-                    if (url.StartsWith("wss:"))
-                        ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeout.CancelAfter(ConnectTimeoutMs);
+                    await socket.ConnectAsync(new Uri(url), timeout.Token).ConfigureAwait(false);
+                    lock (_sync)
+                    {
+                        _socket = socket;
+                    }
+                    return socket;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    socket.Dispose();
+                    ct.ThrowIfCancellationRequested();
+                }
+            }
 
-                    await ws.ConnectAsync(new Uri(url), ct).ConfigureAwait(false);
-                    _ws = ws;
+            throw new InvalidOperationException($"无法连接电视 {_host}: {lastError?.Message ?? "未知错误"}");
+        }
+
+        private void StartReceiveLoop(ClientWebSocket socket)
+        {
+            var cts = new CancellationTokenSource();
+            lock (_sync)
+            {
+                _receiveCts = cts;
+            }
+            _ = Task.Run(() => ReceiveLoopAsync(socket, cts.Token), CancellationToken.None);
+        }
+
+        private async Task ReceiveLoopAsync(ClientWebSocket socket, CancellationToken ct)
+        {
+            var buffer = new byte[ReceiveBufferSize];
+            using var message = new MemoryStream();
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    message.SetLength(0);
+                    WebSocketReceiveResult result;
+                    do
+                    {
+                        result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct).ConfigureAwait(false);
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            HandleSocketClosed(socket, new InvalidOperationException("电视连接已关闭"));
+                            return;
+                        }
+                        message.Write(buffer, 0, result.Count);
+                        if (message.Length > MaxMessageBytes)
+                        {
+                            HandleSocketClosed(socket, new InvalidOperationException("SSAP 消息超出长度上限"));
+                            return;
+                        }
+                    }
+                    while (!result.EndOfMessage);
+
+                    if (result.MessageType != WebSocketMessageType.Text) continue;
+                    DispatchMessage(ParseMessage(message));
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+                catch (WebSocketException ex)
+                {
+                    HandleSocketClosed(socket, ex);
                     return;
                 }
                 catch (Exception ex)
                 {
-                    lastErr = ex;
-                    try { ws.Dispose(); } catch { }
-                    _ws = null;
+                    HdrEngine.WriteFileLog($"[TV] 接收消息失败: {ex.Message}");
                 }
             }
-            throw new InvalidOperationException($"无法连接电视 {_host}: {lastErr?.Message ?? "未知错误"}");
         }
 
-        private void _startReceiveLoop()
+        private static JsonElement ParseMessage(MemoryStream message)
         {
-            _receiveCts = new CancellationTokenSource();
-            _receiveLoop = Task.Run(() => _receiveLoopAsync(_receiveCts.Token));
+            using var document = JsonDocument.Parse(message.ToArray());
+            return document.RootElement.Clone();
         }
 
-        private async Task _receiveLoopAsync(CancellationToken ct)
+        private void DispatchMessage(JsonElement message)
         {
-            while (!ct.IsCancellationRequested && !_closed)
+            var type = GetString(message, "type");
+            var id = GetString(message, "id");
+
+            switch (type)
             {
-                try
+                case HelloType:
+                    BufferOrCompleteHello(message);
+                    return;
+                case RegisteredType:
+                    CompleteRegistered(message);
+                    return;
+                case ResponseType when id == RegisterType:
+                    CompleteRegistered(message);
+                    return;
+                case ErrorType when id == RegisterType:
+                    FailRegister(message);
+                    return;
+                case ResponseType when id == HelloType:
+                    BufferOrCompleteHello(message);
+                    return;
+                case ResponseType:
+                case ErrorType:
+                    ResolveRequest(id, message);
+                    return;
+            }
+        }
+
+        /// <summary>部分固件在连接建立后主动推送 hello，早于客户端发送 hello 请求，先缓存再交付。</summary>
+        private void BufferOrCompleteHello(JsonElement message)
+        {
+            TaskCompletionSource<JsonElement>? waiter;
+            lock (_sync)
+            {
+                waiter = _helloWaiter;
+                if (waiter == null)
                 {
-                    if (_ws == null || _ws.State != WebSocketState.Open)
-                    {
-                        await Task.Delay(500, ct).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    var buffer = new byte[65536];
-                    var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct).ConfigureAwait(false);
-
-                    if (result.MessageType == WebSocketMessageType.Close)
-                    {
-                        await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", ct).ConfigureAwait(false);
-                        _failAll(new InvalidOperationException("连接已关闭"));
-                        _closed = true;
-                        break;
-                    }
-
-                    if (result.MessageType == WebSocketMessageType.Text)
-                    {
-                        var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        JsonElement parsed;
-                        try { parsed = JsonDocument.Parse(json).RootElement; } catch { continue; }
-
-                        lock (_lock)
-                        {
-                            var type = parsed.TryGetProperty("type", out var tp) ? tp.GetString() : null;
-                            if (type == "hello" || type == "registered" || type == "response" || type == "error" || type == "register")
-                            {
-                                _incomingMessages.Enqueue(parsed);
-                                _messageAvailable.Release();
-                            }
-                            else
-                            {
-                                // 非关键消息直接处理（hello/register/response/error 通过 _messageAvailable 分发）
-                                if (parsed.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
-                                {
-                                    var id = idProp.GetString();
-                                    if (id != null && _pending.TryGetValue(id, out var tcs))
-                                    {
-                                        _pending.Remove(id);
-                                        tcs.TrySetResult(parsed);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    _bufferedHello = message;
+                    return;
                 }
-                catch (OperationCanceledException) { break; }
-                catch (InvalidOperationException) { break; }
-                catch (Exception ex)
-                {
-                    HdrEngine.WriteFileLog($"[TV] 接收异常: {ex.Message}");
-                    await Task.Delay(1000, ct).ConfigureAwait(false);
-                }
+                _helloWaiter = null;
             }
+            waiter.TrySetResult(message);
         }
 
-        private async Task<JsonElement> _waitForMsgAsync(string expectedType, Dictionary<string, object> payload, int timeoutMs, CancellationToken ct)
+        private void ResolveRequest(string? id, JsonElement message)
         {
-            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var timeoutTimer = new Timer(_ => tcs.TrySetException(new TimeoutException($"{expectedType} 握手超时")), null, timeoutMs, Timeout.Infinite);
+            if (string.IsNullOrEmpty(id)) return;
 
-            // 发送消息
-            var msg = new Dictionary<string, object> { ["type"] = expectedType, ["payload"] = payload };
-            await SendRawAsync(JsonSerializer.Serialize(msg), ct).ConfigureAwait(false);
-
-            // 等待响应（轮询队列）
-            while (!ct.IsCancellationRequested)
+            TaskCompletionSource<JsonElement>? waiter = null;
+            lock (_sync)
             {
-                if (_messageAvailable.Wait(100, ct))
+                if (_pending.TryGetValue(id!, out var found))
                 {
-                    lock (_lock)
-                    {
-                        while (_incomingMessages.Count > 0)
-                        {
-                            var incoming = _incomingMessages.Dequeue();
-                            if (incoming.TryGetProperty("type", out var tp) && tp.GetString() == expectedType)
-                            {
-                                timeoutTimer.Dispose();
-                                tcs.TrySetResult(incoming);
-                                return incoming;
-                            }
-                        }
-                    }
+                    _pending.Remove(id!);
+                    waiter = found;
                 }
             }
-
-            timeoutTimer.Dispose();
-            throw new TimeoutException($"{expectedType} 握手超时");
+            waiter?.TrySetResult(message);
         }
 
-        /// <summary>发送 SSAP 请求并等待响应。</summary>
-        public async Task<JsonElement> RequestAsync(string uri, Dictionary<string, object> payload, int timeoutMs, CancellationToken ct)
+        private void CompleteRegistered(JsonElement message)
         {
-            if (_ws == null || _ws.State != WebSocketState.Open)
-                throw new InvalidOperationException("未连接");
-
-            var id = Interlocked.Increment(ref _msgId).ToString();
-            var msg = new Dictionary<string, object>
+            TaskCompletionSource<JsonElement>? waiter;
+            lock (_sync)
             {
-                ["id"] = id,
-                ["type"] = "request",
-                ["uri"] = uri,
-                ["payload"] = payload,
-            };
-
-            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var timer = new Timer(_ =>
-            {
-                tcs.TrySetException(new TimeoutException($"请求超时: {uri}"));
-            }, null, timeoutMs, Timeout.Infinite);
-
-            lock (_lock)
-            {
-                _pending[id] = tcs;
+                waiter = _registeredWaiter;
+                _registeredWaiter = null;
             }
+            waiter?.TrySetResult(message);
+        }
 
-            await SendRawAsync(JsonSerializer.Serialize(msg), ct).ConfigureAwait(false);
+        private void FailRegister(JsonElement message)
+        {
+            TaskCompletionSource<JsonElement>? waiter;
+            lock (_sync)
+            {
+                waiter = _registeredWaiter;
+                _registeredWaiter = null;
+            }
+            waiter?.TrySetException(new InvalidOperationException($"配对被拒绝: {ExtractErrorText(message)}"));
+        }
+
+        private async Task<JsonElement> SendHandshakeAsync(string type, Dictionary<string, object> payload, int timeoutMs, CancellationToken ct)
+        {
+            if (type == HelloType && TryTakeBufferedHello(out var buffered))
+                return buffered;
+
+            var waiter = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_sync)
+            {
+                if (type == HelloType) _helloWaiter = waiter;
+                else _registeredWaiter = waiter;
+            }
 
             try
             {
-                return await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
+                var message = new Dictionary<string, object>
+                {
+                    ["id"] = type,
+                    ["type"] = type,
+                    ["payload"] = payload,
+                };
+                await SendRawAsync(JsonSerializer.Serialize(message), ct).ConfigureAwait(false);
+                return await waiter.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException(type == RegisterType
+                    ? "配对超时（电视是否弹出确认提示？）"
+                    : "hello 握手超时");
             }
             finally
             {
-                lock (_lock) { _pending.Remove(id); }
-                timer?.Dispose();
-            }
-        }
-
-        private async Task SendRawAsync(string json, CancellationToken ct)
-        {
-            if (_ws == null || _ws.State != WebSocketState.Open)
-                throw new InvalidOperationException("未连接");
-            var bytes = Encoding.UTF8.GetBytes(json);
-            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
-        }
-
-        /// <summary>发送自定义 JSON 消息（用于非标准 SSAP 消息如 closeAlert）。</summary>
-        public async Task SendCustomJsonAsync(string json, CancellationToken ct)
-        {
-            if (_ws == null || _ws.State != WebSocketState.Open)
-                throw new InvalidOperationException("未连接");
-            var bytes = Encoding.UTF8.GetBytes(json);
-            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
-        }
-
-        private void _failAll(Exception ex)
-        {
-            lock (_lock)
-            {
-                foreach (var kv in _pending)
+                lock (_sync)
                 {
-                    kv.Value.TrySetException(ex);
-                }
-                _pending.Clear();
-            }
-        }
-
-        private async Task CloseInternalAsync()
-        {
-            _closed = true;
-            try { _receiveCts?.Cancel(); } catch { }
-            _receiveCts?.Dispose();
-            _receiveCts = null;
-            _receiveLoop = null;
-            _messageAvailable.Release(); // unblock any wait
-
-            lock (_lock)
-            {
-                if (_ws != null)
-                {
-                    try { _ws.Dispose(); } catch { }
-                    _ws = null;
-                }
-                foreach (var kv in _pending)
-                {
-                    kv.Value.TrySetException(new InvalidOperationException("连接已关闭"));
-                }
-                _pending.Clear();
-                _incomingMessages.Clear();
-            }
-        }
-
-        /// <summary>启动自动重连（每 5 秒检测一次）。</summary>
-        public void StartAutoReconnect(Func<CancellationToken, Task> onReconnect)
-        {
-            Task.Run(async () =>
-            {
-                while (!_disposed)
-                {
-                    await Task.Delay(5000);
-                    if (!_disposed && !Connected)
+                    if (type == HelloType)
                     {
-                        try
-                        {
-                            HdrEngine.WriteFileLog("[TV] 连接断开，正在重连...");
-                            await onReconnect(CancellationToken.None);
-                            HdrEngine.WriteFileLog("[TV] 已重连");
-                        }
-                        catch (Exception ex)
-                        {
-                            HdrEngine.WriteFileLog($"[TV] 重连失败: {ex.Message}");
-                        }
+                        if (_helloWaiter == waiter) _helloWaiter = null;
+                    }
+                    else if (_registeredWaiter == waiter)
+                    {
+                        _registeredWaiter = null;
                     }
                 }
-            });
+            }
+        }
+
+        private bool TryTakeBufferedHello(out JsonElement hello)
+        {
+            lock (_sync)
+            {
+                if (_bufferedHello is JsonElement buffered)
+                {
+                    _bufferedHello = null;
+                    hello = buffered;
+                    return true;
+                }
+            }
+            hello = default;
+            return false;
+        }
+
+        private Task SendRawAsync(string json, CancellationToken ct)
+        {
+            var socket = RequireOpenSocket();
+            var bytes = Encoding.UTF8.GetBytes(json);
+            return socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct);
+        }
+
+        private ClientWebSocket RequireOpenSocket()
+        {
+            lock (_sync)
+            {
+                if (_socket == null || _socket.State != WebSocketState.Open)
+                    throw new InvalidOperationException("未连接电视");
+                return _socket;
+            }
+        }
+
+        private void HandleSocketClosed(ClientWebSocket socket, Exception error)
+        {
+            lock (_sync)
+            {
+                if (!ReferenceEquals(_socket, socket)) return;
+                _socket = null;
+            }
+            FailWaiters(error);
+        }
+
+        private void FailAll(Exception error)
+        {
+            lock (_sync)
+            {
+                _socket = null;
+            }
+            FailWaiters(error);
+        }
+
+        private void FailWaiters(Exception error)
+        {
+            List<TaskCompletionSource<JsonElement>> pending;
+            TaskCompletionSource<JsonElement>? hello;
+            TaskCompletionSource<JsonElement>? registered;
+            lock (_sync)
+            {
+                pending = new List<TaskCompletionSource<JsonElement>>(_pending.Values);
+                _pending.Clear();
+                hello = _helloWaiter;
+                _helloWaiter = null;
+                registered = _registeredWaiter;
+                _registeredWaiter = null;
+                _bufferedHello = null;
+            }
+
+            foreach (var waiter in pending) waiter.TrySetException(error);
+            hello?.TrySetException(error);
+            registered?.TrySetException(error);
+        }
+
+        private async Task CloseSocketAsync()
+        {
+            ClientWebSocket? socket;
+            CancellationTokenSource? cts;
+            lock (_sync)
+            {
+                socket = _socket;
+                _socket = null;
+                cts = _receiveCts;
+                _receiveCts = null;
+            }
+
+            try { cts?.Cancel(); } catch { }
+            cts?.Dispose();
+
+            if (socket != null)
+            {
+                try
+                {
+                    if (socket.State == WebSocketState.Open)
+                    {
+                        using var timeout = new CancellationTokenSource(ShutdownTimeoutMs);
+                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", timeout.Token).ConfigureAwait(false);
+                    }
+                }
+                catch { }
+                socket.Dispose();
+            }
+
+            FailAll(new InvalidOperationException("电视连接已重置"));
+        }
+
+        private static TvDeviceInfo? ReadTvInfo(JsonElement hello)
+        {
+            if (!hello.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object)
+                return null;
+            return new TvDeviceInfo(GetString(payload, "modelName"), GetString(payload, "deviceOSVersion"));
+        }
+
+        private static string? ReadClientKey(JsonElement registered)
+        {
+            if (!registered.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object)
+                return null;
+            return GetString(payload, ClientKeyField) ?? GetString(payload, ClientKeyAltField);
+        }
+
+        private static string? GetString(JsonElement element, string property)
+        {
+            if (element.ValueKind != JsonValueKind.Object) return null;
+            if (!element.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String) return null;
+            var text = value.GetString();
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+
+        internal static string ExtractErrorText(JsonElement message)
+        {
+            if (message.TryGetProperty("payload", out var payload) && payload.ValueKind == JsonValueKind.Object)
+            {
+                if (GetString(payload, "errorText") is string errorText) return errorText;
+                if (GetString(payload, "message") is string messageText) return messageText;
+            }
+            return GetString(message, "error") ?? "电视返回错误";
         }
 
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
-            _closed = true;
-            try { _receiveCts?.Cancel(); } catch { }
-            try { _receiveCts?.Dispose(); } catch { }
-            _messageAvailable.Release();
-            lock (_lock)
+
+            ClientWebSocket? socket;
+            CancellationTokenSource? cts;
+            lock (_sync)
             {
-                _ws?.Dispose();
-                _ws = null;
-                foreach (var kv in _pending) kv.Value.TrySetException(new ObjectDisposedException(nameof(LgeTvClient)));
-                _pending.Clear();
-                _incomingMessages.Clear();
+                socket = _socket;
+                _socket = null;
+                cts = _receiveCts;
+                _receiveCts = null;
             }
+
+            try { cts?.Cancel(); } catch { }
+            cts?.Dispose();
+            try { socket?.Dispose(); } catch { }
+
+            FailAll(new ObjectDisposedException(nameof(LgeTvClient)));
         }
     }
 
@@ -409,39 +578,13 @@ namespace SmartHdrManager
     {
         public string? ModelName { get; }
         public string? WebOSVersion { get; }
+
         public TvDeviceInfo(string? modelName, string? webOSVersion)
         {
             ModelName = modelName;
             WebOSVersion = webOSVersion;
         }
+
         public override string ToString() => $"{ModelName ?? "Unknown"} / webOS {WebOSVersion ?? "Unknown"}";
-    }
-
-    /// <summary>client-key 持久化存储。</summary>
-    public static class ClientKeyStore
-    {
-        private static readonly string KeyDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "key");
-
-        public static string? Load(string host)
-        {
-            try
-            {
-                var file = Path.Combine(KeyDir, "client-key.json");
-                if (!File.Exists(file)) return null;
-                var store = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(file));
-                return store?.TryGetValue(host, out var key) == true ? key : null;
-            }
-            catch { return null; }
-        }
-
-        public static void Save(string host, string clientKey)
-        {
-            Directory.CreateDirectory(KeyDir);
-            var file = Path.Combine(KeyDir, "client-key.json");
-            Dictionary<string, string> store;
-            try { store = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(file)) ?? new(); } catch { store = new(); }
-            store[host] = clientKey;
-            File.WriteAllText(file, JsonSerializer.Serialize(store, new JsonSerializerOptions { WriteIndented = true }));
-        }
     }
 }

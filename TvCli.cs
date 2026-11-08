@@ -1,216 +1,150 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace SmartHdrManager
 {
     /// <summary>
-    /// LG webOS 电视亮度控制（纯 C# 实现，无 Node.js 依赖）。
-    /// 使用 SSAP 协议通过 WebSocket 与电视通信。
+    /// LG webOS 电视亮度控制（纯 C#，无 Node.js 依赖）。
+    /// 写入方式与 pc-control-tv 一致：直接调 setSystemSettings 会被 ACG 拒绝，
+    /// 因此先 createAlert 创建提示框，把 luna 写入挂到它的按钮/关闭回调上，
+    /// 再立即 closeAlert 关闭提示框 —— 关闭动作由电视系统以特权身份执行写入，
+    /// 不需要用户在电视上做任何确认，也不会留下弹窗。
     /// </summary>
     public static class TvCli
     {
         private const string LunaSetSystemSettings = "luna://com.webos.settingsservice/setSystemSettings";
+        private const string CreateAlertUri = "ssap://system.notifications/createAlert";
+        private const string CloseAlertUri = "ssap://system.notifications/closeAlert";
+        private const string GetSystemSettingsUri = "ssap://settings/getSystemSettings";
         private const string PictureCategory = "picture";
         private const string BrightnessKey = "backlight";
 
+        private const int MinBrightness = 0;
+        private const int MaxBrightness = 100;
+        private const int SettingRequestTimeoutMs = 8000;
+        private const int ReadRequestTimeoutMs = 6000;
+        private const int AlertRequestTimeoutMs = 5000;
+        private const int WriteSettleDelayMs = 250;
+        private const int ReadBackAttempts = 3;
+
+        private static readonly object Sync = new();
+        private static readonly SemaphoreSlim Gate = new(1, 1);
+
         private static LgeTvClient? _client;
-        private static readonly object _lock = new();
         private static string? _tvIp;
         private static string? _localAddr;
-        private static volatile bool _connected;
-        private static readonly SemaphoreSlim _semaphore = new(1, 1);
 
-        public static bool IsRunning
-        {
-            get
-            {
-                lock (_lock) { return _connected; }
-            }
-        }
-
-        /// <summary>初始化电视连接。</summary>
+        /// <summary>初始化电视连接：有已保存的 client-key 时静默连接，否则首次需要配对。</summary>
         public static void Init(string tvIp, string localAddr)
         {
-            lock (_lock)
+            if (string.IsNullOrWhiteSpace(tvIp)) return;
+
+            lock (Sync)
             {
-                if (_connected) return;
                 _tvIp = tvIp;
                 _localAddr = localAddr;
-
-                var clientKey = ClientKeyStore.Load(tvIp);
-                _client = new LgeTvClient(tvIp, localAddr, clientKey);
-
-                // 自动重连
-                _client.StartAutoReconnect(async ct =>
-                {
-                    await ReconnectInternalAsync(ct);
-                });
-
-                // 后台异步连接，不阻塞程序启动
-                Task.Run(async () =>
-                {
-                    try
-                    {
-                        var ok = await ConnectInternalAsync(CancellationToken.None);
-                        lock (_lock)
-                        {
-                            _connected = ok;
-                        }
-                        if (ok)
-                        {
-                            HdrEngine.WriteFileLog($"[TV] 电视已连接: {tvIp} ({_client?.TvInfo?.ModelName ?? ""})");
-                        }
-                        else
-                        {
-                            HdrEngine.WriteFileLog($"[TV] 电视连接失败: {tvIp}（将在后台自动重连）");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        HdrEngine.WriteFileLog($"[TV] 电视连接异常: {ex.Message}");
-                        lock (_lock) { _connected = false; }
-                    }
-                });
+                _client?.Dispose();
+                _client = new LgeTvClient(tvIp, localAddr) { ClientKey = TvClientKeyStore.Load(tvIp) };
             }
+
+            _ = Task.Run(async () =>
+            {
+                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
+                if (client != null)
+                {
+                    HdrEngine.WriteFileLog($"[TV] 电视已连接: {tvIp} ({client.TvInfo?.ModelName ?? "未知型号"})");
+                }
+            });
         }
 
-        private static async Task<bool> ConnectInternalAsync(CancellationToken ct)
+        /// <summary>读取当前亮度，失败返回 null。</summary>
+        public static async Task<int?> GetBrightnessAsync()
         {
-            if (_client == null || _tvIp == null) return false;
+            await Gate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await _client.ConnectAsync(ct).ConfigureAwait(false);
-                return true;
+                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
+                return client == null ? null : await ReadBrightnessAsync(client, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                HdrEngine.WriteFileLog($"[TV] 连接失败: {ex.Message}");
-                return false;
-            }
-        }
-
-        private static async Task ReconnectInternalAsync(CancellationToken ct)
-        {
-            if (_client == null || _tvIp == null) return;
-            try
-            {
-                await _client.ConnectAsync(ct).ConfigureAwait(false);
-                lock (_lock)
-                {
-                    _connected = true;
-                }
-            }
-            catch { /* 重连失败在日志中记录 */ }
-        }
-
-        /// <summary>确保连接，失败则尝试重连。</summary>
-        private static async Task<LgeTvClient?> EnsureConnectedAsync(CancellationToken ct)
-        {
-            if (_client == null || _tvIp == null)
-            {
-                HdrEngine.WriteFileLog($"[TV-CONN] 无法确保连接: _client={_client != null}, _tvIp={_tvIp ?? "null"}");
+                HdrEngine.WriteFileLog($"[TV] 读取亮度失败: {ex.Message}");
                 return null;
             }
-
-            if (_client.Connected)
+            finally
             {
-                HdrEngine.WriteFileLog("[TV-CONN] 电视已连接");
-                return _client;
+                Gate.Release();
             }
-
-            HdrEngine.WriteFileLog($"[TV-CONN] 电视未连接，尝试重连: _tvIp={_tvIp}");
-            
-            lock (_lock)
-            {
-                if (_client.Connected)
-                {
-                    HdrEngine.WriteFileLog("[TV-CONN] 在锁内检测到已连接");
-                    return _client;
-                }
-            }
-
-            var ok = await ConnectInternalAsync(ct).ConfigureAwait(false);
-            if (ok)
-            {
-                lock (_lock) { _connected = true; }
-                HdrEngine.WriteFileLog("[TV-CONN] 重连成功");
-                return _client;
-            }
-            
-            HdrEngine.WriteFileLog("[TV-CONN] 重连失败");
-            return null;
         }
 
-        /// <summary>测试与电视的连接，返回详细结果。</summary>
+        /// <summary>设置亮度（0-100），写入后读回验证。</summary>
+        public static async Task<bool> SetBrightnessAsync(int value)
+        {
+            if (value < MinBrightness || value > MaxBrightness)
+            {
+                HdrEngine.WriteFileLog($"[TV] 亮度值超出范围: {value}（有效范围 {MinBrightness}-{MaxBrightness}）");
+                return false;
+            }
+
+            await Gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
+                if (client == null) return false;
+
+                var alertId = await CreateBrightnessAlertAsync(client, value, CancellationToken.None).ConfigureAwait(false);
+                await CloseAlertAsync(client, alertId, CancellationToken.None).ConfigureAwait(false);
+                await Task.Delay(WriteSettleDelayMs).ConfigureAwait(false);
+
+                var applied = await VerifyBrightnessAsync(client, value, CancellationToken.None).ConfigureAwait(false);
+                if (applied) HdrEngine.WriteFileLog($"[TV] 亮度已设置为 {value}");
+                return applied;
+            }
+            catch (Exception ex)
+            {
+                HdrEngine.WriteFileLog($"[TV] 设置亮度 {value} 失败: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                Gate.Release();
+            }
+        }
+
+        /// <summary>以当前亮度为基准步进调整。</summary>
+        public static async Task<(int from, int to)> StepBrightnessAsync(int delta)
+        {
+            var current = await GetBrightnessAsync().ConfigureAwait(false);
+            if (current == null) return (-1, -1);
+
+            var target = Math.Clamp(current.Value + delta, MinBrightness, MaxBrightness);
+            var applied = await SetBrightnessAsync(target).ConfigureAwait(false);
+            return (current.Value, applied ? target : -1);
+        }
+
+        /// <summary>测试连接并汇报当前亮度（会顺带保存配对凭证）。</summary>
         public static async Task<(bool success, string message)> TestConnectionAsync(string tvIp, string localAddr)
         {
             if (string.IsNullOrWhiteSpace(tvIp))
                 return (false, "电视 IP 地址不能为空");
 
-            // 加载已保存的 client-key，避免重复配对
-            var savedKey = ClientKeyStore.Load(tvIp);
-            var client = new LgeTvClient(tvIp, localAddr, savedKey);
+            var client = new LgeTvClient(tvIp, localAddr) { ClientKey = TvClientKeyStore.Load(tvIp) };
             try
             {
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
+                PersistClientKey(client);
 
-                var sysInfoPayload = new Dictionary<string, object>();
-                var sysResp = await client.RequestAsync("ssap://system/getSystemInfo", sysInfoPayload, 6000, CancellationToken.None).ConfigureAwait(false);
-
-                if (sysResp.TryGetProperty("type", out var t) && t.GetString() == "error")
-                {
-                    var errMsg = sysResp.TryGetProperty("payload", out var p) && p.TryGetProperty("errorText", out var et)
-                        ? et.GetString() ?? "未知错误"
-                        : "未知错误";
-                    return (false, $"电视响应错误: {errMsg}");
-                }
-
-                var brightnessPayload = new Dictionary<string, object>
-                {
-                    ["category"] = PictureCategory,
-                    ["keys"] = new[] { BrightnessKey },
-                };
-                var brightnessResp = await client.RequestAsync("ssap://settings/getSystemSettings", brightnessPayload, 6000, CancellationToken.None).ConfigureAwait(false);
-
-                if (brightnessResp.TryGetProperty("type", out var bt) && bt.GetString() == "error")
-                {
-                    var errMsg = brightnessResp.TryGetProperty("payload", out var bp) && bp.TryGetProperty("errorText", out var bet)
-                        ? bet.GetString() ?? "未知错误"
-                        : "未知错误";
-                    return (false, $"读取亮度失败: {errMsg}");
-                }
-
-                if (!brightnessResp.TryGetProperty("payload", out var bp2) ||
-                    !bp2.TryGetProperty("returnValue", out var rv) || !IsReturnValueTrue(rv))
-                {
-                    return (false, "读取亮度返回异常");
-                }
-
-                if (!bp2.TryGetProperty("settings", out var s) || !s.TryGetProperty(BrightnessKey, out var val))
-                    return (false, "电视未返回亮度信息");
-
-                int brightness;
-                if (val.ValueKind == JsonValueKind.Number)
-                    brightness = val.GetInt32();
-                else if (val.ValueKind == JsonValueKind.String && int.TryParse(val.GetString(), out var n))
-                    brightness = n;
-                else
-                    return (false, "亮度值格式异常");
-
-                return (true, $"已连接！当前亮度: {brightness}");
+                var brightness = await ReadBrightnessAsync(client, CancellationToken.None).ConfigureAwait(false);
+                if (brightness == null)
+                    return (false, "已连接，但读取亮度失败");
+                return (true, $"已连接！当前亮度: {brightness.Value}");
             }
-            catch (TimeoutException)
+            catch (TimeoutException ex)
             {
-                return (false, "连接超时——请检查电视 IP 是否正确，电视是否与同一网络");
-            }
-            catch (InvalidOperationException ex)
-            {
-                return (false, $"连接失败: {ex.Message}");
+                return (false, $"{ex.Message}——请检查电视 IP 是否正确、电视是否与电脑在同一网络");
             }
             catch (Exception ex)
             {
@@ -222,218 +156,36 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>获取当前亮度。</summary>
-        public static async Task<int?> GetBrightnessAsync()
-        {
-            await _semaphore.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                if (client == null) return null;
-
-                var payload = new Dictionary<string, object>
-                {
-                    ["category"] = PictureCategory,
-                    ["keys"] = new[] { BrightnessKey },
-                };
-
-                var resp = await client.RequestAsync("ssap://settings/getSystemSettings", payload, 8000, CancellationToken.None).ConfigureAwait(false);
-
-                if (resp.TryGetProperty("type", out var t) && t.GetString() == "error")
-                {
-                    HdrEngine.WriteFileLog($"[TV] 读取亮度失败: {resp}");
-                    return null;
-                }
-
-                if (!resp.TryGetProperty("payload", out var p) || !p.TryGetProperty("returnValue", out var rv) || !IsReturnValueTrue(rv))
-                {
-                    HdrEngine.WriteFileLog($"[TV] 读取亮度返回异常: {resp}");
-                    return null;
-                }
-
-                if (!p.TryGetProperty("settings", out var s) || !s.TryGetProperty(BrightnessKey, out var val))
-                    return null;
-
-                if (val.ValueKind == JsonValueKind.Number) return val.GetInt32();
-                if (val.ValueKind == JsonValueKind.String && int.TryParse(val.GetString(), out var n)) return n;
-                return null;
-            }
-            catch (Exception ex)
-            {
-                HdrEngine.WriteFileLog($"[TV] 读取亮度异常: {ex.Message}");
-                return null;
-            }
-            finally
-            {
-                _semaphore.Release();
-            }
-        }
-
-        /// <summary>设置亮度 0-100。</summary>
-        public static async Task<bool> SetBrightnessAsync(int value)
-        {
-            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 请求设置亮度: {value}");
-            
-            if (value < 0 || value > 100)
-            {
-                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 亮度值超出范围: {value} (有效范围 0-100)");
-                return false;
-            }
-
-            await _semaphore.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 获取信号量成功");
-                
-                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                if (client == null)
-                {
-                    HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 错误: 无法获取电视客户端连接");
-                    return false;
-                }
-                
-                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 电视客户端已连接: {client.Connected}");
-
-                var v = value.ToString();
-                var paramsObj = new Dictionary<string, object>
-                {
-                    ["category"] = PictureCategory,
-                    ["settings"] = new Dictionary<string, object> { [BrightnessKey] = v },
-                };
-
-                var btnObj = new Dictionary<string, object> { ["label"] = " ", ["onClick"] = LunaSetSystemSettings, ["params"] = paramsObj };
-                var onCloseObj = new Dictionary<string, object> { ["uri"] = LunaSetSystemSettings, ["params"] = paramsObj };
-                var onFailObj = new Dictionary<string, object> { ["uri"] = LunaSetSystemSettings, ["params"] = paramsObj };
-
-                var alertPayload = new Dictionary<string, object>
-                {
-                    ["message"] = " ",
-                    ["buttons"] = new[] { btnObj },
-                    ["onclose"] = onCloseObj,
-                    ["onfail"] = onFailObj,
-                };
-
-                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 发送亮度设置请求，值={v}");
-                var createAlertJson = System.Text.Json.JsonSerializer.Serialize(alertPayload);
-                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert JSON: {createAlertJson}");
-                
-                var createResp = await client.RequestAsync("ssap://system.notifications/createAlert", alertPayload, 8000, CancellationToken.None).ConfigureAwait(false);
-
-                // 匹配 pc-control-tv: 同时检查 type=error 和 returnValue !== true
-                var createType = createResp.TryGetProperty("type", out var ct) ? ct.GetString() : null;
-                if (createType == "error")
-                {
-                    var errMsg = createResp.TryGetProperty("payload", out var ep) && ep.TryGetProperty("errorText", out var et)
-                        ? et.GetString() ?? "未知错误"
-                        : (createResp.TryGetProperty("error", out var er) ? er.GetString() ?? "未知错误" : createResp.ToString());
-                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert 失败: {errMsg}");
-                    return false;
-                }
-                if (createResp.TryGetProperty("payload", out var cp) && cp.TryGetProperty("returnValue", out var rv2) && !IsReturnValueTrue(rv2))
-                {
-                    var errMsg = cp.TryGetProperty("errorText", out var et2) ? et2.GetString() ?? "未知错误" : "returnValue = false";
-                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] createAlert returnValue=false: {errMsg}");
-                    return false;
-                }
-
-                string? alertId = null;
-                if (createResp.TryGetProperty("payload", out var p) && p.TryGetProperty("alertId", out var aid))
-                {
-                    if (aid.ValueKind == JsonValueKind.String)
-                        alertId = aid.GetString();
-                    else if (aid.ValueKind == JsonValueKind.Number)
-                        alertId = aid.GetInt32().ToString();
-                }
-
-                // closeAlert 使用单向发送（不等待响应），匹配 pc-control-tv 行为
-                // closeAlert 是清理操作，亮度已由 createAlert 的 onclose/onfail 回调设置
-                if (!string.IsNullOrEmpty(alertId))
-                {
-                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 关闭提示框 alertId={alertId}");
-                    var closeAlertJson = $"{{\"alertId\":\"{alertId}\"}}";
-                    await client.SendCustomJsonAsync(closeAlertJson, CancellationToken.None).ConfigureAwait(false);
-                    HdrEngine.WriteFileLog("[TV-BRIGHTNESS] closeAlert 已发送（单向，不等待响应）");
-                }
-
-                // 等待写入生效（匹配 pc-control-tv 的 250ms）
-                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 等待 250ms 让亮度设置生效");
-                await Task.Delay(250, CancellationToken.None).ConfigureAwait(false);
-
-                // 读回验证（内联读取逻辑，避免在已持有信号量时再次获取导致死锁）
-                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 开始读回验证");
-                for (int i = 0; i < 3; i++)
-                {
-                    var readResp = await client.RequestAsync("ssap://settings/getSystemSettings", new Dictionary<string, object> { ["category"] = PictureCategory, ["keys"] = new[] { BrightnessKey } }, 8000, CancellationToken.None).ConfigureAwait(false);
-                    int? readVal = null;
-                    if (readResp.TryGetProperty("payload", out var rp) && rp.TryGetProperty("returnValue", out var rv) && IsReturnValueTrue(rv))
-                    {
-                        if (rp.TryGetProperty("settings", out var s) && s.TryGetProperty(BrightnessKey, out var val))
-                        {
-                            if (val.ValueKind == JsonValueKind.Number) readVal = val.GetInt32();
-                            else if (val.ValueKind == JsonValueKind.String && int.TryParse(val.GetString(), out var n)) readVal = n;
-                        }
-                    }
-                    HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 读回验证第{i+1}次: 期望={value}, 实际={readVal ?? -1}");
-                    if (readVal == value)
-                    {
-                        HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 亮度设置成功: {value}");
-                        return true;
-                    }
-                    await Task.Delay(250, CancellationToken.None).ConfigureAwait(false);
-                }
-
-                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 亮度写入后读回不符: 期望 {value}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 设置亮度异常: {ex.Message}\n{ex.StackTrace}");
-                return false;
-            }
-            finally
-            {
-                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 释放信号量");
-                _semaphore.Release();
-            }
-        }
-
-        /// <summary>步进调整亮度。</summary>
-        public static async Task<(int from, int to)> StepBrightnessAsync(int delta)
-        {
-            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 步进调整亮度: delta={delta}");
-            
-            var current = await GetBrightnessAsync().ConfigureAwait(false);
-            if (current == null)
-            {
-                HdrEngine.WriteFileLog("[TV-BRIGHTNESS] 获取当前亮度失败，无法步进调整");
-                return (-1, -1);
-            }
-            
-            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 当前亮度: {current.Value}");
-            
-            var target = Math.Max(0, Math.Min(100, current.Value + delta));
-            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 目标亮度: {target}");
-            
-            var ok = await SetBrightnessAsync(target).ConfigureAwait(false);
-            HdrEngine.WriteFileLog($"[TV-BRIGHTNESS] 步进调整结果: {(ok ? "成功" : "失败")}");
-            
-            return (current.Value, ok ? target : -1);
-        }
-
-        /// <summary>执行配对（会在电视上弹出确认请求，用户需在电视上确认）。</summary>
+        /// <summary>强制重新配对：忽略已保存的凭证，让电视重新弹出确认框。</summary>
         public static async Task<bool> PairAsync()
         {
-            await _semaphore.WaitAsync().ConfigureAwait(false);
+            string? tvIp;
+            string? localAddr;
+            lock (Sync)
+            {
+                tvIp = _tvIp;
+                localAddr = _localAddr;
+            }
+            if (string.IsNullOrWhiteSpace(tvIp)) return false;
+
+            var client = new LgeTvClient(tvIp, localAddr);
             try
             {
-                if (_tvIp == null) return false;
-                // 重新配对：不使用已保存的 key，强制电视弹出确认请求
-                var client = new LgeTvClient(_tvIp, _localAddr);
-                await client.ConnectAsync().ConfigureAwait(false);
-                // 配对信息已保存在 client-key 中
-                ClientKeyStore.Save(_tvIp, client.ClientKey!);
-                HdrEngine.WriteFileLog($"[TV] 配对成功，已保存 client-key");
-                client.Dispose();
+                await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(client.ClientKey))
+                {
+                    HdrEngine.WriteFileLog("[TV] 配对失败: 电视未返回 client-key");
+                    return false;
+                }
+
+                TvClientKeyStore.Save(client.Host, client.ClientKey);
+                HdrEngine.WriteFileLog("[TV] 配对成功，已保存 client-key");
+
+                lock (Sync)
+                {
+                    _client?.Dispose();
+                    _client = new LgeTvClient(tvIp, localAddr) { ClientKey = client.ClientKey };
+                }
                 return true;
             }
             catch (Exception ex)
@@ -443,52 +195,200 @@ namespace SmartHdrManager
             }
             finally
             {
-                _semaphore.Release();
+                client.Dispose();
             }
         }
 
-        /// <summary>获取电视信息。</summary>
+        /// <summary>获取电视型号 / webOS 版本。</summary>
         public static async Task<string?> GetInfoAsync()
         {
-            await _semaphore.WaitAsync().ConfigureAwait(false);
+            await Gate.WaitAsync().ConfigureAwait(false);
             try
             {
                 var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                if (client == null) return null;
-                return client.TvInfo?.ToString();
-            }
-            catch (Exception ex)
-            {
-                HdrEngine.WriteFileLog($"[TV] 获取信息异常: {ex.Message}");
-                return null;
+                return client?.TvInfo?.ToString();
             }
             finally
             {
-                _semaphore.Release();
+                Gate.Release();
             }
         }
 
-        /// <summary>判断 returnValue 是否为真（支持 JSON 布尔 true 或数字 1）。</summary>
-        private static bool IsReturnValueTrue(JsonElement elem)
+        public static void Shutdown()
         {
-            if (elem.ValueKind == JsonValueKind.True) return true;
-            if (elem.ValueKind == JsonValueKind.Number && elem.GetInt32() == 1) return true;
-            if (elem.ValueKind == JsonValueKind.String && int.TryParse(elem.GetString(), out var n) && n == 1) return true;
+            lock (Sync)
+            {
+                _client?.Dispose();
+                _client = null;
+                _tvIp = null;
+                _localAddr = null;
+            }
+        }
+
+        private static async Task<LgeTvClient?> EnsureConnectedAsync(CancellationToken ct)
+        {
+            LgeTvClient? client;
+            lock (Sync)
+            {
+                client = _client;
+            }
+            if (client == null) return null;
+            if (client.Connected) return client;
+
+            try
+            {
+                await client.ConnectAsync(ct).ConfigureAwait(false);
+                PersistClientKey(client);
+                return client;
+            }
+            catch (Exception ex)
+            {
+                HdrEngine.WriteFileLog($"[TV] 连接电视失败: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static void PersistClientKey(LgeTvClient client)
+        {
+            var key = client.ClientKey;
+            if (string.IsNullOrEmpty(key)) return;
+            if (TvClientKeyStore.Load(client.Host) == key) return;
+
+            TvClientKeyStore.Save(client.Host, key);
+            HdrEngine.WriteFileLog("[TV] 已保存配对凭证，之后启动不再弹出配对确认");
+        }
+
+        private static async Task<string> CreateBrightnessAlertAsync(LgeTvClient client, int value, CancellationToken ct)
+        {
+            var lunaParams = new Dictionary<string, object>
+            {
+                ["category"] = PictureCategory,
+                ["settings"] = new Dictionary<string, object> { [BrightnessKey] = value.ToString() },
+            };
+            var callback = new Dictionary<string, object> { ["uri"] = LunaSetSystemSettings, ["params"] = lunaParams };
+
+            var alert = new Dictionary<string, object>
+            {
+                ["message"] = " ",
+                ["buttons"] = new object[]
+                {
+                    new Dictionary<string, object>
+                    {
+                        ["label"] = " ",
+                        ["onClick"] = LunaSetSystemSettings,
+                        ["params"] = lunaParams,
+                    },
+                },
+                ["onclose"] = callback,
+                ["onfail"] = callback,
+            };
+
+            var response = await client.RequestAsync(CreateAlertUri, alert, SettingRequestTimeoutMs, ct).ConfigureAwait(false);
+            if (!IsSuccessfulResponse(response))
+                throw new InvalidOperationException($"createAlert 失败: {DescribeFailure(response)}");
+
+            var alertId = ReadAlertId(response);
+            if (string.IsNullOrEmpty(alertId))
+                throw new InvalidOperationException("createAlert 未返回 alertId，无法关闭提示框");
+
+            return alertId;
+        }
+
+        /// <summary>
+        /// closeAlert 必须是完整的 SSAP 请求（带 id/uri/payload）电视才会执行；
+        /// 关闭提示框时系统触发 onclose -> setSystemSettings，弹窗随之消失。
+        /// </summary>
+        private static async Task CloseAlertAsync(LgeTvClient client, string alertId, CancellationToken ct)
+        {
+            var payload = new Dictionary<string, object> { ["alertId"] = alertId };
+            try
+            {
+                var response = await client.RequestAsync(CloseAlertUri, payload, AlertRequestTimeoutMs, ct).ConfigureAwait(false);
+                if (!IsSuccessfulResponse(response))
+                    HdrEngine.WriteFileLog($"[TV] closeAlert 返回异常: {DescribeFailure(response)}");
+            }
+            catch (Exception ex)
+            {
+                HdrEngine.WriteFileLog($"[TV] closeAlert 未确认（{ex.Message}），亮度仍由关闭回调写入");
+            }
+        }
+
+        private static async Task<int?> ReadBrightnessAsync(LgeTvClient client, CancellationToken ct)
+        {
+            var payload = new Dictionary<string, object>
+            {
+                ["category"] = PictureCategory,
+                ["keys"] = new[] { BrightnessKey },
+            };
+
+            var response = await client.RequestAsync(GetSystemSettingsUri, payload, ReadRequestTimeoutMs, ct).ConfigureAwait(false);
+            if (!IsSuccessfulResponse(response)) return null;
+            if (!response.TryGetProperty("payload", out var body) || body.ValueKind != JsonValueKind.Object) return null;
+            if (!body.TryGetProperty("settings", out var settings) || settings.ValueKind != JsonValueKind.Object) return null;
+            if (!settings.TryGetProperty(BrightnessKey, out var value)) return null;
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.Number => value.GetInt32(),
+                JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
+                _ => null,
+            };
+        }
+
+        private static async Task<bool> VerifyBrightnessAsync(LgeTvClient client, int expected, CancellationToken ct)
+        {
+            for (var attempt = 1; attempt <= ReadBackAttempts; attempt++)
+            {
+                var current = await ReadBrightnessAsync(client, ct).ConfigureAwait(false);
+                if (current == expected) return true;
+
+                HdrEngine.WriteFileLog($"[TV] 读回验证 {attempt}/{ReadBackAttempts}: 期望 {expected}，实际 {(current.HasValue ? current.Value.ToString() : "读取失败")}");
+                if (attempt < ReadBackAttempts)
+                    await Task.Delay(WriteSettleDelayMs, ct).ConfigureAwait(false);
+            }
             return false;
         }
 
-        /// <summary>停止连接。</summary>
-        public static void Shutdown()
+        private static string? ReadAlertId(JsonElement response)
         {
-            lock (_lock)
+            if (!response.TryGetProperty("payload", out var body) || body.ValueKind != JsonValueKind.Object) return null;
+            if (!body.TryGetProperty("alertId", out var alertId)) return null;
+
+            return alertId.ValueKind switch
             {
-                _connected = false;
-                if (_client != null)
-                {
-                    _client.Dispose();
-                    _client = null;
-                }
-            }
+                JsonValueKind.String => alertId.GetString(),
+                JsonValueKind.Number => alertId.GetInt32().ToString(),
+                _ => null,
+            };
+        }
+
+        private static bool IsSuccessfulResponse(JsonElement response)
+        {
+            if (GetString(response, "type") == "error") return false;
+            if (!response.TryGetProperty("payload", out var body) || body.ValueKind != JsonValueKind.Object) return false;
+            if (!body.TryGetProperty("returnValue", out var returnValue)) return true;
+
+            return returnValue.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.Number => returnValue.GetInt32() != 0,
+                JsonValueKind.String => returnValue.GetString() is "true" or "1",
+                _ => false,
+            };
+        }
+
+        private static string DescribeFailure(JsonElement response)
+        {
+            var type = GetString(response, "type");
+            var errorText = LgeTvClient.ExtractErrorText(response);
+            return string.IsNullOrEmpty(type) ? response.ToString() : $"[{type}] {errorText}";
+        }
+
+        private static string? GetString(JsonElement element, string property)
+        {
+            if (element.ValueKind != JsonValueKind.Object) return null;
+            if (!element.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String) return null;
+            return value.GetString();
         }
     }
 }
