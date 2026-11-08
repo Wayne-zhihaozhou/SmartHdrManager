@@ -119,11 +119,13 @@ namespace SmartHdrManager
 
             _tabs.AddTab("游戏");
             _tabs.AddTab("设置");
+            _tabs.AddTab("电视");
             _tabs.AddTab("日志");
             root.Controls.Add(_tabs, 0, 1);
 
             AddPage(BuildGamesPage());
             AddPage(BuildSettingsPage());
+            AddPage(BuildTvPage());
             AddPage(BuildLogPage());
             root.Controls.Add(_content, 0, 2);
 
@@ -469,6 +471,334 @@ namespace SmartHdrManager
                 descLabel.SetBounds(S(18), top + titleHeight, textWidth2, descHeight);
             };
             return row;
+        }
+
+        private Control BuildTvPage()
+        {
+            var page = new SmoothScrollTable { ColumnCount = 1, Margin = new Padding(0), AutoScroll = true, Padding = new Padding(0, 0, SystemInformation.VerticalScrollBarWidth, 0) };
+            page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            Theme.UseDarkScrollbars(page);
+
+            int Add(Control c, int height)
+            {
+                page.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+                int row = page.RowStyles.Count - 1;
+                page.Controls.Add(c, 0, row);
+                return row;
+            }
+            void Section(string title, string description, bool first = false)
+            {
+                Add(SectionHeader(title), first ? 34 : 46);
+                Add(SectionDescription(description), 30);
+            }
+
+            // ---- TV Connection ----
+            Section("电视连接", "LG webOS 电视的 SSAP 协议配置。");
+
+            var tvIpLabel = new Label { UseMnemonic = false, Text = "电视 IP 地址", Font = Theme.Semibold, ForeColor = Theme.Text, AutoSize = false, AutoEllipsis = true };
+            var tvIpBox = new TextBox { BorderStyle = BorderStyle.FixedSingle, Font = Theme.Body, Width = 200 };
+            tvIpBox.PlaceholderText = "192.168.1.4";
+            var tvIpRow = SettingRow("电视 IP", "电视的局域网 IP 地址", tvIpBox);
+            tvIpLabel.SetBounds(18, 10, tvIpRow.ClientSize.Width - 18 - tvIpBox.Width - 34, 22);
+            tvIpRow.Controls.Add(tvIpLabel);
+            Add(tvIpRow, 68);
+
+            var localAddrLabel = new Label { UseMnemonic = false, Text = "本机源地址", Font = Theme.Semibold, ForeColor = Theme.Text, AutoSize = false, AutoEllipsis = true };
+            var localAddrBox = new TextBox { BorderStyle = BorderStyle.FixedSingle, Font = Theme.Body, Width = 200 };
+            localAddrBox.PlaceholderText = "192.168.1.5";
+            var localAddrRow = SettingRow("源地址", "本机用于连接的 IP（绕过 VPN 劫持）", localAddrBox);
+            localAddrLabel.SetBounds(18, 10, localAddrRow.ClientSize.Width - 18 - localAddrBox.Width - 34, 22);
+            localAddrRow.Controls.Add(localAddrLabel);
+            Add(localAddrRow, 68);
+
+            var _tvEnabledSwitch = new ToggleSwitch();
+            var tvEnabledRow = SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _tvEnabledSwitch);
+            Add(tvEnabledRow, 68);
+
+            var _tvStepBox = new NumericUpDown { Minimum = 1, Maximum = 50, Value = 5, Width = 80, Font = Theme.Body };
+            var tvStepRow = SettingRow("步进值", "快捷键步进调整的亮度步长", _tvStepBox);
+            Add(tvStepRow, 68);
+
+            var testBtn = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "测试连接", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
+            var pairBtn = new ModernButton { Glyph = Theme.GlyphLink, Text = "重新配对", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
+            var statusLabel = new Label { UseMnemonic = false, Text = "未测试", Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Left, AutoSize = true };
+            var connPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
+            connPanel.Controls.Add(testBtn);
+            connPanel.Controls.Add(pairBtn);
+            connPanel.Controls.Add(statusLabel);
+            Add(connPanel, 52);
+
+            // ---- Brightness Rules ----
+            Section("亮度规则", "按前台进程/标题匹配亮度值，自动切换。");
+
+            var rulesList = new ListBox { Font = Theme.Body, BorderStyle = BorderStyle.FixedSingle, Width = 600, Height = 200 };
+            var addRuleBtn = new ModernButton { Glyph = Theme.GlyphPlus, Text = "添加规则", AutoSize = true, Margin = new Padding(0, 0, 4, 0) };
+            var editRuleBtn = new ModernButton { Glyph = Theme.GlyphEdit, Text = "编辑", AutoSize = true, Margin = new Padding(0, 0, 4, 0) };
+            var delRuleBtn = new ModernButton { Glyph = Theme.GlyphDelete, Text = "删除", AutoSize = true, Margin = new Padding(0, 0, 4, 0) };
+            var upRuleBtn = new ModernButton { Glyph = Theme.GlyphUp, Text = "↑", AutoSize = true, Margin = new Padding(0, 0, 4, 0) };
+            var downRuleBtn = new ModernButton { Glyph = Theme.GlyphDown, Text = "↓", AutoSize = true, Margin = new Padding(0, 0, 4, 0) };
+            var rulesPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
+            rulesPanel.Controls.Add(rulesList);
+            rulesPanel.Controls.Add(addRuleBtn);
+            rulesPanel.Controls.Add(editRuleBtn);
+            rulesPanel.Controls.Add(delRuleBtn);
+            rulesPanel.Controls.Add(upRuleBtn);
+            rulesPanel.Controls.Add(downRuleBtn);
+            Add(rulesPanel, 240);
+
+            // ---- OSD ----
+            Section("OSD 提示", "亮度变化时屏幕右上角的显示样式。");
+
+            var _osdTitleBox = new TextBox { BorderStyle = BorderStyle.FixedSingle, Font = Theme.Body, Width = 200 };
+            _osdTitleBox.PlaceholderText = "亮度";
+            var osdTitleRow = SettingRow("提示标题", "OSD 显示的标题文字", _osdTitleBox);
+            Add(osdTitleRow, 68);
+
+            var _osdFontSize = new NumericUpDown { Minimum = 8, Maximum = 48, Value = 18, Width = 80, Font = Theme.Body };
+            var osdFontRow = SettingRow("字体大小", "OSD 文字的字体大小", _osdFontSize);
+            Add(osdFontRow, 68);
+
+            var _osdDisplayMs = new NumericUpDown { Minimum = 500, Maximum = 5000, Value = 2000, Increment = 500, Width = 100, Font = Theme.Body };
+            var osdDisplayRow = SettingRow("显示时长", "OSD 显示后自动消失的时间", _osdDisplayMs);
+            Add(osdDisplayRow, 68);
+
+            var _osdBgColor = new ColorPickerButton();
+            var osdBgRow = SettingRow("背景颜色", "OSD 提示框背景色", _osdBgColor);
+            Add(osdBgRow, 68);
+
+            var _osdFgColor = new ColorPickerButton();
+            var osdFgRow = SettingRow("文字颜色", "OSD 提示文字颜色", _osdFgColor);
+            Add(osdFgRow, 68);
+
+            // ---- Auto Switch ----
+            Section("自动切换", "根据前台窗口自动调节电视亮度。");
+
+            var _autoSwitchEnabled = new ToggleSwitch();
+            var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
+            Add(autoSwitchRow, 68);
+
+            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            // ---- Wire events ----
+            testBtn.Click += async (_, _) =>
+            {
+                statusLabel.Text = "测试中...";
+                statusLabel.ForeColor = Theme.Muted;
+                try
+                {
+                    var brightness = await TvCli.GetBrightnessAsync();
+                    if (brightness != null)
+                    {
+                        statusLabel.Text = $"已连接！当前亮度: {brightness}";
+                        statusLabel.ForeColor = Color.Green;
+                    }
+                    else
+                    {
+                        statusLabel.Text = "连接失败";
+                        statusLabel.ForeColor = Color.Red;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = $"失败: {ex.Message}";
+                    statusLabel.ForeColor = Color.Red;
+                }
+            };
+
+            pairBtn.Click += async (_, _) =>
+            {
+                statusLabel.Text = "配对中...";
+                statusLabel.ForeColor = Theme.Muted;
+                var ok = await TvCli.PairAsync();
+                statusLabel.Text = ok ? "配对成功" : "配对失败";
+                statusLabel.ForeColor = ok ? Color.Green : Color.Red;
+            };
+
+            addRuleBtn.Click += (_, _) => OnAddBrightnessRule(rulesList);
+            editRuleBtn.Click += (_, _) => OnEditBrightnessRule(rulesList);
+            delRuleBtn.Click += (_, _) => OnDeleteBrightnessRule(rulesList);
+            upRuleBtn.Click += (_, _) => OnMoveRuleUp(rulesList);
+            downRuleBtn.Click += (_, _) => OnMoveRuleDown(rulesList);
+
+            // Control change events
+            tvIpBox.TextChanged += (_, _) => SaveTvPageSettings();
+            localAddrBox.TextChanged += (_, _) => SaveTvPageSettings();
+            _tvEnabledSwitch.CheckedChanged += (_, _) => SaveTvPageSettings();
+            _tvStepBox.ValueChanged += (_, _) => SaveTvPageSettings();
+            _osdTitleBox.TextChanged += (_, _) => SaveTvPageSettings();
+            _osdFontSize.ValueChanged += (_, _) => SaveTvPageSettings();
+            _osdDisplayMs.ValueChanged += (_, _) => SaveTvPageSettings();
+            _osdBgColor.Click += (_, _) =>
+            {
+                using var dlg = new ColorDialog { Color = _osdBgColor.SelectedColor };
+                if (dlg.ShowDialog() == DialogResult.OK)
+                {
+                    _osdBgColor.BackColor = dlg.Color;
+                    _osdBgColor.Text = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
+                    SaveTvPageSettings();
+                }
+            };
+            _osdFgColor.Click += (_, _) =>
+            {
+                using var dlg = new ColorDialog { Color = _osdFgColor.SelectedColor };
+                if (dlg.ShowDialog() == DialogResult.OK)
+                {
+                    _osdFgColor.BackColor = dlg.Color;
+                    _osdFgColor.Text = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
+                    SaveTvPageSettings();
+                }
+            };
+            _autoSwitchEnabled.CheckedChanged += (_, _) => SaveTvPageSettings();
+
+            // Store controls for save/load
+            _tvPageControls = (tvIpBox, localAddrBox, _tvEnabledSwitch, _tvStepBox, _osdTitleBox, _osdFontSize, _osdDisplayMs, _osdBgColor, _osdFgColor, rulesList, _autoSwitchEnabled);
+
+            // Load saved TV settings into controls
+            LoadTvPageControls();
+
+            return page;
+        }
+
+        // TV page controls for save/load
+        private (TextBox tvIp, TextBox localAddr, ToggleSwitch enabled, NumericUpDown step,
+                 TextBox osdTitle, NumericUpDown osdFontSize, NumericUpDown osdDisplayMs,
+                 ColorPickerButton osdBg, ColorPickerButton osdFg, ListBox rules, ToggleSwitch autoSwitch)
+            _tvPageControls;
+
+        private void OnAddBrightnessRule(ListBox rulesList)
+        {
+            var rule = new BrightnessRule { Name = "新规则", Brightness = 50, Processes = new List<string>(), TitleKeywords = new List<string>(), IgnoreProcesses = new List<string>() };
+            var result = ShowRuleDialog(rule);
+            if (result == DialogResult.OK)
+            {
+                TvConfig.Rules.Add(rule);
+                RefreshRulesList(rulesList);
+                SaveTvConfig();
+            }
+        }
+
+        private void OnEditBrightnessRule(ListBox rulesList)
+        {
+            if (rulesList.SelectedIndex < 0) return;
+            var rule = TvConfig.Rules[rulesList.SelectedIndex];
+            var result = ShowRuleDialog(rule);
+            if (result == DialogResult.OK)
+            {
+                RefreshRulesList(rulesList);
+                SaveTvConfig();
+            }
+        }
+
+        private void OnDeleteBrightnessRule(ListBox rulesList)
+        {
+            if (rulesList.SelectedIndex < 0) return;
+            TvConfig.Rules.RemoveAt(rulesList.SelectedIndex);
+            RefreshRulesList(rulesList);
+            SaveTvConfig();
+        }
+
+        private void OnMoveRuleUp(ListBox rulesList)
+        {
+            if (rulesList.SelectedIndex <= 0) return;
+            var idx = rulesList.SelectedIndex;
+            var item = TvConfig.Rules[idx];
+            TvConfig.Rules.RemoveAt(idx);
+            TvConfig.Rules.Insert(idx - 1, item);
+            RefreshRulesList(rulesList);
+            rulesList.SelectedIndex = idx - 1;
+            SaveTvConfig();
+        }
+
+        private void OnMoveRuleDown(ListBox rulesList)
+        {
+            if (rulesList.SelectedIndex < 0 || rulesList.SelectedIndex >= TvConfig.Rules.Count - 1) return;
+            var idx = rulesList.SelectedIndex;
+            var item = TvConfig.Rules[idx];
+            TvConfig.Rules.RemoveAt(idx);
+            TvConfig.Rules.Insert(idx + 1, item);
+            RefreshRulesList(rulesList);
+            rulesList.SelectedIndex = idx + 1;
+            SaveTvConfig();
+        }
+
+        private void RefreshRulesList(ListBox rulesList)
+        {
+            rulesList.Items.Clear();
+            foreach (var rule in TvConfig.Rules)
+            {
+                var summary = rule.Name;
+                if (!rule.IsFallback()) summary += $" – {rule.ConditionSummary()}";
+                else summary += " – 兜底";
+                summary += $" (亮度: {rule.Brightness})";
+                rulesList.Items.Add(summary);
+            }
+        }
+
+        private DialogResult ShowRuleDialog(BrightnessRule rule)
+        {
+            using var dlg = new RuleDialog(rule);
+            return dlg.ShowDialog(this);
+        }
+
+        private void SaveTvConfig()
+        {
+            var config = _engine.Read(c => c);
+            if (config.Brightness == null) config.Brightness = new BrightnessConfig();
+            var bc = config.Brightness;
+            bc.Rules = TvConfig.Rules;
+            _engine.Update(c => c.Brightness = bc);
+        }
+
+        private void LoadTvConfig()
+        {
+            var config = _engine.Read(c => c);
+            if (config.Brightness != null)
+            {
+                TvConfig.LoadFrom(config);
+            }
+            else
+            {
+                TvConfig.LoadFrom(new AppConfig());
+            }
+        }
+
+        private void SaveTvPageSettings()
+        {
+            var config = _engine.Read(c => c);
+            if (config.Brightness == null) config.Brightness = new BrightnessConfig();
+            var bc = config.Brightness;
+            bc.TvIp = _tvPageControls.tvIp.Text ?? TvConfig.TvIp;
+            bc.LocalAddr = _tvPageControls.localAddr.Text ?? TvConfig.LocalAddr;
+            bc.Enabled = _tvPageControls.enabled.Checked;
+            bc.HotkeyStep = (int)_tvPageControls.step.Value;
+            bc.Osd.Title = _tvPageControls.osdTitle.Text ?? "亮度";
+            bc.Osd.FontSize = (int)_tvPageControls.osdFontSize.Value;
+            bc.Osd.DisplayMs = (int)_tvPageControls.osdDisplayMs.Value;
+            bc.Osd.Background = _tvPageControls.osdBg.Text;
+            bc.Osd.Foreground = _tvPageControls.osdFg.Text;
+            bc.AutoSwitchEnabled = _tvPageControls.autoSwitch.Checked;
+            _engine.Update(c => c.Brightness = bc);
+        }
+
+        private void LoadTvPageControls()
+        {
+            _loadingSettings = true;
+            try
+            {
+                _tvPageControls.tvIp.Text = TvConfig.TvIp;
+                _tvPageControls.localAddr.Text = TvConfig.LocalAddr;
+                _tvPageControls.enabled.Checked = TvConfig.Enabled;
+                _tvPageControls.step.Value = TvConfig.HotkeyStep;
+                _tvPageControls.osdTitle.Text = TvConfig.Osd.Title;
+                _tvPageControls.osdFontSize.Value = TvConfig.Osd.FontSize;
+                _tvPageControls.osdDisplayMs.Value = TvConfig.Osd.DisplayMs;
+                _tvPageControls.osdBg.BackColor = TvConfig.Osd.BackgroundColor;
+                _tvPageControls.osdBg.Text = $"#{TvConfig.Osd.BackgroundColor.R:X2}{TvConfig.Osd.BackgroundColor.G:X2}{TvConfig.Osd.BackgroundColor.B:X2}";
+                _tvPageControls.osdFg.BackColor = TvConfig.Osd.ForegroundColor;
+                _tvPageControls.osdFg.Text = $"#{TvConfig.Osd.ForegroundColor.R:X2}{TvConfig.Osd.ForegroundColor.G:X2}{TvConfig.Osd.ForegroundColor.B:X2}";
+                RefreshRulesList(_tvPageControls.rules);
+            }
+            finally { _loadingSettings = false; }
         }
 
         private Control BuildLogPage()
@@ -1250,6 +1580,9 @@ namespace SmartHdrManager
                         : !onlyPrimary || monitor.IsPrimary);
                 }
                 UpdateNeverHdrDescription();
+
+                // TV settings
+                LoadTvConfig();
             }
             finally { _loadingSettings = false; }
         }

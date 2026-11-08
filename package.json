@@ -1,0 +1,9 @@
+{
+  "name": "smart-hdr-manager-tv",
+  "version": "1.0.0",
+  "description": "LG webOS TV brightness control for Smart HDR Manager",
+  "private": true,
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

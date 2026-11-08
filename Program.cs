@@ -114,7 +114,7 @@ namespace SmartHdrManager
 
             try
             {
-                _hotkeys = new GlobalHotkeys(HotkeySettings.ModifierFlags(mode), _engine.HotkeyAddCurrent, _engine.HotkeyIgnoreCurrent, OnOverrideHotkey);
+                _hotkeys = new GlobalHotkeys(HotkeySettings.ModifierFlags(mode), _engine.HotkeyAddCurrent, _engine.HotkeyIgnoreCurrent, OnOverrideHotkey, OnBrightnessHotkey);
                 _engine.PollHotkeys = !_hotkeys.Registered;
                 _engine.PollOverrideHotkey = !_hotkeys.OverrideRegistered;
                 _engine.Log("INFO", $"快捷键：{Shortcut('H')} 对当前前台游戏使用 HDR，{Shortcut('I')} 从不使用 HDR " +
@@ -123,6 +123,10 @@ namespace SmartHdrManager
                     _engine.Log("INFO", $"{Shortcut('H')} / {Shortcut('I')} 正被其他程序占用 – 改用键盘轮询。");
                 if (!_hotkeys.OverrideRegistered)
                     _engine.Log("INFO", $"{Shortcut('O')} 正被其他程序占用 – 改用键盘轮询。");
+                if (_hotkeys.TvHotkeysRegistered)
+                    _engine.Log("INFO", "电视亮度快捷键：Alt+↑/↓ 步进，Alt+0-9 直接设亮度。");
+                else
+                    _engine.Log("INFO", "电视亮度快捷键被其他程序占用。");
             }
             catch (Exception ex)
             {
@@ -156,6 +160,39 @@ namespace SmartHdrManager
                 _ => "已恢复自动 HDR 切换。"
             });
             if (_form != null && !_form.IsDisposed && _form.Visible) _form.RefreshView();
+        }
+
+        /// <summary>TV 亮度快捷键回调：wParam 为亮度值（0-90）或 ±1（步进）。</summary>
+        private async void OnBrightnessHotkey(int wParam)
+        {
+            // Check if TV is enabled
+            if (!TvConfig.Enabled) return;
+
+            int brightness;
+            string title;
+
+            if (wParam == 1)
+            {
+                var (from, to) = await TvCli.StepBrightnessAsync(TvConfig.HotkeyStep);
+                if (to < 0) return;
+                brightness = to;
+                title = "亮度 ↑";
+            }
+            else if (wParam == -1)
+            {
+                var (from, to) = await TvCli.StepBrightnessAsync(-TvConfig.HotkeyStep);
+                if (to < 0) return;
+                brightness = to;
+                title = "亮度 ↓";
+            }
+            else
+            {
+                brightness = wParam;
+                title = $"亮度 {brightness}";
+            }
+
+            // Show OSD
+            BrightnessOsd.Show(brightness, title);
         }
 
         // No notification when the window goes to the tray (2.6): the tray icon itself shows that the app still runs

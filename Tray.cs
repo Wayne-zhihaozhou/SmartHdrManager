@@ -250,16 +250,19 @@ namespace SmartHdrManager
         private readonly Action _onAdd;
         private readonly Action _onIgnore;
         private readonly Action _onOverride;
+        private readonly Action<int>? _onBrightnessHotkey; // TV brightness hotkey callback
 
         public bool Registered { get; }           // H and I shortcuts
         public bool OverrideRegistered { get; }   // O shortcut (registered on its own, so a conflict only affects it)
+        public bool TvHotkeysRegistered { get; private set; }   // TV brightness shortcuts
 
         /// <param name="modifiers">HotkeySettings.ModifierFlags(...): Win+Alt (default) or Ctrl+Alt</param>
-        public GlobalHotkeys(uint modifiers, Action onAdd, Action onIgnore, Action onOverride)
+        public GlobalHotkeys(uint modifiers, Action onAdd, Action onIgnore, Action onOverride, Action<int>? onBrightnessHotkey = null)
         {
             _onAdd = onAdd;
             _onIgnore = onIgnore;
             _onOverride = onOverride;
+            _onBrightnessHotkey = onBrightnessHotkey;
 
             CreateHandle(new CreateParams { Parent = HWND_MESSAGE });
 
@@ -274,6 +277,26 @@ namespace SmartHdrManager
                 if (add) UnregisterHotKey(Handle, ID_ADD);
                 if (ignore) UnregisterHotKey(Handle, ID_IGNORE);
             }
+
+            // Register TV brightness hotkeys: Alt+↑/↓ + Alt+0-9
+            if (_onBrightnessHotkey != null)
+            {
+                TvHotkeysRegistered = RegisterTvHotkeys(modifiers);
+            }
+        }
+
+        private bool RegisterTvHotkeys(uint modifiers)
+        {
+            bool allOk = true;
+            // Alt+↑/↓ for step
+            allOk &= RegisterHotKey(Handle, 2001, modifiers | MOD_NOREPEAT, 0x26); // VK_UP
+            allOk &= RegisterHotKey(Handle, 2002, modifiers | MOD_NOREPEAT, 0x28); // VK_DOWN
+            // Alt+0-9 for direct brightness (0=100, 1=10, 2=20, ..., 9=90)
+            for (int i = 0; i <= 9; i++)
+            {
+                RegisterHotKey(Handle, 2010 + i, modifiers | MOD_NOREPEAT, (uint)(0x30 + i));
+            }
+            return allOk;
         }
 
         protected override void WndProc(ref Message m)
@@ -284,6 +307,10 @@ namespace SmartHdrManager
                 if (id == ID_ADD) _onAdd();
                 else if (id == ID_IGNORE) _onIgnore();
                 else if (id == ID_OVERRIDE) _onOverride();
+                // TV brightness hotkeys
+                else if (id == 2001) _onBrightnessHotkey?.Invoke(1);   // step up
+                else if (id == 2002) _onBrightnessHotkey?.Invoke(-1);  // step down
+                else if (id >= 2010 && id <= 2019) _onBrightnessHotkey?.Invoke((id - 2010) * 10); // direct set
                 return;
             }
             base.WndProc(ref m);
@@ -298,6 +325,12 @@ namespace SmartHdrManager
                 UnregisterHotKey(Handle, ID_IGNORE);
             }
             if (OverrideRegistered) UnregisterHotKey(Handle, ID_OVERRIDE);
+            if (TvHotkeysRegistered)
+            {
+                UnregisterHotKey(Handle, 2001);
+                UnregisterHotKey(Handle, 2002);
+                for (int i = 0; i <= 9; i++) UnregisterHotKey(Handle, 2010 + i);
+            }
             DestroyHandle();
         }
     }

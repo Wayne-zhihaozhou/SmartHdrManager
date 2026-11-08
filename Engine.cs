@@ -414,6 +414,18 @@ namespace SmartHdrManager
         {
             Log("INFO", "Smart HDR Manager 已启动 – 监控中。");
 
+            // TV brightness control initialization
+            var tvIp = Config.Brightness?.TvIp ?? "192.168.1.4";
+            var localAddr = Config.Brightness?.LocalAddr ?? "192.168.1.5";
+            TvCli.Init(tvIp, localAddr);
+            if (TvConfig.Enabled)
+            {
+                if (TvConfig.AutoSwitchEnabled)
+                {
+                    BrightnessAutoSwitcher.Start();
+                }
+            }
+
             // Settings › General › Scan drives automatically (manual "Scan games" still works any time)
             if (IsDriveScanDue(atStartup: true)) StartAutoScan(StartupScanDelayMs);
             _nextScanDueCheckMs = Now + ScanDueCheckMs;   // later checks: once an hour on the engine thread (Tick)
@@ -710,7 +722,12 @@ namespace SmartHdrManager
             _wake.Set();
             bool finished = true;
             try { finished = _thread == null || _thread.Join(2000); } catch { }
-            if (finished) RestoreSdrOnExit();   // never while the engine thread might still switch
+            if (finished)
+            {
+                TvCli.Shutdown();
+                BrightnessAutoSwitcher.Shutdown();
+                RestoreSdrOnExit();   // never while the engine thread might still switch
+            }
             lock (Sync) Save();
         }
 

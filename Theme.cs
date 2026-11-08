@@ -56,6 +56,12 @@ namespace SmartHdrManager
         public const string GlyphDocument = "";
         public const string GlyphFolder = "";
         public const string GlyphSettings = "\uE713";
+        public const string GlyphLink = "\uE71B";
+        public const string GlyphPlus = "\uE106";
+        public const string GlyphEdit = "\uE70E";
+        public const string GlyphDelete = "\uE7F6";
+        public const string GlyphUp = "\uE710";
+        public const string GlyphDown = "\uE711";
 
         private static HashSet<string> LoadFamilies()
         {
