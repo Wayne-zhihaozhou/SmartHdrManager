@@ -32,7 +32,6 @@ namespace SmartHdrManager
         private readonly StatusCard _statusCard = new() { Radius = 12, Dock = DockStyle.Fill, Margin = new Padding(0) };
         private readonly Label _hdrLabel = new() { AutoSize = true, Font = Theme.Title, ForeColor = Theme.Text };
         private readonly Label _detailLabel = new() { AutoSize = false, AutoEllipsis = true, Font = Theme.Body, ForeColor = Theme.Muted };
-        private readonly ModernButton _pauseButton = new() { Glyph = Theme.GlyphPause, Text = "暂停自动化" };
 
         // Tabs
         private readonly SegmentedTabs _tabs = new() { Size = new Size(330, 40), Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = new Padding(0, 16, 0, 0) };
@@ -79,6 +78,8 @@ namespace SmartHdrManager
 
         // Settings page parts that change at runtime
         private SmoothScrollTable? _settingsPage;
+        private ToggleSwitch? _swPauseAutomation;
+        private ModernButton? _btnResume;
 
         private bool _reallyExit;
         private int _logCursor;
@@ -176,23 +177,16 @@ namespace SmartHdrManager
             _statusCard.Size = new Size(CardWidth, h);
             _statusCard.IndicatorX = 28;
 
-            // Initial bounds (96-DPI pixels); the real positions are set in LayoutStatusCard on every resize,
-            // because edge anchoring combined with DPI scaling can stretch the label over the buttons.
+            // Initial bounds (96-DPI pixels); the real positions are set in LayoutStatusCard on every resize.
             _hdrLabel.Location = new Point(52, 18);
-            _pauseButton.SetBounds(CardWidth - 18 - 196, (h - 34) / 2, 196, 34);
-            _detailLabel.SetBounds(54, 60, _pauseButton.Left - 16 - 54, 22);
+            _detailLabel.SetBounds(54, 60, CardWidth - 54 - 72, 22);
 
-            // Transparent so the animated HDR sweep on the card shows behind the text and around the buttons
+            // Transparent so the animated HDR sweep on the card shows behind the text
             _hdrLabel.BackColor = Color.Transparent;
             _detailLabel.BackColor = Color.Transparent;
-            _pauseButton.BackColor = Color.Transparent;
 
-            // Button first = on top of the labels (minimize / close in the title bar hide the window to the tray)
-            _statusCard.Controls.Add(_pauseButton);
             _statusCard.Controls.Add(_hdrLabel);
             _statusCard.Controls.Add(_detailLabel);
-            // Layout (not Resize): runs after WinForms has finished DPI-scaling the child controls,
-            // so the positions set here are not scaled a second time.
             _statusCard.Layout += (_, _) => LayoutStatusCard();
         }
 
@@ -202,14 +196,12 @@ namespace SmartHdrManager
             int w = _statusCard.ClientSize.Width;
             int h = _statusCard.ClientSize.Height;
 
-            _pauseButton.Location = new Point(w - S(18) - _pauseButton.Width, (h - _pauseButton.Height) / 2);
-
             // Title + detail as one block, vertically centred
             int detailHeight = _detailLabel.PreferredHeight;
             int top = Math.Max(0, (h - _hdrLabel.Height - S(2) - detailHeight) / 2);
             int left = S(52);
             _hdrLabel.Location = new Point(left, top);
-            _detailLabel.SetBounds(left + S(2), _hdrLabel.Bottom + S(2), Math.Max(0, _pauseButton.Left - S(16) - left), detailHeight);
+            _detailLabel.SetBounds(left + S(2), _hdrLabel.Bottom + S(2), w - S(54) - S(72), detailHeight);
         }
 
         private void AddPage(Control page)
@@ -339,6 +331,18 @@ namespace SmartHdrManager
 
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
+            _swPauseAutomation = new ToggleSwitch();
+            _btnResume = new ModernButton { Text = "恢复", AutoSize = true, Visible = false };
+            _btnResume.Click += (_, _) =>
+            {
+                _setOverride(HdrOverride.None, null);
+                _swPauseAutomation.Checked = false;
+                RefreshView();
+            };
+            var pauseRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(0) };
+            pauseRow.Controls.Add(_swPauseAutomation);
+            pauseRow.Controls.Add(_btnResume);
+            page.AddRow(SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", pauseRow), 68);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
             var scanRow = SettingRow("查找新游戏", "在磁盘上搜索新安装的游戏。", _scanInterval);
             _scanIntervalDesc = RowDescription(scanRow);
@@ -627,13 +631,6 @@ namespace SmartHdrManager
         private void WireEvents()
         {
             _tabs.SelectedIndexChanged += (_, _) => ShowPage(_tabs.SelectedIndex);
-            _pauseButton.Click += (_, _) =>
-            {
-                // While a manual override is active this button ends it; otherwise it pauses/resumes automation
-                if (_engine.OverrideMode != HdrOverride.None) _setOverride(HdrOverride.None, null);
-                else _setPaused(!_engine.Paused);
-                RefreshView();
-            };
             _search.TextChanged += (_, _) => RebuildGames();
 
             _games.HdrToggled += (_, item) =>
@@ -676,6 +673,13 @@ namespace SmartHdrManager
                     _loadingSettings = false;
                 }
             };
+
+            _swPauseAutomation!.CheckedChanged += (_, _) =>
+            {
+                if (_loadingSettings) return;
+                _setPaused(_swPauseAutomation.Checked);
+            };
+
             _scanInterval.ValueChanged += (_, _) =>
             {
                 if (_loadingSettings) return;
@@ -791,25 +795,25 @@ namespace SmartHdrManager
                     _ => state == 2 ? (s.HdrOn ? "HDR 开 · 已暂停" : "自动化已暂停")
                          : s.HdrOn ? "HDR 已开启" : "HDR 已关闭"
                 };
+            }
 
-                if (s.Override != HdrOverride.None)
-                {
-                    _pauseButton.Text = "恢复自动";
-                    _pauseButton.Glyph = Theme.GlyphPlay;
-                    _pauseButton.Primary = true;
-                }
-                else if (state == 2)
-                {
-                    _pauseButton.Text = "恢复自动化";
-                    _pauseButton.Glyph = Theme.GlyphPlay;
-                    _pauseButton.Primary = true;
-                }
-                else
-                {
-                    _pauseButton.Text = "暂停自动化";
-                    _pauseButton.Glyph = Theme.GlyphPause;
-                    _pauseButton.Primary = false;
-                }
+            if (_btnResume != null)
+            {
+                bool show = s.Override != HdrOverride.None;
+                if (_btnResume.Visible != show)
+                    BeginInvoke(new Action(() => { if (!_btnResume.IsDisposed) _btnResume.Visible = show; }));
+            }
+
+            if (_swPauseAutomation != null)
+            {
+                bool wasPaused = _swPauseAutomation.Checked;
+                bool isPaused = s.Paused && s.Override == HdrOverride.None;
+                if (wasPaused != isPaused)
+                    BeginInvoke(new Action(() =>
+                    {
+                        if (!_swPauseAutomation.IsDisposed)
+                            _swPauseAutomation.Checked = isPaused;
+                    }));
             }
 
             string detail;
@@ -1372,6 +1376,7 @@ namespace SmartHdrManager
             _loadingSettings = true;
             try
             {
+                _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
                 _scanInterval.Value = _engine.Read(c => c.DriveScanIntervalDays);
                 UpdateScanDescription();
