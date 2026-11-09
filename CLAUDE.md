@@ -17,6 +17,15 @@ C:\Users\admin\.dotnet\sdk\10.0.403
 & "C:\Users\admin\.dotnet\dotnet.exe" build SmartHdrManager.csproj -c Release
 ```
 
+## 编译异常处理
+
+如果编译时提示 `SmartHdrManager.exe` 文件被占用（进程正在运行），需要先结束进程再重新编译：
+
+```powershell
+Stop-Process -Name SmartHdrManager -Force
+& "C:\Users\admin\.dotnet\dotnet.exe" build SmartHdrManager.csproj -c Release
+```
+
 ## 编译配置
 
 - **仅允许 Release 配置**，禁止 Debug 配置
