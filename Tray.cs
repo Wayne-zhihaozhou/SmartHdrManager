@@ -21,80 +21,20 @@ namespace SmartHdrManager
         private readonly Icon _iconOn;
         private readonly Icon _iconPaused;
         private int _iconState = -1;
-        private readonly ToolStripMenuItem _pauseItem;
-        private readonly ToolStripMenuItem _autostartItem;
-        private bool _syncing;
 
-        public TrayAndStartupManager(Action openMainWindow, Action<bool> setPaused, Action exit,
-                                     Action<HdrOverride, TimeSpan?> setOverride, Func<(HdrOverride Mode, bool Timed)> getOverride)
+        public TrayAndStartupManager(Action exit)
         {
-            var openItem = new ToolStripMenuItem("打开 Smart HDR Manager") { Font = new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) };
-            openItem.Click += (_, _) => openMainWindow();
-
-            _pauseItem = new ToolStripMenuItem("暂停自动化") { CheckOnClick = true };
-            _pauseItem.CheckedChanged += (_, _) =>
-            {
-                if (!_syncing) setPaused(_pauseItem.Checked);
-            };
-
-            _autostartItem = new ToolStripMenuItem("开机自启动");
-            _autostartItem.Click += (_, _) =>
-            {
-                if (!SetAutostart(!IsAutostartEnabled()))
-                    _icon!.ShowBalloonTip(3000, "Smart HDR Manager", "无法更新 Windows 启动项。", ToolTipIcon.Warning);
-            };
-
             var exitItem = new ToolStripMenuItem("退出");
             exitItem.Click += (_, _) => exit();
 
-            var renderer = new DarkMenuRenderer();
-
-            // Manual override submenu (cycles automatic -> HDR on -> SDR -> automatic)
-            var overrideMenu = new ToolStripMenuItem("HDR 覆盖");
-            var autoItem = new ToolStripMenuItem("自动（无覆盖）");
-            var hdrHour = new ToolStripMenuItem("HDR 开启 1 小时");
-            var hdrUntil = new ToolStripMenuItem("HDR 开启直至恢复");
-            var sdrHour = new ToolStripMenuItem("SDR 1 小时");
-            var sdrUntil = new ToolStripMenuItem("SDR 直至恢复");
-            autoItem.Click += (_, _) => setOverride(HdrOverride.None, null);
-            hdrHour.Click += (_, _) => setOverride(HdrOverride.ForceHdr, TimeSpan.FromHours(1));
-            hdrUntil.Click += (_, _) => setOverride(HdrOverride.ForceHdr, null);
-            sdrHour.Click += (_, _) => setOverride(HdrOverride.ForceSdr, TimeSpan.FromHours(1));
-            sdrUntil.Click += (_, _) => setOverride(HdrOverride.ForceSdr, null);
-            overrideMenu.DropDownItems.AddRange(new ToolStripItem[]
-            {
-                autoItem, new ToolStripSeparator(), hdrHour, hdrUntil, sdrHour, sdrUntil
-            });
-            overrideMenu.DropDown.Renderer = renderer;
-            overrideMenu.DropDown.BackColor = Theme.Surface;
-            overrideMenu.DropDown.ForeColor = Theme.Text;
-            overrideMenu.DropDownOpening += (_, _) =>
-            {
-                var (mode, timed) = getOverride();
-                autoItem.Checked = mode == HdrOverride.None;
-                hdrHour.Checked = mode == HdrOverride.ForceHdr && timed;
-                hdrUntil.Checked = mode == HdrOverride.ForceHdr && !timed;
-                sdrHour.Checked = mode == HdrOverride.ForceSdr && timed;
-                sdrUntil.Checked = mode == HdrOverride.ForceSdr && !timed;
-            };
-
             var menu = new ContextMenuStrip
             {
-                Renderer = renderer,
+                Renderer = new DarkMenuRenderer(),
                 BackColor = Theme.Surface,
                 ForeColor = Theme.Text,
                 ShowImageMargin = true
             };
-            menu.Items.Add(openItem);
-            menu.Items.Add(overrideMenu);
-            menu.Items.Add(_pauseItem);
-            menu.Items.Add(_autostartItem);
-            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(exitItem);
-            menu.Opening += (_, _) =>
-            {
-                _autostartItem.Checked = IsAutostartEnabled();
-            };
 
             // Tray icon shows the state at a glance: colourful = HDR on, grey = SDR, amber = paused
             int iconSize = Math.Max(16, SystemInformation.SmallIconSize.Width);
@@ -113,15 +53,12 @@ namespace SmartHdrManager
             // Left click / double click opens the window; right click shows the menu.
             _icon.MouseClick += (_, e) =>
             {
-                if (e.Button == MouseButtons.Left) openMainWindow();
+                if (e.Button == MouseButtons.Left) { }
             };
         }
 
         public void SetPaused(bool paused)
         {
-            _syncing = true;
-            try { _pauseItem.Checked = paused; }
-            finally { _syncing = false; }
         }
 
         public void UpdateState(bool hdrOn, bool paused)
@@ -300,4 +237,3 @@ namespace SmartHdrManager
         }
     }
 }
-

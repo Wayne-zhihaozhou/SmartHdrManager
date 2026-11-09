@@ -10,8 +10,6 @@ using System.Threading.Tasks;
 
 namespace SmartHdrManager
 {
-    public enum HdrOverride { None, ForceHdr, ForceSdr }
-
     public sealed class EngineStatus
     {
         public bool HdrOn { get; init; }
@@ -19,8 +17,6 @@ namespace SmartHdrManager
         public string ActiveProcess { get; init; } = string.Empty;
         public bool IsFullscreen { get; init; }
         public string? RunningGame { get; init; }
-        public HdrOverride Override { get; init; }
-        public long OverrideRemainingMs { get; init; } = -1;   // -1 = until turned back
         public string? WaitingForGame { get; init; }            // per-game start delay in progress
         public int WaitingSecondsLeft { get; init; }
         public int HoldSecondsLeft { get; init; }               // minimum HDR time / keep-after-exit in progress
@@ -185,12 +181,6 @@ namespace SmartHdrManager
         private long _hdrOnSinceMs;            // when HDR was last switched/seen on (0 = off)
         private bool _firstHdrQueryDone;
         private bool _apiLogged;
-
-        // manual override (written from any thread, read by the engine thread)
-        private volatile int _overrideMode;    // (int)HdrOverride
-        private long _overrideUntilMs;         // 0 = until turned back
-        private readonly object _overrideLock = new();
-        private int _overrideChanged;          // 1 = engine thread must reset its timers (set by any thread)
 
         // per-game options (removed)
         private long _holdHdrUntilMs;          // keep-after-exit
@@ -423,48 +413,6 @@ namespace SmartHdrManager
             }
         }
 
-        // ------------------------------------------------------------------
-        // Manual override (tray menu / the override shortcut)
-        // ------------------------------------------------------------------
-        public HdrOverride OverrideMode => (HdrOverride)_overrideMode;
-
-        /// <summary>Force HDR on/off. duration null = until turned back. HdrOverride.None = back to automatic.</summary>
-        public void SetOverride(HdrOverride mode, TimeSpan? duration)
-        {
-            long until = mode != HdrOverride.None && duration.HasValue ? Now + (long)duration.Value.TotalMilliseconds : 0;
-            lock (_overrideLock)
-            {
-                Interlocked.Exchange(ref _overrideUntilMs, until);
-                _overrideMode = (int)mode;
-            }
-            Interlocked.Exchange(ref _overrideChanged, 1);
-
-            string length = duration.HasValue ? $"持续 {FormatDuration(duration.Value)}" : "，直到手动恢复";
-            Log("MANUAL", mode switch
-            {
-                HdrOverride.ForceHdr => $"HDR 已强制开启{length}。",
-                HdrOverride.ForceSdr => $"HDR 已强制关闭（SDR）{length}。",
-                _ => "已恢复自动 HDR 切换。"
-            });
-            _wake.Set();
-        }
-
-        /// <summary>the override shortcut: automatic -> HDR on -> SDR -> automatic. Returns the new mode.</summary>
-        public HdrOverride CycleOverride()
-        {
-            var next = OverrideMode switch
-            {
-                HdrOverride.None => HdrOverride.ForceHdr,
-                HdrOverride.ForceHdr => HdrOverride.ForceSdr,
-                _ => HdrOverride.None
-            };
-            SetOverride(next, null);
-            return next;
-        }
-
-        private static string FormatDuration(TimeSpan t) =>
-            t.TotalHours >= 1 ? $"{t.TotalHours:0.#} 小时" : $"{t.TotalMinutes:0} 分钟";
-
         public List<MonitorInfo> GetMonitors() => HdrController.ListMonitors();
 
         public void Stop()
@@ -625,47 +573,10 @@ namespace SmartHdrManager
                 TrackLauncherFollow(s, now);
             }
 
-            // Manual override has priority over everything (also over "pause")
-            HdrOverride mode;
-            long until;
-            bool expired = false;
-            lock (_overrideLock)
-            {
-                mode = (HdrOverride)_overrideMode;
-                until = Interlocked.Read(ref _overrideUntilMs);
-                if (mode != HdrOverride.None && until > 0 && now >= until)
-                {
-                    // expire only this exact override (a new one chosen meanwhile is not touched: same lock)
-                    _overrideMode = (int)HdrOverride.None;
-                    Interlocked.Exchange(ref _overrideUntilMs, 0);
-                    mode = HdrOverride.None;
-                    until = 0;
-                    expired = true;
-                }
-            }
-            if (expired)
-            {
-                Log("MANUAL", "覆盖时间已到 – 已恢复自动 HDR 切换。");
-                Interlocked.Exchange(ref _overrideChanged, 1);
-            }
-
-            // After any override change, start the automatic logic fresh (no stale timers or "game closed" events)
-            if (Interlocked.Exchange(ref _overrideChanged, 0) == 1)
-            {
-                _sdrFallbackAtMs = -1;
-                _holdHdrUntilMs = 0;
-                _activeHdrGameProcess = null;
-                _handOffDemand = null;   // you decided: the automatic logic starts fresh
-                _restoreHdr = false;
-                _externalEnded = false;
-            }
-
             _holdMsLeft = 0;
 
-            if (mode == HdrOverride.None && !Paused)
+            if (!Paused)
                 Decide(s, now, procName, title, isFullscreen);
-            else if (mode != HdrOverride.None)
-                ApplyOverride(s, now, mode);
 
             Status = new EngineStatus
             {
@@ -674,25 +585,12 @@ namespace SmartHdrManager
                 ActiveProcess = procName,
                 IsFullscreen = isFullscreen,
                 RunningGame = _runningGame,
-                Override = mode,
-                OverrideRemainingMs = mode != HdrOverride.None && until > 0 ? Math.Max(0, until - now) : -1,
                 HoldSecondsLeft = (int)Math.Ceiling(_holdMsLeft / 1000.0),
                 BlockedBy = false,
                 LaunchHold = now < Interlocked.Read(ref _launchHoldUntilMs),
                 FollowingLauncher = _followLauncher
             };
 
-        }
-
-        private void ApplyOverride(Snapshot s, long now, HdrOverride mode)
-        {
-            bool canAttempt = now - _lastAttemptMs >= SwitchSpacingMs && now >= _cooldownUntilMs;
-            if (!canAttempt) return;
-
-            if (mode == HdrOverride.ForceHdr && !_hdrAll)
-                TurnHdrOn("Manual override", s.Monitors);
-            else if (mode == HdrOverride.ForceSdr && _hdrAny)
-                TurnHdrOff("Manual override", s.Monitors, s.ReloadProfile);
         }
 
         private void RefreshHdrState(Snapshot s, long now)
@@ -748,7 +646,7 @@ namespace SmartHdrManager
                         _externalEnded = false;
                         Log("HDR", $"'{front}' 自行开启了 HDR – 其运行期间保持 HDR 开启。");
                     }
-                    else if (!Paused && OverrideMode == HdrOverride.None)
+                    else if (!Paused)
                     {
                         // Hands off until the next game / video (or until the current one ends). HDR lost right after a
                         // display change or wake-up is not your decision: that one is switched on again if needed.
@@ -1203,7 +1101,7 @@ namespace SmartHdrManager
                 }
                 _hdrOnForGame = null;
 
-                if (_followLauncher == null && ran < LauncherShortRunMs && !Paused && OverrideMode == HdrOverride.None)
+                if (_followLauncher == null && ran < LauncherShortRunMs && !Paused)
                     StartFollow(s, now, closed, ran);
 
                 // A launcher hands over to the real game: only count it once the launcher check is over

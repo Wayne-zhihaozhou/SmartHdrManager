@@ -34,7 +34,7 @@ namespace SmartHdrManager
             _showEvent = showEvent;
             _commands = commands;
 
-            _tray = new TrayAndStartupManager(ShowMain, SetPaused, Exit, SetOverride, GetOverride);
+            _tray = new TrayAndStartupManager(Exit);
 
             // Re-read the HDR state right away when monitors change or the PC wakes up
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -61,15 +61,6 @@ namespace SmartHdrManager
             _engine.Log("MANUAL", $"命令行操作：{command}。");
             switch (command)
             {
-                case CliCommand.ForceHdr:
-                    SetOverride(HdrOverride.ForceHdr, null);
-                    break;
-                case CliCommand.ForceSdr:
-                    SetOverride(HdrOverride.ForceSdr, null);
-                    break;
-                case CliCommand.Auto:
-                    SetOverride(HdrOverride.None, null);
-                    break;
                 case CliCommand.TogglePause:
                     SetPaused(!_engine.Paused);
                     break;
@@ -83,23 +74,10 @@ namespace SmartHdrManager
             if (_exiting) return;
             if (_form == null || _form.IsDisposed)
             {
-                _form = new MainForm(_engine, SetPaused, SetOverride, Exit);
+                _form = new MainForm(_engine, SetPaused, Exit);
                 _form.HiddenToTray += OnFormHidden;
             }
             _form.ShowFromTray();
-        }
-
-        // ---- manual override (tray menu) ----
-        private void SetOverride(HdrOverride mode, TimeSpan? duration)
-        {
-            _engine.SetOverride(mode, duration);
-            if (_form != null && !_form.IsDisposed && _form.Visible) _form.RefreshView();
-        }
-
-        private (HdrOverride Mode, bool Timed) GetOverride()
-        {
-            var s = _engine.Status;
-            return (_engine.OverrideMode, s.OverrideRemainingMs >= 0);
         }
 
         // No notification when the window goes to the tray (2.6): the tray icon itself shows that the app still runs
@@ -138,7 +116,7 @@ namespace SmartHdrManager
             if (_commands.TakeLaunchHold())
             {
                 var st = _engine.Status;
-                if (_engine.Paused || _engine.OverrideMode == HdrOverride.ForceSdr || st.BlockedBy)
+                if (_engine.Paused || st.BlockedBy)
                     _commands.RefuseLaunch();
                 else
                     _engine.HoldHdrForLaunch();
@@ -152,16 +130,14 @@ namespace SmartHdrManager
             ConsoleWindowHider.HideIfMinimized();
 
             var s = _engine.Status;
-            string state = s.Override == HdrOverride.ForceHdr ? "HDR 已强制开启"
-                : s.Override == HdrOverride.ForceSdr ? "SDR 已强制"
-                : s.Paused ? "已暂停" : s.HdrOn ? "HDR 开" : "HDR 关";
+            string state = s.Paused ? "已暂停" : s.HdrOn ? "HDR 开" : "HDR 关";
             string tooltip = $"Smart HDR Manager – {state}";
             if (tooltip != _lastTooltip)
             {
                 _lastTooltip = tooltip;
                 _tray.UpdateTooltip(tooltip);
             }
-            _tray.UpdateState(s.HdrOn, s.Paused && s.Override == HdrOverride.None);
+            _tray.UpdateState(s.HdrOn, s.Paused);
 
             if (_form == null) return;
 
@@ -206,16 +182,13 @@ namespace SmartHdrManager
         }
     }
 
-    internal enum CliCommand { None, ForceHdr, ForceSdr, Auto, TogglePause }
+    internal enum CliCommand { None, TogglePause }
 
     /// <summary>Named events through which a second launch passes a command-line action to the running tray instance.</summary>
     internal sealed class CommandEvents : IDisposable
     {
         private readonly (CliCommand Command, EventWaitHandle Event)[] _events =
         {
-            (CliCommand.ForceHdr, new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\SmartHdrManager.ForceHdr")),
-            (CliCommand.ForceSdr, new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\SmartHdrManager.ForceSdr")),
-            (CliCommand.Auto, new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\SmartHdrManager.AutoHdr")),
             (CliCommand.TogglePause, new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\SmartHdrManager.TogglePause"))
         };
 
@@ -251,9 +224,6 @@ namespace SmartHdrManager
             {
                 switch (a.Trim().ToLowerInvariant())
                 {
-                    case "--force-hdr": return CliCommand.ForceHdr;
-                    case "--force-sdr": return CliCommand.ForceSdr;
-                    case "--auto": return CliCommand.Auto;
                     case "--toggle-pause": return CliCommand.TogglePause;
                 }
             }

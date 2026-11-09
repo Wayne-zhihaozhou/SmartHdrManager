@@ -20,7 +20,6 @@ namespace SmartHdrManager
 
         private readonly HdrEngine _engine;
         private readonly Action<bool> _setPaused;
-        private readonly Action<HdrOverride, TimeSpan?> _setOverride;
         private readonly Action _exitApp;
         private readonly Icon _windowIcon = AppIcons.Create(IconStyle.Vivid, 48);
         private readonly ToolTip _toolTip = new();
@@ -69,11 +68,10 @@ namespace SmartHdrManager
 
         public event EventHandler? HiddenToTray;
 
-        public MainForm(HdrEngine engine, Action<bool> setPaused, Action<HdrOverride, TimeSpan?> setOverride, Action exitApp)
+        public MainForm(HdrEngine engine, Action<bool> setPaused, Action exitApp)
         {
             _engine = engine;
             _setPaused = setPaused;
-            _setOverride = setOverride;
             _exitApp = exitApp;
             
             // 从引擎配置加载 TvConfig，确保快捷键回调读取正确的启用状态
@@ -654,18 +652,13 @@ namespace SmartHdrManager
         public void RefreshView()
         {
             var s = _engine.Status;
-            int state = (s.Paused && s.Override == HdrOverride.None ? 2 : s.HdrOn ? 1 : 0) + (int)s.Override * 10;
 
             // Update HDR status label
             if (_hdrStatusLabel != null)
             {
-                string statusText = s.Override switch
-                {
-                    HdrOverride.ForceHdr => "HDR 已强制开启",
-                    HdrOverride.ForceSdr => "SDR 已强制",
-                    _ => state == 2 ? (s.HdrOn ? "HDR 开 · 已暂停" : "自动化已暂停")
-                         : s.HdrOn ? "HDR 已开启" : "HDR 已关闭"
-                };
+                string statusText = s.Paused
+                    ? (s.HdrOn ? "HDR 开 · 已暂停" : "自动化已暂停")
+                    : s.HdrOn ? "HDR 已开启" : "HDR 已关闭";
                 if (_hdrStatusLabel.Text != statusText)
                     BeginInvoke(new Action(() => { if (!_hdrStatusLabel.IsDisposed) _hdrStatusLabel.Text = statusText; }));
             }
@@ -674,14 +667,7 @@ namespace SmartHdrManager
             if (_activityLabel != null)
             {
                 string activity;
-                if (s.Override != HdrOverride.None)
-                {
-                    string length = s.OverrideRemainingMs >= 0
-                        ? $"{Math.Max(1, (int)Math.Ceiling(s.OverrideRemainingMs / 60000.0))} 分钟剩余"
-                        : "直到您手动恢复";
-                    activity = $"手动覆盖 · {length}";
-                }
-                else if (s.Paused)
+                if (s.Paused)
                 {
                     activity = "在恢复前不会自动切换 HDR。";
                 }
@@ -719,9 +705,7 @@ namespace SmartHdrManager
             if (_hdrStatusLabel != null)
             {
                 Color color;
-                if (s.Override == HdrOverride.ForceHdr) color = Theme.Accent;
-                else if (s.Override == HdrOverride.ForceSdr) color = Theme.Muted;
-                else if (s.Paused) color = Theme.Muted;
+                if (s.Paused) color = Theme.Muted;
                 else color = s.HdrOn ? Theme.Accent : Theme.Text;
                 if (_hdrStatusLabel.ForeColor != color)
                     BeginInvoke(new Action(() => { if (!_hdrStatusLabel.IsDisposed) _hdrStatusLabel.ForeColor = color; }));
