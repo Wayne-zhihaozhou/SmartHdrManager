@@ -1274,9 +1274,9 @@ namespace SmartHdrManager
             else if (e.Button == MouseButtons.Left && _pressed >= 0 && _pressedOnSwitch)
             {
                 int index = IndexAt(e.Location);
-                if (index == _pressed && IsOnSwitch(e.Location, index) && SameRowBoundary(_pressed, e.Location))
+                if (SameRowBoundary(_pressed, e.Location))
                 {
-                    Toggle(index);
+                    Toggle(_pressed);
                 }
             }
             else if (e.Button == MouseButtons.Left && _pressed >= 0 && _pressedOnBrightness)
