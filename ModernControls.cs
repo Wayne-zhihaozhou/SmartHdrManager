@@ -1074,7 +1074,8 @@ namespace SmartHdrManager
             if (index < 0) return false;
             Rectangle row = RowRect(index);
             RectangleF hit = SwitchRect(row);
-            hit.Inflate(row.Height * 0.2f, row.Height * 0.2f);
+            int pad = LogicalToDeviceUnits(3);
+            hit.Inflate(pad, pad);
             return hit.Contains(p);
         }
 
