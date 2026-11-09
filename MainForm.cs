@@ -828,7 +828,7 @@ namespace SmartHdrManager
             if (_swPauseAutomation != null)
             {
                 bool wasPaused = _swPauseAutomation.Checked;
-                bool isPaused = s.Paused && s.Override == HdrOverride.None;
+                bool isPaused = _engine.Paused;
                 if (wasPaused != isPaused)
                     BeginInvoke(new Action(() =>
                     {
