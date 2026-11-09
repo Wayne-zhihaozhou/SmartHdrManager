@@ -1,3 +1,12 @@
+# 项目信息
+
+- **名称**：Smart HDR Manager
+- **版本**：2.6.2
+- **作者**：VantaCode420
+- **类型**：Windows 托盘应用（无控制台窗口）
+
+---
+
 # 编译指导
 
 ## 环境要求
@@ -37,11 +46,26 @@ dotnet clean SmartHdrManager.csproj
 
 ## 输出位置
 
-- **DLL/EXE**：`bin\Release\net10.0-windows\SmartHdrManager.{dll,exe}`
+- **EXE**：`bin\Release\net10.0-windows\win-x64\publish\SmartHdrManager.exe`
+- **发布包**：`bin\Release\net10.0-windows\win-x64\publish\`（自包含部署，含完整 .NET 运行时）
 
 ## 目标框架
 
-- `net10.0-windows`，平台 `x64`（默认）/ `win-arm64`
+- `net10.0-windows`，平台 `x64`
+- 自包含部署（`SelfContained=true`），无需目标机器安装 .NET
+- 支持滚动到主版本（`RollForward=Major`）
+
+## 项目属性
+
+| 属性 | 值 |
+|------|------|
+| OutputType | WinExe |
+| Nullable | enable |
+| ImplicitUsings | disable |
+| LangVersion | latest |
+| InvariantGlobalization | true |
+| ConcurrentGarbageCollection | false |
+| SatelliteResourceLanguages | en |
 
 ## 警告处理
 
