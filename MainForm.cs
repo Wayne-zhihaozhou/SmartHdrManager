@@ -51,6 +51,7 @@ namespace SmartHdrManager
         private ToggleSwitch _swPauseAutomation = null!;
         private Label _hdrStatusLabel = null!;
         private Label _activityLabel = null!;
+        private Panel _activityPanel = null!;
         // Automatic drive scan: off / at every start / daily / weekly / monthly (2.6)
         private readonly Stepper _scanInterval = new()
         {
@@ -292,18 +293,18 @@ namespace SmartHdrManager
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
             
-            // Status row
-            _hdrStatusLabel = new Label { AutoSize = true, Font = Theme.Title, ForeColor = Theme.Text };
+            // Activity display panel (no card)
+            _activityPanel = new Panel { Height = 52, Margin = new Padding(0, 0, 0, 6) };
+            var actTable = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            actTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            actTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            actTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _hdrStatusLabel = new Label { AutoSize = true, Font = Theme.Semibold, ForeColor = Theme.Text };
             _activityLabel = new Label { AutoSize = false, AutoEllipsis = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill };
-            var statusRow = new RoundedPanel { Padding = new Padding(12, 8, 12, 8), Height = 56, Margin = new Padding(0, 0, 0, 4) };
-            var statusPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            statusPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-            statusPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            statusPanel.Controls.Add(_hdrStatusLabel, 0, 0);
-            statusPanel.Controls.Add(_activityLabel, 0, 1);
-            statusRow.Controls.Add(statusPanel);
-            page.AddRow(statusRow, 56);
+            actTable.Controls.Add(_hdrStatusLabel, 0, 0);
+            actTable.Controls.Add(_activityLabel, 0, 1);
+            _activityPanel.Controls.Add(actTable);
+            page.AddRow(_activityPanel, 52);
             
             _swPauseAutomation = new ToggleSwitch();
             var pauseRow = SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", _swPauseAutomation);
@@ -809,6 +810,18 @@ namespace SmartHdrManager
                 }
                 if (_activityLabel.Text != activity)
                     BeginInvoke(new Action(() => { if (!_activityLabel.IsDisposed) _activityLabel.Text = activity; }));
+            }
+
+            // Update HDR status label color
+            if (_hdrStatusLabel != null)
+            {
+                Color color;
+                if (s.Override == HdrOverride.ForceHdr) color = Theme.Accent;
+                else if (s.Override == HdrOverride.ForceSdr) color = Theme.Muted;
+                else if (s.Paused) color = Theme.Muted;
+                else color = s.HdrOn ? Theme.Accent : Theme.Text;
+                if (_hdrStatusLabel.ForeColor != color)
+                    BeginInvoke(new Action(() => { if (!_hdrStatusLabel.IsDisposed) _hdrStatusLabel.ForeColor = color; }));
             }
 
             // Update pause automation switch state
