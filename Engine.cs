@@ -109,11 +109,9 @@ namespace SmartHdrManager
             public readonly HashSet<string> Ignored;
             public readonly bool EnableOnProcessStart, ReloadProfile, RefreshApps;
             public readonly int FallbackSeconds, TickMs;
-            public readonly long MinimumHdrMs;
             public readonly MonitorFilter Monitors;
             public readonly string HotkeyMode;
             public readonly Dictionary<string, GameOptions> GameOptions;
-            public readonly bool KeepDesktopSdr;
             public readonly Dictionary<string, (string[] Folders, string[] Exes)> GameFolders;
 
             public Snapshot(AppConfig c)
@@ -122,10 +120,8 @@ namespace SmartHdrManager
                 Ignored = new HashSet<string>(c.IgnoredGames ?? new List<string>(), Cmp);
                 ReloadProfile = c.ReloadColorProfileAfterSdr;
                 RefreshApps = c.RefreshAppsAfterSdr;
-                KeepDesktopSdr = c.KeepDesktopSdr;
                 Monitors = new MonitorFilter(c.OnlyPrimaryMonitor, c.SelectedMonitors);
                 HotkeyMode = HotkeySettings.Normalize(c.HotkeyModifier);
-                MinimumHdrMs = Math.Clamp(c.MinimumHdrSeconds, 0, 3600) * 1000L;
                 GameOptions = new Dictionary<string, GameOptions>(c.PerGameOptions ?? new Dictionary<string, GameOptions>(), Cmp);
                 EnableOnProcessStart = c.EnableHdrOnProcessStart;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
@@ -926,7 +922,7 @@ namespace SmartHdrManager
                     // First look (or other monitors): this is the starting point, nothing was switched by anyone yet
                     _expectAny = any;
                     _switchConfirmed = true;
-                    if (!_firstHdrQueryDone && any && !s.KeepDesktopSdr)
+                    if (!_firstHdrQueryDone && any)
                         Log("HDR", "HDR 已开启 – 保持现状（本程序只切回自己开启的 HDR）。");
                 }
 
@@ -959,7 +955,7 @@ namespace SmartHdrManager
                         _externalEnded = false;
                         Log("HDR", $"'{front}' 自行开启了 HDR – 其运行期间保持 HDR 开启。");
                     }
-                    else if (!Paused && OverrideMode == HdrOverride.None && !s.KeepDesktopSdr)
+                    else if (!Paused && OverrideMode == HdrOverride.None)
                     {
                         // Hands off until the next game / video (or until the current one ends). HDR lost right after a
                         // display change or wake-up is not your decision: that one is switched on again if needed.
@@ -1164,8 +1160,8 @@ namespace SmartHdrManager
             }
 
             // The app only undoes what it did itself: HDR that you or another program turned on is never switched
-            // back here (2.6). "Keep the desktop in SDR" (Settings) brings back the old behaviour.
-            bool owns = _hdrOnByApp || s.KeepDesktopSdr;
+            // back here (2.6).
+            bool owns = _hdrOnByApp;
 
             if (shouldEnableHdr)
             {
@@ -1196,9 +1192,8 @@ namespace SmartHdrManager
                     _activeHdrGameProcess = null;
                 }
 
-                // Hold HDR: keep-after-exit, or the "minimum time in HDR" setting. Colour-critical apps still switch at once.
-                long holdUntil = Math.Max(_holdHdrUntilMs,
-                    s.MinimumHdrMs > 0 && _hdrOnSinceMs > 0 ? _hdrOnSinceMs + s.MinimumHdrMs : 0);
+                // Hold HDR: keep-after-exit. Colour-critical apps still switch at once.
+                long holdUntil = _holdHdrUntilMs;
                 if (owns && now < holdUntil)
                 {
                     _holdMsLeft = holdUntil - now;
@@ -1281,7 +1276,7 @@ namespace SmartHdrManager
         {
             _lastDemand = demand;
             if (_handOffDemand == null) return false;
-            if (!s.KeepDesktopSdr && string.Equals(demand, _handOffDemand, StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(demand, _handOffDemand, StringComparison.OrdinalIgnoreCase)) return true;
             _handOffDemand = null;
             Log("HDR", $"自动切换重新接管（{(demand == "none" ? "您的列表中已无活动项目" : DescribeDemand(demand))}）。");
             return false;
@@ -2604,8 +2599,6 @@ namespace SmartHdrManager
 
             c.HotkeyModifier = HotkeySettings.Normalize(c.HotkeyModifier);
 
-            // Same ranges as the controls in Settings
-            c.MinimumHdrSeconds = Math.Clamp(c.MinimumHdrSeconds, 0, 120);
             c.SdrFallbackDelaySeconds = Math.Clamp(c.SdrFallbackDelaySeconds, 0, 30);
             foreach (var g in c.LibraryGames) g.Processes ??= new List<string>();
 

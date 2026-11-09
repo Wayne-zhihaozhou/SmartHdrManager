@@ -55,12 +55,11 @@ namespace SmartHdrManager
 
         private Label? _neverHdrDesc;
         private readonly ToggleSwitch _swShowOthers = new();
-        private readonly Stepper _minimumHdr = new() { Minimum = 0, Maximum = 120, Step = 5, ZeroText = "关闭" };
+
         private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
 
         private readonly ToggleSwitch _swColorProfile = new();
         private readonly ToggleSwitch _swRefreshApps = new();
-        private readonly ToggleSwitch _swKeepDesktopSdr = new();
 
         // Log page
         private readonly TextBox _log = new()
@@ -327,11 +326,6 @@ namespace SmartHdrManager
                 _monitorSwitches.Add((monitor, sw));
                 page.AddRow(SettingRow(title, desc, sw), 68);
             }
-
-            // ---- Switching back ----
-            Section("切回 SDR", "本程序只切回自己开启的 HDR。您开启的 HDR 保持开启。");
-            page.AddRow(SettingRow("HDR 最短时长", "快速启动 / 停止时减少黑屏。", _minimumHdr), 68);
-            page.AddRow(SettingRow("保持桌面为 SDR", "同时切回您或其他程序开启的 HDR。", _swKeepDesktopSdr), 68);
 
             // ---- Display fixes ----
             Section("显示修复", "修复退出 HDR 后的副作用。");
@@ -608,7 +602,6 @@ namespace SmartHdrManager
                 _engine.Update(c => c.ShowOtherPrograms = _swShowOthers.Checked);
                 RebuildGames();
             };
-            _minimumHdr.ValueChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.MinimumHdrSeconds = _minimumHdr.Value); };
             _hotkeyChoice.SelectedIndexChanged += (_, _) =>
             {
                 if (_loadingSettings) return;
@@ -639,16 +632,6 @@ namespace SmartHdrManager
 
             _swColorProfile.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.ReloadColorProfileAfterSdr = _swColorProfile.Checked); };
             _swRefreshApps.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.RefreshAppsAfterSdr = _swRefreshApps.Checked); };
-
-            _swKeepDesktopSdr.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                bool on = _swKeepDesktopSdr.Checked;
-                _engine.Update(c => c.KeepDesktopSdr = on);
-                _engine.Log("CONFIG", on
-                    ? "保持桌面为 SDR：开启 – 您或其他程序开启的 HDR 也会被切回 SDR。"
-                    : "保持桌面为 SDR：关闭 – 只切回本程序开启的 HDR。");
-            };
 
             Resize += (_, _) =>
             {
@@ -1339,7 +1322,6 @@ namespace SmartHdrManager
                 _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
                 _swShowOthers.Checked = _engine.Read(c => c.ShowOtherPrograms);
-                _minimumHdr.Value = _engine.Read(c => c.MinimumHdrSeconds);
                 _hotkeyChoice.SelectedIndex = Math.Max(0, Array.IndexOf(HotkeyModes, _engine.Read(c => HotkeySettings.Normalize(c.HotkeyModifier))));
 
                 // Monitors: explicit selection if set, otherwise "primary only" / "all HDR monitors"

@@ -41,10 +41,6 @@ namespace SmartHdrManager
         // with their cached HDR brightness (which makes them look dimmed until minimized/restored).
         public bool RefreshAppsAfterSdr { get; set; } = true;
 
-        // ---- v2.3 ----
-        // Once HDR is on, keep it on at least this long (0 = off). Colour-critical apps and manual SDR still switch at once.
-        public int MinimumHdrSeconds { get; set; } = 0;
-
         // Monitors to switch, by Windows device path. Empty = use OnlyPrimaryMonitor (primary only / all monitors).
         public List<string> SelectedMonitors { get; set; } = new();
 
@@ -66,12 +62,6 @@ namespace SmartHdrManager
         // Filled automatically when a watched game closes within seconds and a program from the same folder takes over.
         public Dictionary<string, List<string>> LauncherGames { get; set; } = new();
 
-        // ---- v2.6 ----
-        // Legacy field kept for old config files; no longer used internally.
-        public Dictionary<string, AppRule> AppRules { get; set; } = new();
-        // Off (default): the app only switches back HDR that it turned on itself; HDR turned on by you or another
-        // program is left alone. On: the 2.5 behaviour – back to SDR whenever nothing in the lists needs HDR.
-        public bool KeepDesktopSdr { get; set; } = false;
         // Games that closed within seconds after HDR was switched on for them (possible crash, e.g. with NVIDIA RTX HDR)
         public Dictionary<string, int> QuickExitCounts { get; set; } = new();
 
@@ -83,6 +73,10 @@ namespace SmartHdrManager
         // Off by default: the Windows task it uses needs administrator rights on most PCs
         public bool ReloadColorProfileAfterSdr { get; set; } = false;
         public int SdrFallbackDelaySeconds { get; set; } = 3;
+
+        // ---- v2.6 ----
+        // Legacy field kept for old config files; no longer used internally.
+        public Dictionary<string, AppRule> AppRules { get; set; } = new();
 
         // ---- TV brightness control (pc-control-tv migration) ----
         public BrightnessConfig? Brightness { get; set; }
