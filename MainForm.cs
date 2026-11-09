@@ -38,7 +38,7 @@ namespace SmartHdrManager
         private readonly List<Control> _pages = new();
 
         // Games page
-        private readonly TextBox _search = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
+        private readonly TextBox _search = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索列表…" };
         private readonly GameList _games = new() { Dock = DockStyle.Fill };
         // Settings page
         private readonly ToggleSwitch _swAutostart = new();
@@ -81,7 +81,7 @@ namespace SmartHdrManager
             
             SuspendLayout();
 
-            Text = "Smart HDR Manager";
+            Text = "HDR";
             Icon = _windowIcon;
             Font = Theme.Body;
             BackColor = Theme.Back;
