@@ -243,11 +243,18 @@ namespace SmartHdrManager
 
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
+            page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
             
             _swPauseAutomation = new ToggleSwitch();
-            var pauseRow = SettingRow("启用 HDR 控制", "关闭后不会自动切换 HDR。", _swPauseAutomation);
-            page.AddRow(pauseRow, 68);
-            page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
+            page.AddRow(SettingRow("启动 HDR 控制", "关闭后不会自动切换 HDR。", _swPauseAutomation), 68);
+
+            _swTvEnabled = new ToggleSwitch { Checked = TvConfig.Enabled };
+            page.AddRow(SettingRow("启动亮度控制", "允许通过快捷键控制电视亮度", _swTvEnabled), 68);
+            _swTvEnabled.CheckedChanged += (_, _) =>
+            {
+                if (_loadingSettings) return;
+                SaveTvPageSettings();
+            };
 
             // ---- Monitors ----
             var monitors = _engine.GetMonitors();
@@ -265,16 +272,6 @@ namespace SmartHdrManager
                 _monitorSwitches.Add((monitor, sw));
                 page.AddRow(SettingRow(title, desc, sw), 68);
             }
-
-            // ---- TV Control ----
-            Section("电视控制", "启用电视控制。");
-            _swTvEnabled = new ToggleSwitch { Checked = TvConfig.Enabled };
-            page.AddRow(SettingRow("启用亮度控制", "允许通过快捷键控制电视亮度", _swTvEnabled), 68);
-            _swTvEnabled.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                SaveTvPageSettings();
-            };
 
             // ---- Advanced ----
             Section("高级", "设置文件、日志和重置。");
