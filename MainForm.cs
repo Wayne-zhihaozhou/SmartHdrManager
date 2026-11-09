@@ -29,12 +29,6 @@ namespace SmartHdrManager
         private readonly ToolTip _toolTip = new();
 
         // Settings page
-        // Settings page status card
-        private readonly StatusCard _settingsStatusCard = new() { Radius = 12, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 12) };
-        private readonly Label _settingsHdrLabel = new() { AutoSize = true, Font = Theme.Title, ForeColor = Theme.Text };
-        private readonly Label _settingsDetailLabel = new() { AutoSize = false, AutoEllipsis = true, Font = Theme.Body, ForeColor = Theme.Muted };
-        private readonly ToggleSwitch _swPauseAutomation = new();
-        private readonly ModernButton _btnResume = new() { Text = "恢复", AutoSize = true, Visible = false };
         // Automatic drive scan: off / at every start / daily / weekly / monthly (2.6)
         // Tabs
         private readonly SegmentedTabs _tabs = new() { Size = new Size(330, 40), Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = new Padding(0, 16, 0, 0) };
@@ -54,6 +48,7 @@ namespace SmartHdrManager
 
         // Settings page
         private readonly ToggleSwitch _swAutostart = new();
+        private ToggleSwitch _swPauseAutomation = null!;
         // Automatic drive scan: off / at every start / daily / weekly / monthly (2.6)
         private readonly Stepper _scanInterval = new()
         {
@@ -84,7 +79,6 @@ namespace SmartHdrManager
 
         private bool _reallyExit;
         private int _logCursor;
-        private int _lastState = -1;
         private bool _scanInFlight;
 
         public event EventHandler? HiddenToTray;
@@ -293,12 +287,11 @@ namespace SmartHdrManager
                 page.AddRow(SectionDescription(description), 30);
             }
 
-            // ---- Status Card ----
-            var statusCard = BuildSettingsStatusCard();
-            page.AddRow(statusCard, 104);
-
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
+            _swPauseAutomation = new ToggleSwitch();
+            var pauseRow = SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", _swPauseAutomation);
+            page.AddRow(pauseRow, 68);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
             var scanRow = SettingRow("查找新游戏", "在磁盘上搜索新安装的游戏。", _scanInterval);
             _scanIntervalDesc = RowDescription(scanRow);
@@ -360,59 +353,6 @@ namespace SmartHdrManager
 
             page.AddFillerRow();
             return page;
-        }
-
-        private Control BuildSettingsStatusCard()
-        {
-            const int h = 104;
-            _settingsStatusCard.Size = new Size(CardWidth, h);
-            _settingsStatusCard.IndicatorX = 28;
-
-            _settingsHdrLabel.Location = new Point(52, 18);
-            _settingsDetailLabel.SetBounds(54, 60, CardWidth - 54 - 72, 22);
-
-            _settingsHdrLabel.BackColor = Color.Transparent;
-            _settingsDetailLabel.BackColor = Color.Transparent;
-
-            var pauseContainer = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Right,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                Height = 34,
-                Margin = new Padding(0, (h - 34) / 2, 18, 0)
-            };
-            _swPauseAutomation.Size = new Size(80, 34);
-            _btnResume.Size = new Size(60, 34);
-            pauseContainer.Controls.Add(_btnResume);
-            pauseContainer.Controls.Add(_swPauseAutomation);
-
-            _settingsStatusCard.Controls.Add(_settingsHdrLabel);
-            _settingsStatusCard.Controls.Add(_settingsDetailLabel);
-            _settingsStatusCard.Controls.Add(pauseContainer);
-
-            _settingsStatusCard.Layout += (_, _) =>
-            {
-                int S(int v) => _settingsStatusCard.LogicalToDeviceUnits(v);
-                int w = _settingsStatusCard.ClientSize.Width;
-                int rh = pauseContainer.Height;
-
-                pauseContainer.Location = new Point(w - S(18) - pauseContainer.Width, (h - rh) / 2);
-
-                int detailHeight = _settingsDetailLabel.PreferredHeight;
-                int top = Math.Max(0, (h - _settingsHdrLabel.Height - S(2) - detailHeight) / 2);
-                int left = S(52);
-                _settingsHdrLabel.Location = new Point(left, top);
-                _settingsDetailLabel.SetBounds(left + S(2), _settingsHdrLabel.Bottom + S(2), w - S(54) - S(72), detailHeight);
-            };
-
-            _swPauseAutomation.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                _setPaused(_swPauseAutomation.Checked);
-            };
-
-            return _settingsStatusCard;
         }
 
         private static Label SectionDescription(string text) => new()
@@ -790,73 +730,8 @@ namespace SmartHdrManager
         {
             var s = _engine.Status;
 
-            // Visual state: 0 off, 1 on, 2 paused; +10 / +20 while a manual override (HDR / SDR) is active
-            int state = (s.Paused && s.Override == HdrOverride.None ? 2 : s.HdrOn ? 1 : 0) + (int)s.Override * 10;
-            if (state != _lastState)
+            if (_swPauseAutomation != null)
             {
-                _lastState = state;
-
-                _settingsStatusCard.SetState(state == 2 ? HdrVisualState.Paused : s.HdrOn ? HdrVisualState.On : HdrVisualState.Off);
-                _settingsHdrLabel.Text = s.Override switch
-                {
-                    HdrOverride.ForceHdr => "HDR 已强制开启",
-                    HdrOverride.ForceSdr => "SDR 已强制",
-                    _ => state == 2 ? (s.HdrOn ? "HDR 开 · 已暂停" : "自动化已暂停")
-                         : s.HdrOn ? "HDR 已开启" : "HDR 已关闭"
-                };
-            }
-
-            string detail;
-            if (s.Override != HdrOverride.None)
-            {
-                string length = s.OverrideRemainingMs >= 0
-                    ? $"{Math.Max(1, (int)Math.Ceiling(s.OverrideRemainingMs / 60000.0))} 分钟剩余"
-                    : "直到您手动恢复";
-                string shortcut = HotkeySettings.Describe(_engine.Read(c => c.HotkeyModifier), 'O');
-                detail = shortcut.Length > 0 ? $"手动覆盖 · {length}  ({shortcut})" : $"手动覆盖 · {length}";
-            }
-            else if (s.Paused)
-            {
-                detail = "在恢复前不会自动切换 HDR。";
-            }
-            else if (s.BlockedBy)
-            {
-                detail = $"HDR 已被阻止 – {s.BlockedBy} 正在运行（程序 › 录制与直播）";
-            }
-            else if (s.LaunchHold)
-            {
-                detail = s.RunningGame != null ? $"以 HDR 启动 · {s.RunningGame}" : "以 HDR 启动 · 正在启动 …";
-            }
-            else if (s.WaitingForGame != null)
-            {
-                detail = $"{s.WaitingForGame} 已启动 · {s.WaitingSecondsLeft} 秒后开启 HDR（游戏选项）";
-            }
-            else if (s.RunningGame != null)
-            {
-                detail = $"HDR 游戏运行中：{s.RunningGame}";
-            }
-            else if (s.FollowingLauncher != null)
-            {
-                detail = $"{s.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
-            }
-            else if (s.HoldSecondsLeft > 0)
-            {
-                detail = $"再保持 HDR {s.HoldSecondsLeft} 秒";
-            }
-            else
-            {
-                detail = string.IsNullOrEmpty(s.ActiveProcess)
-                    ? "等待中 …"
-                    : $"活动窗口：{s.ActiveProcess}{(s.IsFullscreen ? "（全屏）" : "")}";
-            }
-            if (_settingsDetailLabel.Text != detail) _settingsDetailLabel.Text = detail;
-
-            if (_btnResume != null && _swPauseAutomation != null)
-            {
-                bool show = s.Override != HdrOverride.None;
-                if (_btnResume.Visible != show)
-                    BeginInvoke(new Action(() => { if (!_btnResume.IsDisposed) _btnResume.Visible = show; }));
-
                 bool wasPaused = _swPauseAutomation.Checked;
                 bool isPaused = s.Paused && s.Override == HdrOverride.None;
                 if (wasPaused != isPaused)
