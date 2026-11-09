@@ -57,6 +57,9 @@ namespace SmartHdrManager
         // Per-game brightness settings (process name -> brightness 0-100)
         public Dictionary<string, int> PerGameBrightness { get; set; } = new();
 
+        // Per-user-added-program HDR on/off (process name -> HDR enabled)
+        public Dictionary<string, bool> GameHdrModes { get; set; } = new();
+
         public bool EnableHdrOnProcessStart { get; set; } = true;
         public int ProcessScanIntervalMs { get; set; } = 100;
         // Off by default: the Windows task it uses needs administrator rights on most PCs
@@ -276,6 +279,7 @@ namespace SmartHdrManager
         public string? ExePath { get; set; }                    // main exe, used for the icon
         public int ScanVersion { get; set; }                    // version of the scan when this game was detected
         public int Brightness { get; set; } = 50;              // per-game TV brightness (0-100, default 50)
+        public bool HdrEnabled { get; set; } = true;           // per-game HDR on/off toggle
     }
 
     /// <summary>

@@ -1808,6 +1808,7 @@ namespace SmartHdrManager
                 var hdr = new HashSet<string>(Config.HdrGamesAndApps ?? new List<string>(), Cmp);
                 var paths = Config.ProgramPaths ?? new Dictionary<string, string>();
                 var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
+                var hdrModes = Config.GameHdrModes ?? new Dictionary<string, bool>();
 
                 var rows = new List<GameRow>();
                 var covered = new HashSet<string>(Cmp);
@@ -1827,7 +1828,7 @@ namespace SmartHdrManager
                         // library path, or one learned from a running game (e.g. Xbox games)
                         ExePath = game.ExePath ?? procs.Select(p => paths.TryGetValue(p, out var known) ? known : null)
                                                       .FirstOrDefault(p => p != null),
-                        Hdr = procs.Any(hdr.Contains),
+                        Hdr = game.HdrEnabled,
                         Brightness = game.Brightness
                     });
                 }
@@ -1843,7 +1844,7 @@ namespace SmartHdrManager
                         Subtitle = $"程序  ·  {proc}.exe",
                         Processes = new List<string> { proc },
                         ExePath = paths.TryGetValue(proc, out var path) ? path : null,
-                        Hdr = hdr.Contains(proc),
+                        Hdr = hdrModes.TryGetValue(proc, out var mode) ? mode : true,
                         Brightness = brightnessMap.TryGetValue(proc, out var b) ? b : 50
                     });
                 }
@@ -1857,19 +1858,39 @@ namespace SmartHdrManager
             var list = processes.ToList();
             lock (Sync)
             {
-                foreach (var name in list)
+                // Update library game HDR state
+                var games = Config.LibraryGames ?? new List<LibraryGame>();
+                bool foundLibrary = false;
+                foreach (var game in games)
                 {
-                    if (enabled)
+                    foreach (var proc in list)
                     {
-                        if (!Config.HdrGamesAndApps.Contains(name, Cmp))
-                            Config.HdrGamesAndApps.Add(name);
-                    }
-                    else
-                    {
-                        Config.HdrGamesAndApps.RemoveAll(g => g.Equals(name, StringComparison.OrdinalIgnoreCase));
+                        if (game.Processes.Contains(proc, Cmp))
+                        {
+                            game.HdrEnabled = enabled;
+                            foundLibrary = true;
+                        }
                     }
                 }
-                Config.HdrGamesAndApps.Sort(Cmp);
+
+                // Update per-program HDR mode for user-added programs
+                if (!foundLibrary)
+                {
+                    var hdrModes = Config.GameHdrModes ?? new Dictionary<string, bool>();
+                    foreach (var proc in list)
+                    {
+                        if (enabled)
+                        {
+                            hdrModes[proc] = true;
+                        }
+                        else
+                        {
+                            hdrModes.Remove(proc);
+                        }
+                    }
+                    Config.GameHdrModes = hdrModes;
+                }
+
                 InvalidateSnapshot();
                 Save();
             }
@@ -2040,6 +2061,12 @@ namespace SmartHdrManager
                 {
                     Log("LIST", $"'{procName}' 已在 HDR 列表中");
                 }
+
+                // Initialize HDR mode for new programs (default: HDR enabled)
+                var hdrModes = Config.GameHdrModes ?? new Dictionary<string, bool>();
+                hdrModes[procName] = true;
+                Config.GameHdrModes = hdrModes;
+
                 if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                     Config.ProgramPaths[procName] = exePath;   // used for the icon in the Games tab
                 InvalidateSnapshot();
@@ -2065,6 +2092,14 @@ namespace SmartHdrManager
                 {
                     Config.ProgramPaths.Remove(proc);
                 }
+
+                // Remove from GameHdrModes
+                var hdrModes = Config.GameHdrModes ?? new Dictionary<string, bool>();
+                foreach (string proc in procList)
+                {
+                    hdrModes.Remove(proc);
+                }
+                Config.GameHdrModes = hdrModes;
 
                 // Remove from LibraryGames if it's a library game
                 var libGames = Config.LibraryGames ?? new List<LibraryGame>();
