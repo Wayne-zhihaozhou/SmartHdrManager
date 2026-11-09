@@ -504,4 +504,185 @@ namespace SmartHdrManager
             }
         }
     }
+
+    /// <summary>Draws one "−"/"+" button of a stepper, shared by the settings row and the games list.</summary>
+    internal static class StepperButtons
+    {
+        private const float CornerFactor = 0.5f;
+        private const float BorderWidth = 1f;
+        private const int SymbolHalfWidth = 4;
+        private const int SymbolWidth = 8;
+
+        public static void Draw(Graphics graphics, Control owner, RectangleF rect, string symbol, bool down, bool hover)
+        {
+            Color fill = down ? Theme.ButtonPressed : hover ? Theme.ButtonHover : Theme.ButtonBack;
+
+            using (var path = Theme.RoundRect(rect, rect.Height * CornerFactor))
+            {
+                using (var brush = new SolidBrush(fill))
+                    graphics.FillPath(brush, path);
+                using (var pen = new Pen(Theme.Border, BorderWidth))
+                    graphics.DrawPath(pen, path);
+            }
+
+            var center = new RectangleF(
+                rect.X + rect.Width / 2f - owner.LogicalToDeviceUnits(SymbolHalfWidth),
+                rect.Y + rect.Height / 2f - owner.Font.Height / 2f,
+                owner.LogicalToDeviceUnits(SymbolWidth),
+                owner.Font.Height);
+
+            TextRenderer.DrawText(graphics, symbol, Theme.Semibold, Rectangle.Round(center), Theme.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        }
+    }
+
+    /// <summary>
+    /// "−  value  +" number control drawn as one control without children, so DPI scaling can never position its parts
+    /// twice. Keyboard: Left/Down = one step down, Right/Up = one step up.
+    /// </summary>
+    public sealed class NumberStepper : Control
+    {
+        private const int DefaultWidth = 130;
+        private const int DefaultHeight = 34;
+        private const int FocusInset = 4;
+        private const int FocusTop = 2;
+        private const int FocusHeightReduction = 5;
+        private const int FocusBorderAlpha = 120;
+
+        private enum Part { None, Minus, Plus }
+
+        private int _value;
+        private Part _hover = Part.None;
+        private Part _pressed = Part.None;
+
+        public event EventHandler? ValueChanged;
+
+        public NumberStepper()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            SetStyle(ControlStyles.StandardDoubleClick, false);   // fast repeated clicks all count
+            Font = Theme.Body;
+            TabStop = true;
+            Size = new Size(DefaultWidth, DefaultHeight);
+        }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int Minimum { get; set; }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int Maximum { get; set; } = 100;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int Step { get; set; } = 10;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int Value
+        {
+            get => _value;
+            set
+            {
+                int clamped = Math.Clamp(value, Minimum, Maximum);
+                if (clamped == _value) return;
+
+                _value = clamped;
+                Invalidate();
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private Rectangle MinusRect => new(0, 0, Height, Height);
+
+        private Rectangle PlusRect => new(Math.Max(0, Width - Height), 0, Height, Height);
+
+        private Part HitTest(Point location) =>
+            MinusRect.Contains(location) ? Part.Minus : PlusRect.Contains(location) ? Part.Plus : Part.None;
+
+        private bool CanChange(Part part) =>
+            Enabled && (part == Part.Minus ? _value > Minimum : part == Part.Plus && _value < Maximum);
+
+        private void Change(bool up)
+        {
+            int delta = Math.Max(1, Step);
+            Value = _value + (up ? delta : -delta);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            Part hovered = HitTest(e.Location);
+            if (hovered != _hover)
+            {
+                _hover = hovered;
+                Cursor = hovered != Part.None && CanChange(hovered) ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = Part.None;
+            _pressed = Part.None;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                Focus();
+                _pressed = HitTest(e.Location);
+                Invalidate();
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            Part released = HitTest(e.Location);
+            if (e.Button == MouseButtons.Left && released == _pressed && CanChange(released))
+                Change(released == Part.Plus);
+
+            _pressed = Part.None;
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        protected override bool IsInputKey(Keys keyData) =>
+            keyData is Keys.Left or Keys.Right or Keys.Up or Keys.Down || base.IsInputKey(keyData);
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode is Keys.Left or Keys.Down) { Change(up: false); e.Handled = true; }
+            else if (e.KeyCode is Keys.Right or Keys.Up) { Change(up: true); e.Handled = true; }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            StepperButtons.Draw(graphics, this, MinusRect, "\u2212", _pressed == Part.Minus, _hover == Part.Minus);
+            StepperButtons.Draw(graphics, this, PlusRect, "+", _pressed == Part.Plus, _hover == Part.Plus);
+
+            var valueRect = new Rectangle(Height, 0, Math.Max(0, Width - Height * 2), Height);
+            TextRenderer.DrawText(graphics, _value.ToString(), Theme.Semibold, valueRect,
+                Enabled ? Theme.Text : Theme.Muted,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+
+            if (!Focused || !ShowFocusCues) return;
+
+            int inset = LogicalToDeviceUnits(FocusInset);
+            using var pen = new Pen(Color.FromArgb(FocusBorderAlpha, Theme.Text)) { DashStyle = DashStyle.Dot };
+            graphics.DrawRectangle(pen, valueRect.X + inset, FocusTop,
+                Math.Max(0, valueRect.Width - inset * 2), Height - FocusHeightReduction);
+        }
+    }
 }

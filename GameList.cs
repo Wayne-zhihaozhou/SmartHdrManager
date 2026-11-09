@@ -563,30 +563,8 @@ namespace SmartHdrManager
                 item.Tracked ? Theme.Text : Theme.Muted,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
 
-            DrawStepperButton(graphics, minusRect, "-", _minusDown, _minusHover);
-            DrawStepperButton(graphics, plusRect, "+", _plusDown, _plusHover);
-        }
-
-        private void DrawStepperButton(Graphics graphics, RectangleF rect, string symbol, bool down, bool hover)
-        {
-            Color fill = down ? Theme.ButtonPressed : hover ? Theme.ButtonHover : Theme.ButtonBack;
-
-            using (var path = Theme.RoundRect(rect, rect.Height / 2f))
-            {
-                using (var brush = new SolidBrush(fill))
-                    graphics.FillPath(brush, path);
-                using (var pen = new Pen(Theme.Border, 1f))
-                    graphics.DrawPath(pen, path);
-            }
-
-            var center = new RectangleF(
-                rect.X + rect.Width / 2f - LogicalToDeviceUnits(4),
-                rect.Y + rect.Height / 2f - Font.Height / 2f,
-                LogicalToDeviceUnits(8),
-                Font.Height);
-
-            TextRenderer.DrawText(graphics, symbol, Theme.Semibold, Rectangle.Round(center), Theme.Text,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+            StepperButtons.Draw(graphics, this, minusRect, "\u2212", _minusDown, _minusHover);
+            StepperButtons.Draw(graphics, this, plusRect, "+", _plusDown, _plusHover);
         }
 
         /// <summary>

@@ -88,6 +88,16 @@ namespace SmartHdrManager
             return (applied, applied ? "设置成功" : "设置失败");
         }
 
+        private void OnDesktopBrightnessChanged()
+        {
+            int value = _desktopBrightness.Value;
+            _engine.Update(config => config.DesktopBrightness = value);
+
+            // Nothing from either list owns the screen right now: show the new value at once
+            var status = _engine.Status;
+            if (status.RunningGame == null && status.RunningSdrApp == null) ApplyGameBrightness(value);
+        }
+
         private void OnResetSettings()
         {
             var answer = MessageBox.Show(this,

@@ -47,6 +47,7 @@ namespace SmartHdrManager
 
         private readonly ToggleSwitch _swAutostart = new();
         private readonly ToggleSwitch _swHdrControl = new();
+        private readonly NumberStepper _desktopBrightness = new() { Minimum = 0, Maximum = 100, Step = 10 };
         private Label _hdrStatusLabel = null!;
         private Label _activityLabel = null!;
 
@@ -181,6 +182,12 @@ namespace SmartHdrManager
                 _setPaused(!_swHdrControl.Checked);
             };
 
+            _desktopBrightness.ValueChanged += (_, _) =>
+            {
+                if (_loadingSettings) return;
+                OnDesktopBrightnessChanged();
+            };
+
             Resize += (_, _) =>
             {
                 if (WindowState == FormWindowState.Minimized)
@@ -310,6 +317,7 @@ namespace SmartHdrManager
             {
                 _swHdrControl.Checked = !_engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
+                _desktopBrightness.Value = _engine.Read(config => config.DesktopBrightness);
             }
             finally { _loadingSettings = false; }
         }
