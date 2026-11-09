@@ -38,7 +38,7 @@ namespace SmartHdrManager
         private readonly List<Control> _pages = new();
 
         // Games page
-        private readonly TextBox _search = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索列表…" };
+        private readonly TextBox _search = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
         private readonly GameList _games = new() { Dock = DockStyle.Fill };
         // Settings page
         private readonly ToggleSwitch _swAutostart = new();
@@ -94,7 +94,7 @@ namespace SmartHdrManager
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            _tabs.AddTab("游戏");
+            _tabs.AddTab("HDR");
             _tabs.AddTab("电视");
             _tabs.AddTab("设置");
             _tabs.AddTab("日志");
