@@ -10,7 +10,7 @@ using System.Windows.Forms;
 namespace SmartHdrManager
 {
     /// <summary>
-    /// The settings window: a segmented tab bar, and four pages (Games, TV, Settings, Log).
+    /// The settings window: a status card on top, a segmented tab bar, and four pages (Games, TV, Settings, Log).
     /// Layout values are in 96-DPI pixels; WinForms scales them for the actual display DPI.
     /// Closing or minimizing hides it to the tray; the tray context disposes it a few seconds later to free memory.
     /// </summary>
@@ -27,6 +27,11 @@ namespace SmartHdrManager
         private static readonly string[] HotkeyModes = { HotkeySettings.WinAlt, HotkeySettings.CtrlAlt, HotkeySettings.Off };
         private readonly Icon _windowIcon = AppIcons.Create(IconStyle.Vivid, 48);
         private readonly ToolTip _toolTip = new();
+
+        // Status card
+        private readonly StatusCard _statusCard = new() { Radius = 12, Dock = DockStyle.Fill, Margin = new Padding(0) };
+        private readonly Label _hdrLabel = new() { AutoSize = true, Font = Theme.Title, ForeColor = Theme.Text };
+        private readonly Label _detailLabel = new() { AutoSize = false, AutoEllipsis = true, Font = Theme.Body, ForeColor = Theme.Muted };
 
         // Tabs
         private readonly SegmentedTabs _tabs = new() { Size = new Size(330, 40), Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = new Padding(0, 16, 0, 0) };
@@ -78,6 +83,7 @@ namespace SmartHdrManager
 
         private bool _reallyExit;
         private int _logCursor;
+        private int _lastState = -1;
         private bool _scanInFlight;
 
         public event EventHandler? HiddenToTray;
@@ -106,23 +112,27 @@ namespace SmartHdrManager
             ForeColor = Theme.Text;
             StartPosition = FormStartPosition.CenterScreen;
 
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(20) };
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(20) };
             _root = root;
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 104));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            BuildStatusCard();
+            root.Controls.Add(_statusCard, 0, 0);
 
             _tabs.AddTab("游戏");
             _tabs.AddTab("电视");
             _tabs.AddTab("设置");
             _tabs.AddTab("日志");
-            root.Controls.Add(_tabs, 0, 0);
+            root.Controls.Add(_tabs, 0, 1);
 
             AddPage(BuildGamesPage());
             AddPage(BuildTvPage());
             AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
-            root.Controls.Add(_content, 0, 1);
+            root.Controls.Add(_content, 0, 2);
 
             // Designer-style auto scaling: everything above is in 96-DPI pixels
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -134,7 +144,7 @@ namespace SmartHdrManager
             ResumeLayout(false);
             PerformLayout();
 
-            UpdateContentWidth();
+            LayoutStatusCard();
             ShowPage(0);
             WireEvents();
             LoadSettings();
@@ -161,6 +171,42 @@ namespace SmartHdrManager
         // ------------------------------------------------------------------
         // Layout
         // ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        // Layout
+        // ------------------------------------------------------------------
+        private void BuildStatusCard()
+        {
+            const int h = 104;
+            _statusCard.Size = new Size(CardWidth, h);
+            _statusCard.IndicatorX = 28;
+
+            // Initial bounds (96-DPI pixels); the real positions are set in LayoutStatusCard on every resize.
+            _hdrLabel.Location = new Point(52, 18);
+            _detailLabel.SetBounds(54, 60, CardWidth - 54 - 72, 22);
+
+            // Transparent so the animated HDR sweep on the card shows behind the text
+            _hdrLabel.BackColor = Color.Transparent;
+            _detailLabel.BackColor = Color.Transparent;
+
+            _statusCard.Controls.Add(_hdrLabel);
+            _statusCard.Controls.Add(_detailLabel);
+            _statusCard.Layout += (_, _) => LayoutStatusCard();
+        }
+
+        private void LayoutStatusCard()
+        {
+            int S(int v) => _statusCard.LogicalToDeviceUnits(v);
+            int w = _statusCard.ClientSize.Width;
+            int h = _statusCard.ClientSize.Height;
+
+            // Title + detail as one block, vertically centred
+            int detailHeight = _detailLabel.PreferredHeight;
+            int top = Math.Max(0, (h - _hdrLabel.Height - S(2) - detailHeight) / 2);
+            int left = S(52);
+            _hdrLabel.Location = new Point(left, top);
+            _detailLabel.SetBounds(left + S(2), _hdrLabel.Bottom + S(2), w - S(54) - S(72), detailHeight);
+        }
+
         private void AddPage(Control page)
         {
             page.Dock = DockStyle.Fill;
@@ -296,7 +342,9 @@ namespace SmartHdrManager
                 _swPauseAutomation.Checked = false;
                 RefreshView();
             };
-            var pauseRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(0) };
+            var pauseRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(0), Height = 34 };
+            _swPauseAutomation.SetBounds(0, 0, 80, 34);
+            _btnResume.SetBounds(90, 0, 60, 34);
             pauseRow.Controls.Add(_swPauseAutomation);
             pauseRow.Controls.Add(_btnResume);
             page.AddRow(SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", pauseRow), 68);
@@ -737,6 +785,67 @@ namespace SmartHdrManager
         public void RefreshView()
         {
             var s = _engine.Status;
+
+            // Visual state: 0 off, 1 on, 2 paused; +10 / +20 while a manual override (HDR / SDR) is active
+            int state = (s.Paused && s.Override == HdrOverride.None ? 2 : s.HdrOn ? 1 : 0) + (int)s.Override * 10;
+            if (state != _lastState)
+            {
+                _lastState = state;
+
+                _statusCard.SetState(state == 2 ? HdrVisualState.Paused : s.HdrOn ? HdrVisualState.On : HdrVisualState.Off);
+                _hdrLabel.Text = s.Override switch
+                {
+                    HdrOverride.ForceHdr => "HDR 已强制开启",
+                    HdrOverride.ForceSdr => "SDR 已强制",
+                    _ => state == 2 ? (s.HdrOn ? "HDR 开 · 已暂停" : "自动化已暂停")
+                         : s.HdrOn ? "HDR 已开启" : "HDR 已关闭"
+                };
+            }
+
+            string detail;
+            if (s.Override != HdrOverride.None)
+            {
+                string length = s.OverrideRemainingMs >= 0
+                    ? $"{Math.Max(1, (int)Math.Ceiling(s.OverrideRemainingMs / 60000.0))} 分钟剩余"
+                    : "直到您手动恢复";
+                string shortcut = HotkeySettings.Describe(_engine.Read(c => c.HotkeyModifier), 'O');
+                detail = shortcut.Length > 0 ? $"手动覆盖 · {length}  ({shortcut})" : $"手动覆盖 · {length}";
+            }
+            else if (s.Paused)
+            {
+                detail = "在恢复前不会自动切换 HDR。";
+            }
+            else if (s.BlockedBy)
+            {
+                detail = $"HDR 已被阻止 – {s.BlockedBy} 正在运行（程序 › 录制与直播）";
+            }
+            else if (s.LaunchHold)
+            {
+                detail = s.RunningGame != null ? $"以 HDR 启动 · {s.RunningGame}" : "以 HDR 启动 · 正在启动 …";
+            }
+            else if (s.WaitingForGame != null)
+            {
+                detail = $"{s.WaitingForGame} 已启动 · {s.WaitingSecondsLeft} 秒后开启 HDR（游戏选项）";
+            }
+            else if (s.RunningGame != null)
+            {
+                detail = $"HDR 游戏运行中：{s.RunningGame}";
+            }
+            else if (s.FollowingLauncher != null)
+            {
+                detail = $"{s.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
+            }
+            else if (s.HoldSecondsLeft > 0)
+            {
+                detail = $"再保持 HDR {s.HoldSecondsLeft} 秒";
+            }
+            else
+            {
+                detail = string.IsNullOrEmpty(s.ActiveProcess)
+                    ? "等待中 …"
+                    : $"活动窗口：{s.ActiveProcess}{(s.IsFullscreen ? "（全屏）" : "")}";
+            }
+            if (_detailLabel.Text != detail) _detailLabel.Text = detail;
 
             if (_btnResume != null)
             {
