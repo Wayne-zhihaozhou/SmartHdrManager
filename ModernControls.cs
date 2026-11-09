@@ -1207,14 +1207,7 @@ namespace SmartHdrManager
                 bool plusHover = h >= 0 && IsOnPlusButton(e.Location, h);
                 if (h != _hover || thumbHover != _thumbHover || minusHover != _minusHover || plusHover != _plusHover)
                 {
-                    if (minusHover || plusHover)
-                    {
-                        _hover = -1;
-                    }
-                    else
-                    {
-                        _hover = h;
-                    }
+                    _hover = h;
                     _thumbHover = thumbHover;
                     _minusHover = minusHover;
                     _plusHover = plusHover;
