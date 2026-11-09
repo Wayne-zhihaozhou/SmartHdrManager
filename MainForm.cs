@@ -45,9 +45,10 @@ namespace SmartHdrManager
         private Label _hdrStatusLabel = null!;
         private Label _activityLabel = null!;
         private Panel _activityPanel = null!;
+        private ToggleSwitch _swTvEnabled = null!;
+        private ToggleSwitch _swAutoSwitch = null!;
 
         private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
-
 
         // Log page
         private readonly TextBox _log = new()
@@ -91,13 +92,13 @@ namespace SmartHdrManager
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             _tabs.AddTab("HDR");
-            _tabs.AddTab("电视");
+            _tabs.AddTab("测试");
             _tabs.AddTab("设置");
             _tabs.AddTab("日志");
             root.Controls.Add(_tabs, 0, 0);
 
             AddPage(BuildGamesPage());
-            AddPage(BuildTvPage());
+            AddPage(BuildTestPage());
             AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
             root.Controls.Add(_content, 0, 1);
@@ -279,6 +280,23 @@ namespace SmartHdrManager
                 page.AddRow(SettingRow(title, desc, sw), 68);
             }
 
+            // ---- TV Control ----
+            Section("电视控制", "启用电视控制和自动切换。");
+            _swTvEnabled = new ToggleSwitch { Checked = TvConfig.Enabled };
+            _swAutoSwitch = new ToggleSwitch { Checked = TvConfig.AutoSwitchEnabled };
+            page.AddRow(SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _swTvEnabled), 68);
+            page.AddRow(SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _swAutoSwitch), 68);
+            _swTvEnabled.CheckedChanged += (_, _) =>
+            {
+                if (_loadingSettings) return;
+                SaveTvPageSettings();
+            };
+            _swAutoSwitch.CheckedChanged += (_, _) =>
+            {
+                if (_loadingSettings) return;
+                SaveTvPageSettings();
+            };
+
             // ---- Advanced ----
             Section("高级", "设置文件、日志和重置。");
             var advanced = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
@@ -371,7 +389,7 @@ namespace SmartHdrManager
             return row;
         }
 
-        private Control BuildTvPage()
+        private Control BuildTestPage()
         {
             var page = new SmoothScrollTable { ColumnCount = 1, Margin = new Padding(0), AutoScroll = true, Padding = new Padding(0, 0, SystemInformation.VerticalScrollBarWidth, 0) };
             page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -459,41 +477,18 @@ namespace SmartHdrManager
                 }
             };
 
-            // ---- TV Control ----
-            var _tvEnabledSwitch = new ToggleSwitch { Checked = true };
-            var tvEnabledRow = SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _tvEnabledSwitch);
-            page.AddRow(tvEnabledRow, 68);
-
-            // ---- Auto Switch ----
-            var _autoSwitchEnabled = new ToggleSwitch { Checked = true };
-            var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
-            page.AddRow(autoSwitchRow, 68);
-
-            // ---- Wire events ----
-            _tvEnabledSwitch.CheckedChanged += (_, _) => SaveTvPageSettings();
-            _autoSwitchEnabled.CheckedChanged += (_, _) => SaveTvPageSettings();
-
-            // Store controls for save/load
-            _tvPageControls = (_tvEnabledSwitch, _autoSwitchEnabled);
-
-            // Load saved TV settings into controls
-            LoadTvPageControls();
-
             page.AddFillerRow();
             return page;
         }
 
         // TV page controls for save/load
-        private (ToggleSwitch enabled, ToggleSwitch autoSwitch)
-            _tvPageControls;
-
         private void LoadTvPageControls()
         {
             _loadingSettings = true;
             try
             {
-                _tvPageControls.enabled.Checked = TvConfig.Enabled;
-                _tvPageControls.autoSwitch.Checked = TvConfig.AutoSwitchEnabled;
+                _swTvEnabled.Checked = TvConfig.Enabled;
+                _swAutoSwitch.Checked = TvConfig.AutoSwitchEnabled;
             }
             finally { _loadingSettings = false; }
         }
@@ -503,8 +498,8 @@ namespace SmartHdrManager
             var config = _engine.Read(c => c);
             if (config.Brightness == null) config.Brightness = new BrightnessConfig();
             var bc = config.Brightness;
-            bc.Enabled = _tvPageControls.enabled.Checked;
-            bc.AutoSwitchEnabled = _tvPageControls.autoSwitch.Checked;
+            bc.Enabled = _swTvEnabled.Checked;
+            bc.AutoSwitchEnabled = _swAutoSwitch.Checked;
             _engine.Update(c => c.Brightness = bc);
             
             // 同步更新 TvConfig 静态字段，确保快捷键回调读取最新值
@@ -885,6 +880,8 @@ namespace SmartHdrManager
             {
                 _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
+                _swTvEnabled.Checked = TvConfig.Enabled;
+                _swAutoSwitch.Checked = TvConfig.AutoSwitchEnabled;
 
                 // Monitors: explicit selection if set, otherwise "primary only" / "all HDR monitors"
                 var selection = _engine.Read(c => (c.SelectedMonitors ?? new List<string>()).ToList());
