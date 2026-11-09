@@ -941,8 +941,6 @@ namespace SmartHdrManager
         private float _offset;             // current scroll position in pixels
         private float _target;             // where the scroll animation is heading
         private int _hover = -1;
-        private int _hoverMinusRow = -1;
-        private int _hoverPlusRow = -1;
         private int _selected = -1;
         private int _pressed = -1;
         private bool _pressedOnMinus;
@@ -1201,14 +1199,10 @@ namespace SmartHdrManager
             {
                 bool thumbHover = OnScrollbar(e.Location);
                 int h = IndexAt(e.Location);
-                int minusRow = _hover >= 0 && _hover < _items.Count && IsOnMinusButton(e.Location, _hover) ? _hover : -1;
-                int plusRow = _hover >= 0 && _hover < _items.Count && IsOnPlusButton(e.Location, _hover) ? _hover : -1;
-                if (h != _hover || thumbHover != _thumbHover || minusRow != _hoverMinusRow || plusRow != _hoverPlusRow || (h >= 0 && _hoverMinusRow != -1) || (h >= 0 && _hoverPlusRow != -1))
+                if (h != _hover || thumbHover != _thumbHover)
                 {
                     _hover = h;
                     _thumbHover = thumbHover;
-                    _hoverMinusRow = minusRow;
-                    _hoverPlusRow = plusRow;
                     Invalidate();
                 }
             }
@@ -1221,8 +1215,6 @@ namespace SmartHdrManager
             {
                 _hover = -1;
                 _thumbHover = false;
-                _hoverMinusRow = -1;
-                _hoverPlusRow = -1;
                 Invalidate();
             }
             base.OnMouseLeave(e);
@@ -1498,9 +1490,8 @@ namespace SmartHdrManager
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
             
             // Draw minus button
-            Color minusFill = _pressedOnMinus ? Theme.ButtonPressed : _hoverMinusRow == _pressed ? Theme.ButtonPressed : _hoverMinusRow >= 0 ? Theme.ButtonHover : Theme.ButtonBack;
             using var minusPath = Theme.RoundRect(minusRect, minusRect.Height / 2f);
-            using var minusBrush = new SolidBrush(minusFill);
+            using var minusBrush = new SolidBrush(_pressedOnMinus ? Theme.Muted : Theme.ButtonBack);
             g.FillPath(minusBrush, minusPath);
             using var minusPen = new Pen(Theme.Border, 1f);
             g.DrawPath(minusPen, minusPath);
@@ -1513,9 +1504,8 @@ namespace SmartHdrManager
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
             
             // Draw plus button
-            Color plusFill = _pressedOnPlus ? Theme.ButtonPressed : _hoverPlusRow == _pressed ? Theme.ButtonPressed : _hoverPlusRow >= 0 ? Theme.ButtonHover : Theme.ButtonBack;
             using var plusPath = Theme.RoundRect(plusRect, plusRect.Height / 2f);
-            using var plusBrush = new SolidBrush(plusFill);
+            using var plusBrush = new SolidBrush(_pressedOnPlus ? Theme.Muted : Theme.ButtonBack);
             g.FillPath(plusBrush, plusPath);
             using var plusPen = new Pen(Theme.Border, 1f);
             g.DrawPath(plusPen, plusPath);
