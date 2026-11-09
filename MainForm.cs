@@ -331,31 +331,24 @@ namespace SmartHdrManager
             Theme.UseDarkScrollbars(page);
             _settingsPage = page;
 
-            int Add(Control c, int height)
-            {
-                page.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
-                int row = page.RowStyles.Count - 1;
-                page.Controls.Add(c, 0, row);
-                return row;
-            }
             void Section(string title, string description, bool first = false)
             {
-                Add(SectionHeader(title), first ? 34 : 46);
-                Add(SectionDescription(description), 30);
+                page.AddRow(SectionHeader(title), first ? 34 : 46);
+                page.AddRow(SectionDescription(description), 30);
             }
 
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
-            Add(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
+            page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
             var scanRow = SettingRow("查找新游戏", "在磁盘上搜索新安装的游戏。", _scanInterval);
             _scanIntervalDesc = RowDescription(scanRow);
-            Add(scanRow, 68);
-            Add(SettingRow("键盘快捷键", "+ H：此游戏使用 HDR  ·  + I：从不使用 HDR  ·  + O：强制 HDR / SDR", _hotkeyChoice), 68);
+            page.AddRow(scanRow, 68);
+            page.AddRow(SettingRow("键盘快捷键", "+ H：此游戏使用 HDR  ·  + I：从不使用 HDR  ·  + O：强制 HDR / SDR", _hotkeyChoice), 68);
             var neverButton = new ModernButton { Text = "显示列表", AutoSize = true };
             neverButton.Click += (_, _) => OnManageNeverHdr();
             var neverRow = SettingRow("从不 HDR 的游戏", "您排除的游戏 – 可在此撤销。", neverButton);
             _neverHdrDesc = RowDescription(neverRow);
-            Add(neverRow, 68);
+            page.AddRow(neverRow, 68);
 
             // ---- Monitors ----
             var monitors = _engine.GetMonitors();
@@ -371,18 +364,18 @@ namespace SmartHdrManager
                     ? "此显示器不支持 HDR。"
                     : $"HDR 当前{(monitor.HdrEnabled ? "开启" : "关闭")}";
                 _monitorSwitches.Add((monitor, sw));
-                Add(SettingRow(title, desc, sw), 68);
+                page.AddRow(SettingRow(title, desc, sw), 68);
             }
 
             // ---- Switching back ----
             Section("切回 SDR", "本程序只切回自己开启的 HDR。您开启的 HDR 保持开启。");
-            Add(SettingRow("HDR 最短时长", "快速启动 / 停止时减少黑屏。", _minimumHdr), 68);
-            Add(SettingRow("保持桌面为 SDR", "同时切回您或其他程序开启的 HDR。", _swKeepDesktopSdr), 68);
+            page.AddRow(SettingRow("HDR 最短时长", "快速启动 / 停止时减少黑屏。", _minimumHdr), 68);
+            page.AddRow(SettingRow("保持桌面为 SDR", "同时切回您或其他程序开启的 HDR。", _swKeepDesktopSdr), 68);
 
             // ---- Display fixes ----
             Section("显示修复", "修复退出 HDR 后的副作用。");
-            Add(SettingRow("重新加载颜色配置文件", "HDR 后重新应用您的校准（可能需要管理员权限）。", _swColorProfile), 68);
-            Add(SettingRow("刷新应用", "修复 Chrome 等程序在 HDR 后变暗的问题。", _swRefreshApps), 68);
+            page.AddRow(SettingRow("重新加载颜色配置文件", "HDR 后重新应用您的校准（可能需要管理员权限）。", _swColorProfile), 68);
+            page.AddRow(SettingRow("刷新应用", "修复 Chrome 等程序在 HDR 后变暗的问题。", _swRefreshApps), 68);
 
             // ---- Advanced ----
             Section("高级", "设置文件、日志和重置。");
@@ -403,9 +396,9 @@ namespace SmartHdrManager
             advanced.Controls.Add(reload);
             advanced.Controls.Add(openLog);
             advanced.Controls.Add(reset);
-            Add(advanced, 52);
+            page.AddRow(advanced, 52);
 
-            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // filler
+            page.AddFillerRow();
             return page;
         }
 
@@ -483,17 +476,10 @@ namespace SmartHdrManager
             page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             Theme.UseDarkScrollbars(page);
 
-            int Add(Control c, int height)
-            {
-                page.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
-                int row = page.RowStyles.Count - 1;
-                page.Controls.Add(c, 0, row);
-                return row;
-            }
             void Section(string title, string description, bool first = false)
             {
-                Add(SectionHeader(title), first ? 34 : 46);
-                Add(SectionDescription(description), 30);
+                page.AddRow(SectionHeader(title), first ? 34 : 46);
+                page.AddRow(SectionDescription(description), 30);
             }
 
             // ---- Test ----
@@ -510,7 +496,7 @@ namespace SmartHdrManager
             testPanel.Controls.Add(btnBrightness0);
             testPanel.Controls.Add(btnBrightness100);
             testPanel.Controls.Add(testStatusLabel);
-            Add(testPanel, 52);
+            page.AddRow(testPanel, 52);
 
             testBtn.Click += async (_, _) =>
             {
@@ -575,12 +561,12 @@ namespace SmartHdrManager
             // ---- TV Control ----
             var _tvEnabledSwitch = new ToggleSwitch { Checked = true };
             var tvEnabledRow = SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _tvEnabledSwitch);
-            Add(tvEnabledRow, 68);
+            page.AddRow(tvEnabledRow, 68);
 
             // ---- Auto Switch ----
             var _autoSwitchEnabled = new ToggleSwitch { Checked = true };
             var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
-            Add(autoSwitchRow, 68);
+            page.AddRow(autoSwitchRow, 68);
 
             // ---- Wire events ----
             _tvEnabledSwitch.CheckedChanged += (_, _) => SaveTvPageSettings();
@@ -592,8 +578,7 @@ namespace SmartHdrManager
             // Load saved TV settings into controls
             LoadTvPageControls();
 
-            // Filler row to absorb remaining space (prevents the last content row from stretching)
-            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            page.AddFillerRow();
             return page;
         }
 

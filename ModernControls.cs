@@ -1542,7 +1542,7 @@ namespace SmartHdrManager
     }
 
     /// <summary>
-    /// TableLayoutPanel with smooth, animated mouse-wheel scrolling (used for the Settings page).
+    /// TableLayoutPanel with smooth, animated mouse-wheel scrolling (used for the Settings and TV pages).
     /// The native scrollbar still works for dragging; the animation picks up from wherever it is.
     /// </summary>
     public sealed class SmoothScrollTable : TableLayoutPanel
@@ -1561,6 +1561,26 @@ namespace SmartHdrManager
             {
                 if (!_animation.IsRunning) _current = _target = -AutoScrollPosition.Y;
             };
+        }
+
+        /// <summary>Adds a row of the given height in 96-DPI pixels and puts <paramref name="control"/> in it.</summary>
+        public void AddRow(Control control, int height)
+        {
+            RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            RowCount = RowStyles.Count;
+            Controls.Add(control, 0, RowCount - 1);
+        }
+
+        /// <summary>
+        /// Adds an empty row that takes the height the content leaves over, so a short page keeps its rows at their
+        /// own height instead of stretching the last one. The row must be counted in <see cref="TableLayoutPanel.RowCount"/>:
+        /// a table whose row count is still unset lays out only the rows that hold controls and gives all the remaining
+        /// height to the last of them.
+        /// </summary>
+        public void AddFillerRow()
+        {
+            RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            RowCount = RowStyles.Count;
         }
 
         private float MaxScroll => Math.Max(0, DisplayRectangle.Height - ClientSize.Height);
