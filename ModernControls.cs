@@ -849,7 +849,6 @@ namespace SmartHdrManager
             Processes = row.Processes;
             ExePath = row.ExePath;
             Hdr = row.Hdr;
-            Excluded = row.Excluded;
         }
 
         public string Key { get; }
@@ -858,7 +857,6 @@ namespace SmartHdrManager
         public List<string> Processes { get; }
         public string? ExePath { get; }
         public bool Hdr { get; set; }
-        public bool Excluded { get; }      // "Never HDR" row (only shown while searching)
         public override string ToString() => Name;
     }
 

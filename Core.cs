@@ -28,8 +28,7 @@ namespace SmartHdrManager
         // Extra folders to search for games (the common Steam / Epic / GOG / Xbox / "Games" folders are found automatically)
         public List<string> CustomGameFolders { get; set; } = new();
 
-        // "Never HDR" (Games tab). Empty by default since 2.6.1 (2.6.0 and older shipped cs2 and valorant here).
-        public List<string> IgnoredGames { get; set; } = new();
+
 
         // Active HDR list: Only games in this list will automatically trigger HDR (empty: the user picks the games)
         public List<string> HdrGamesAndApps { get; set; } = new();
@@ -126,7 +125,6 @@ namespace SmartHdrManager
                 case "browser": return "browser";
                 case "player": return "player";
                 case "creative": return "creative";
-                case "recording": return "recording";
                 default: return null;
             }
         }
@@ -138,7 +136,6 @@ namespace SmartHdrManager
         public const string Sdr = "sdr";
         public const string HdrOnly = "hdr_only";
         public const string Auto = "auto";
-        public const string NoHdr = "no_hdr";
 
         public static string Normalize(string category, string? mode)
         {
@@ -149,8 +146,6 @@ namespace SmartHdrManager
                     return mode switch { Off => Off, HdrOnly => HdrOnly, _ => Auto };
                 case "creative":
                     return mode switch { Sdr => Sdr, _ => Off };
-                case "recording":
-                    return mode switch { Off => Off, NoHdr => NoHdr, _ => Auto };
                 default:
                     return Off;
             }
@@ -483,7 +478,6 @@ namespace SmartHdrManager
             }
 
             var discoveredSet = new HashSet<string>(config.DiscoveredGames, StringComparer.OrdinalIgnoreCase);
-            var ignoredSet = new HashSet<string>(config.IgnoredGames, StringComparer.OrdinalIgnoreCase);
             int newlyDiscoveredCount = 0;
 
             foreach (var root in searchRoots)
@@ -506,7 +500,7 @@ namespace SmartHdrManager
                             if (foundPaths != null && !foundPaths.ContainsKey(exeName))
                                 foundPaths[exeName] = exePath;
 
-                            if (!discoveredSet.Contains(exeName) && !ignoredSet.Contains(exeName))
+                            if (!discoveredSet.Contains(exeName))
                             {
                                 config.DiscoveredGames.Add(exeName);
                                 discoveredSet.Add(exeName);

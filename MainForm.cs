@@ -49,7 +49,6 @@ namespace SmartHdrManager
         private Label _activityLabel = null!;
         private Panel _activityPanel = null!;
 
-        private Label? _neverHdrDesc;
         private readonly ToggleSwitch _swShowOthers = new();
 
         private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
@@ -160,7 +159,6 @@ namespace SmartHdrManager
         {
             for (int i = 0; i < _pages.Count; i++)
                 _pages[i].Visible = i == index;
-            if (index == 1) UpdateNeverHdrDescription();   // Settings: games excluded meanwhile with Win+Alt+I
         }
 
         private Control BuildGamesPage()
@@ -237,14 +235,11 @@ namespace SmartHdrManager
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 12, 0, 0), Padding = new Padding(0) };
             var addExe = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加程序", AutoSize = true };
             var addRunning = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加正在运行", AutoSize = true };
-            var exclude = new ModernButton { Glyph = Theme.GlyphCancel, Text = "从不 HDR", AutoSize = true };
             _toolTip.SetToolTip(addExe, "选择游戏的 .exe 文件");
             _toolTip.SetToolTip(addRunning, "从正在运行的程序中选择");
-            _toolTip.SetToolTip(exclude, "选定的游戏将从不使用 HDR。撤销：设置 › 从不 HDR 的游戏，或在此搜索该游戏");
             addExe.Click += (_, _) => OnAddExe();
             addRunning.Click += (_, _) => OnAddRunning();
-            exclude.Click += (_, _) => OnExclude();
-            foreach (var b in new Control[] { addExe, addRunning, exclude })
+            foreach (var b in new Control[] { addExe, addRunning })
             {
                 b.Margin = new Padding(0, 0, 8, 0);
                 buttons.Controls.Add(b);
@@ -287,11 +282,6 @@ namespace SmartHdrManager
             var pauseRow = SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", _swPauseAutomation);
             page.AddRow(pauseRow, 68);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
-            var neverButton = new ModernButton { Text = "显示列表", AutoSize = true };
-            neverButton.Click += (_, _) => OnManageNeverHdr();
-            var neverRow = SettingRow("从不 HDR 的游戏", "您排除的游戏 – 可在此撤销。", neverButton);
-            _neverHdrDesc = RowDescription(neverRow);
-            page.AddRow(neverRow, 68);
 
             // ---- Monitors ----
             var monitors = _engine.GetMonitors();
@@ -568,12 +558,8 @@ namespace SmartHdrManager
 
             _games.HdrToggled += (_, item) =>
             {
-                _engine.SetGameHdr(item.Processes, item.Hdr, item.Name);   // turning it on also undoes "Never HDR"
-                if (item.Excluded)
-                {
-                    BeginInvoke(new Action(RebuildGames));   // not inside the list's own click handler
-                    UpdateNeverHdrDescription();
-                }
+                _engine.SetGameHdr(item.Processes, item.Hdr, item.Name);
+                BeginInvoke(new Action(RebuildGames));
                 UpdateGamesCount();
             };
             _engine.LibraryChanged += OnLibraryChanged;
@@ -794,8 +780,7 @@ namespace SmartHdrManager
         {
             string filter = _search.Text.Trim();
             bool showOthers = _engine.Read(c => c.ShowOtherPrograms);
-            // "Never HDR" games are hidden from the list, but a search finds them so they can be turned back on
-            var items = _engine.GetGameRows(showOthers, includeExcluded: filter.Length > 0)
+            var items = _engine.GetGameRows(showOthers)
                 .Where(r => filter.Length == 0 ||
                             r.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
                             r.Subtitle.Contains(filter, StringComparison.OrdinalIgnoreCase))
@@ -836,161 +821,6 @@ namespace SmartHdrManager
             if (picked == null) return;
             _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path);
             RebuildGames();
-        }
-
-        private void OnExclude()
-        {
-            if (_games.SelectedItem is not GameItem item)
-            {
-                MessageBox.Show(this, "请先在列表中选择游戏。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            _engine.IgnoreProcesses(item.Processes, item.Name);
-            RebuildGames();
-            UpdateNeverHdrDescription();
-        }
-
-        /// <summary>
-        /// "Never HDR" games with a way to undo it (2.6.1 – before, excluded games could only be undone in config.json).
-        /// The same list as the Games tab: icon, name, source and a switch. Switch on = HDR for the game (like in the
-        /// Games tab, it is no longer excluded); Restore = no longer excluded, HDR stays off.
-        /// </summary>
-        private void OnManageNeverHdr()
-        {
-            const string prefix = "从不 HDR  ·  ";
-            var items = _engine.GetExcludedRows()
-                .Select(r => new GameItem(new GameRow
-                {
-                    Key = r.Key, Name = r.Name, Processes = r.Processes, ExePath = r.ExePath, Excluded = true,
-                    Subtitle = r.Subtitle.StartsWith(prefix, StringComparison.Ordinal) ? r.Subtitle[prefix.Length..] : r.Subtitle
-                }))
-                .ToList();
-
-            using var dlg = new Form
-            {
-                Text = "从不 HDR 的游戏",
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false,
-                BackColor = Theme.Back, ForeColor = Theme.Text, Font = Theme.Body,
-                Icon = _windowIcon, KeyPreview = true,
-                Padding = new Padding(16)
-            };
-            dlg.HandleCreated += (_, _) => Theme.StyleWindow(dlg.Handle);
-            dlg.KeyDown += (_, e) =>
-            {
-                if (e.KeyCode == Keys.Escape)
-                {
-                    dlg.DialogResult = DialogResult.Cancel;
-                    e.Handled = e.SuppressKeyPress = true;
-                }
-            };
-
-            dlg.SuspendLayout();
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = new Padding(0) };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));    // title + count
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // description
-            table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));    // the list
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));    // buttons
-
-            // Title on the left, "2 games" on the right (like "6 with HDR · 36 shown" in the Games tab)
-            var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
-            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            header.Controls.Add(new Label
-            {
-                Text = "从不 HDR 的游戏", Font = Theme.Section, ForeColor = Theme.Text, Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true, Margin = new Padding(2, 0, 0, 0)
-            }, 0, 0);
-            var count = new Label { AutoSize = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(12, 0, 2, 0) };
-            header.Controls.Add(count, 1, 0);
-            table.Controls.Add(header, 0, 0);
-
-            table.Controls.Add(new Label
-            {
-                Text = "开启某个游戏即可再次为其使用 HDR，或选中游戏后点击“恢复”。",
-                Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, Dock = DockStyle.Fill, UseMnemonic = false,
-                TextAlign = ContentAlignment.TopLeft, AutoEllipsis = true, Margin = new Padding(2, 0, 2, 6)
-            }, 0, 1);
-
-            // The list, in the same rounded card as the Games tab
-            var listCard = new RoundedPanel { Radius = 12, BackColor = Theme.Surface, Dock = DockStyle.Fill, Margin = new Padding(0), Padding = new Padding(6) };
-            var list = new GameList { Dock = DockStyle.Fill };
-            var empty = new Label
-            {
-                Text = "没有游戏被排除。\n在游戏选项卡中点击“从不 HDR”可把游戏添加到这里。",
-                Font = Theme.Body, ForeColor = Theme.Muted, BackColor = Theme.Surface, Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleCenter, UseMnemonic = false
-            };
-            listCard.Controls.Add(list);
-            listCard.Controls.Add(empty);
-            table.Controls.Add(listCard, 0, 2);
-
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Margin = new Padding(0, 12, 0, 0) };
-            var close = new ModernButton { Text = "关闭", Primary = true, AutoSize = true, Margin = new Padding(8, 0, 0, 0) };
-            var restore = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "恢复", AutoSize = true, Margin = new Padding(0) };
-            // Own tooltip for this dialog: the main window's tooltip would keep the closed dialog's button alive
-            using var tips = new ToolTip();
-            tips.SetToolTip(restore, "把选中的游戏移除此列表 – 直到您在游戏选项卡中开启它，HDR 保持关闭");
-            buttons.Controls.Add(close);
-            buttons.Controls.Add(restore);
-            table.Controls.Add(buttons, 0, 3);
-
-            void ShowItems(List<GameItem> rows)
-            {
-                list.SetItems(rows, list.SelectedItem?.Key);
-                list.Visible = rows.Count > 0;
-                empty.Visible = rows.Count == 0;
-                restore.Enabled = rows.Count > 0;
-                int on = rows.Count(i => i.Hdr);
-                count.Text = rows.Count == 1 ? "1 个游戏" : $"{rows.Count} 个游戏";
-                if (on > 0) count.Text += $" · {on} 个已恢复 HDR";
-            }
-
-            // Switch on: HDR for the game (this also undoes "Never HDR"). Switch off again: back to "Never HDR".
-            list.HdrToggled += (_, item) =>
-            {
-                if (item.Hdr)
-                    _engine.SetGameHdr(item.Processes, true, item.Name);
-                else
-                    _engine.IgnoreProcesses(item.Processes, item.Name);
-                int on = list.Items.Count(i => i.Hdr);
-                count.Text = (list.Items.Count == 1 ? "1 个游戏" : $"{list.Items.Count} 个游戏") + (on > 0 ? $" · {on} 个已恢复 HDR" : "");
-            };
-            restore.Click += (_, _) =>
-            {
-                if (list.SelectedItem is not GameItem item)
-                {
-                    MessageBox.Show(dlg, "请先在列表中选择游戏。", dlg.Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                if (!item.Hdr)   // switched on already = not excluded any more
-                    _engine.RestoreProcesses(item.Processes, item.Name);
-                ShowItems(list.Items.Where(i => i.Key != item.Key).ToList());
-            };
-            close.Click += (_, _) => dlg.DialogResult = DialogResult.OK;
-
-            dlg.Controls.Add(table);
-            dlg.AutoScaleDimensions = new SizeF(96F, 96F);
-            dlg.AutoScaleMode = AutoScaleMode.Dpi;
-            dlg.ClientSize = new Size(560, 500);
-            dlg.ResumeLayout(false);
-            ShowItems(items);
-            dlg.ShowDialog(this);
-
-            RebuildGames();
-            UpdateNeverHdrDescription();
-        }
-
-        /// <summary>Settings › Never HDR games: "2 games excluded – undo it here."</summary>
-        private void UpdateNeverHdrDescription()
-        {
-            if (_neverHdrDesc == null || IsDisposed) return;
-            int count = _engine.GetExcludedRows().Count;
-            _neverHdrDesc.Text = count == 0 ? "无。在游戏选项卡中点击“从不 HDR”可把游戏添加到这里。"
-                : count == 1 ? "1 个游戏被排除 – 在这里恢复。"
-                : $"{count} 个游戏被排除 – 在这里恢复。";
         }
 
         private void OnLibraryChanged(object? sender, EventArgs e)
@@ -1098,7 +928,6 @@ namespace SmartHdrManager
                         ? selection.Contains(monitor.DevicePath, StringComparer.OrdinalIgnoreCase)
                         : !onlyPrimary || monitor.IsPrimary);
                 }
-                UpdateNeverHdrDescription();
             }
             finally { _loadingSettings = false; }
         }
