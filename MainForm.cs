@@ -122,14 +122,14 @@ namespace SmartHdrManager
             root.Controls.Add(_statusCard, 0, 0);
 
             _tabs.AddTab("游戏");
-            _tabs.AddTab("设置");
             _tabs.AddTab("电视");
+            _tabs.AddTab("设置");
             _tabs.AddTab("日志");
             root.Controls.Add(_tabs, 0, 1);
 
             AddPage(BuildGamesPage());
-            AddPage(BuildSettingsPage());
             AddPage(BuildTvPage());
+            AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
             root.Controls.Add(_content, 0, 2);
 
