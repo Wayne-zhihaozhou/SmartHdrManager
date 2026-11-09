@@ -41,11 +41,10 @@ namespace SmartHdrManager
         private readonly GameList _games = new() { Dock = DockStyle.Fill };
         // Settings page
         private readonly ToggleSwitch _swAutostart = new();
-        private ToggleSwitch _swPauseAutomation = null!;
+        private readonly ToggleSwitch _swHdrControl = new();
+        private readonly ToggleSwitch _swBrightnessControl = new();
         private Label _hdrStatusLabel = null!;
         private Label _activityLabel = null!;
-        private Panel _activityPanel = null!;
-        private ToggleSwitch _swTvEnabled = null!;
 
         // Log page
         private readonly TextBox _log = new()
@@ -55,9 +54,6 @@ namespace SmartHdrManager
         };
 
         private bool _loadingSettings;
-
-        // Settings page parts that change at runtime
-        private SmoothScrollTable? _settingsPage;
 
         private bool _reallyExit;
         private int _logCursor;
@@ -69,10 +65,7 @@ namespace SmartHdrManager
             _engine = engine;
             _setPaused = setPaused;
             _exitApp = exitApp;
-            
-            // 从引擎配置加载 TvConfig，确保快捷键回调读取正确的启用状态
-            TvConfig.LoadFrom(engine.Read(c => c));
-            
+
             SuspendLayout();
 
             Text = "HDR";
@@ -231,7 +224,6 @@ namespace SmartHdrManager
             var page = new SmoothScrollTable { ColumnCount = 1, Margin = new Padding(0), AutoScroll = true, Padding = new Padding(0, 0, SystemInformation.VerticalScrollBarWidth, 0) };
             page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             Theme.UseDarkScrollbars(page);
-            _settingsPage = page;
 
             void Section(string title, string description, bool first = false)
             {
@@ -240,19 +232,10 @@ namespace SmartHdrManager
             }
 
             // ---- General ----
-            Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
+            Section("常规", "启动和自动化开关。", first: true);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
-            
-            _swPauseAutomation = new ToggleSwitch();
-            page.AddRow(SettingRow("启动 HDR 控制", "关闭后不会自动切换 HDR。", _swPauseAutomation), 68);
-
-            _swTvEnabled = new ToggleSwitch { Checked = TvConfig.Enabled };
-            page.AddRow(SettingRow("启动亮度控制", "允许通过快捷键控制电视亮度", _swTvEnabled), 68);
-            _swTvEnabled.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                SaveTvPageSettings();
-            };
+            page.AddRow(SettingRow("启用 HDR 控制", "关闭后不再自动切换 HDR。", _swHdrControl), 68);
+            page.AddRow(SettingRow("启用亮度控制", "自动按亮度规则调整电视亮度。", _swBrightnessControl), 68);
 
             // ---- Advanced ----
             Section("高级", "设置文件、日志和重置。");
@@ -285,9 +268,6 @@ namespace SmartHdrManager
             Text = text, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill, AutoEllipsis = true,
             TextAlign = ContentAlignment.TopLeft, Margin = new Padding(2, 0, 0, 6), AutoSize = false
         };
-
-        /// <summary>The description line of a <see cref="SettingRow"/> (its last label).</summary>
-        private static Label RowDescription(RoundedPanel row) => row.Controls.OfType<Label>().Last();
 
         private void OnResetSettings()
         {
@@ -363,8 +343,8 @@ namespace SmartHdrManager
 
             // ---- Activity ----
             Section("活动窗口", "当前 HDR 状态和活动窗口信息。");
-            
-            _activityPanel = new Panel { Height = 52, Margin = new Padding(0, 0, 0, 6) };
+
+            var activityPanel = new Panel { Height = 52, Margin = new Padding(0, 0, 0, 6) };
             var actTable = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
             actTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             actTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
@@ -373,8 +353,8 @@ namespace SmartHdrManager
             _activityLabel = new Label { AutoSize = false, AutoEllipsis = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill };
             actTable.Controls.Add(_hdrStatusLabel, 0, 0);
             actTable.Controls.Add(_activityLabel, 0, 1);
-            _activityPanel.Controls.Add(actTable);
-            page.AddRow(_activityPanel, 52);
+            activityPanel.Controls.Add(actTable);
+            page.AddRow(activityPanel, 52);
 
             var testBtn = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "测试连接", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
             var pairBtn = new ModernButton { Glyph = Theme.GlyphLink, Text = "重新配对", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
@@ -453,28 +433,12 @@ namespace SmartHdrManager
             return page;
         }
 
-        // TV page controls for save/load
-        private void LoadTvPageControls()
-        {
-            _loadingSettings = true;
-            try
+        private void SetBrightnessControlEnabled(bool enabled) =>
+            _engine.Update(config =>
             {
-                _swTvEnabled.Checked = TvConfig.Enabled;
-            }
-            finally { _loadingSettings = false; }
-        }
-
-        private void SaveTvPageSettings()
-        {
-            var config = _engine.Read(c => c);
-            if (config.Brightness == null) config.Brightness = new BrightnessConfig();
-            var bc = config.Brightness;
-            bc.Enabled = _swTvEnabled.Checked;
-            _engine.Update(c => c.Brightness = bc);
-            
-            // 同步更新 TvConfig 静态字段，确保快捷键回调读取最新值
-            TvConfig.LoadFrom(config);
-        }
+                config.Brightness ??= new BrightnessConfig();
+                config.Brightness.Enabled = enabled;
+            });
 
         private Control BuildLogPage()
         {
@@ -517,10 +481,16 @@ namespace SmartHdrManager
                 }
             };
 
-            _swPauseAutomation!.CheckedChanged += (_, _) =>
+            _swHdrControl.CheckedChanged += (_, _) =>
             {
                 if (_loadingSettings) return;
-                _setPaused(_swPauseAutomation.Checked);
+                _setPaused(!_swHdrControl.Checked);
+            };
+
+            _swBrightnessControl.CheckedChanged += (_, _) =>
+            {
+                if (_loadingSettings) return;
+                SetBrightnessControlEnabled(_swBrightnessControl.Checked);
             };
 
             Resize += (_, _) =>
@@ -622,10 +592,6 @@ namespace SmartHdrManager
                 {
                     activity = "在恢复前不会自动切换 HDR。";
                 }
-                else if (s.BlockedBy)
-                {
-                    activity = $"HDR 已被阻止 – {s.BlockedBy} 正在运行（程序 › 录制与直播）";
-                }
                 else if (s.LaunchHold)
                 {
                     activity = s.RunningGame != null ? $"以 HDR 启动 · {s.RunningGame}" : "以 HDR 启动 · 正在启动 …";
@@ -637,10 +603,6 @@ namespace SmartHdrManager
                 else if (s.FollowingLauncher != null)
                 {
                     activity = $"{s.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
-                }
-                else if (s.HoldSecondsLeft > 0)
-                {
-                    activity = $"再保持 HDR {s.HoldSecondsLeft} 秒";
                 }
                 else
                 {
@@ -662,18 +624,13 @@ namespace SmartHdrManager
                     BeginInvoke(new Action(() => { if (!_hdrStatusLabel.IsDisposed) _hdrStatusLabel.ForeColor = color; }));
             }
 
-            // Update pause automation switch state
-            if (_swPauseAutomation != null)
-            {
-                bool wasPaused = _swPauseAutomation.Checked;
-                bool isPaused = _engine.Paused;
-                if (wasPaused != isPaused)
-                    BeginInvoke(new Action(() =>
-                    {
-                        if (!_swPauseAutomation.IsDisposed)
-                            _swPauseAutomation.Checked = isPaused;
-                    }));
-            }
+            // Update HDR control switch state
+            bool controlEnabled = !_engine.Paused;
+            if (_swHdrControl.Checked != controlEnabled)
+                BeginInvoke(new Action(() =>
+                {
+                    if (!_swHdrControl.IsDisposed) _swHdrControl.Checked = controlEnabled;
+                }));
 
             var lines = _engine.ReadLog(ref _logCursor);
             if (lines.Length > 0)
@@ -687,10 +644,6 @@ namespace SmartHdrManager
         // ------------------------------------------------------------------
         // Games page
         // ------------------------------------------------------------------
-        /// <summary>45 -> "45 s", 299 -> "4:59 min".</summary>
-        private static string FormatSeconds(int seconds) =>
-            seconds < 60 ? $"{seconds} 秒" : $"{seconds / 60}:{seconds % 60:00} 分钟";
-
         private void RebuildGames()
         {
             string filter = _search.Text.Trim();
@@ -819,9 +772,9 @@ namespace SmartHdrManager
             _loadingSettings = true;
             try
             {
-                _swPauseAutomation!.Checked = _engine.Paused;
+                _swHdrControl.Checked = !_engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
-                _swTvEnabled.Checked = TvConfig.Enabled;
+                _swBrightnessControl.Checked = _engine.Read(c => c.Brightness?.Enabled ?? true);
             }
             finally { _loadingSettings = false; }
         }

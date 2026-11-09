@@ -1,195 +1,166 @@
 using System;
 using System.Drawing;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace SmartHdrManager
 {
     /// <summary>
-    /// 屏幕右上角 OSD 提示：亮度调节时显示。
-    /// 使用 TopMost + Transparent + 淡入淡出动画。
-    /// 所有参数写死，无需配置。
+    /// Brightness overlay in the top-right corner of the primary monitor. It runs on its own UI thread with a real
+    /// message loop, because WinForms windows and timers do not work on a thread without one (the background thread
+    /// that applies the brightness rules has none).
     /// </summary>
-    public static class BrightnessOsd
+    internal sealed class BrightnessOsd
     {
-        private static Form? _form;
-        private static Panel? _panel;
-        private static Label? _label;
-        private static Timer? _fadeTimer;
-        private static Timer? _dismissTimer;
-        private static bool _isVisible;
-        private static int _lastBrightness;
+        private const int FadeIntervalMs = 16;
+        private const int DisplayMs = 1500;
+        private const int Padding = 18;
+        private const int Margin = 16;
+        private const int BaseDpi = 96;
+        private const int ReadyTimeoutMs = 3000;
+        private const double FadeStep = 0.06;
+        private const double VisibleOpacity = 0.9;
+        private const float FontSize = 15f;
+        private const string DefaultTitle = "亮度";
 
-        // 写死参数
-        private const int FADE_INTERVAL = 16;   // ~60fps
-        private const int FADE_STEP = 25;        // alpha step per frame
-        private const int MAX_ALPHA = 230;       // max opacity (not fully opaque)
-        private const int MIN_ALPHA = 0;
-        private const int FONT_SIZE = 18;
-        private const int DISPLAY_MS = 2000;
-        private const int PADDING_X = 20;
-        private const int MARGIN = 16;
-        private const string TITLE = "亮度";
-        private static readonly Color BG_COLOR = Color.FromArgb(0, 0, 0);
-        private static readonly Color FG_COLOR = Color.White;
+        private static readonly object Sync = new();
+        private static BrightnessOsd? _shared;
 
-        public static void Show(int brightness, string? title = null)
+        private readonly ManualResetEventSlim _ready = new(false);
+        private readonly Thread _thread;
+
+        private Form? _form;
+        private Label? _label;
+        private System.Windows.Forms.Timer? _animTimer;
+        private System.Windows.Forms.Timer? _dismissTimer;
+        private bool _fadingOut;
+        private string _lastText = string.Empty;
+
+        public static void Show(int brightness, string? source)
         {
-            if (brightness == _lastBrightness) return;
-            _lastBrightness = brightness;
-
-            if (_form == null || _form.IsDisposed)
-            {
-                CreateForm();
-            }
-
-            if (_isVisible)
-            {
-                // Reset fade-in
-                if (_fadeTimer != null) { _fadeTimer.Stop(); _fadeTimer.Dispose(); }
-                if (_dismissTimer != null) { _dismissTimer.Stop(); _dismissTimer.Dispose(); }
-                _form!.Opacity = 0;
-                _isVisible = false;
-            }
-
-            _label!.Text = $"{title ?? TITLE}: {brightness}";
-            _label.Font = new Font("Segoe UI", Math.Max(10, FONT_SIZE * 2f / 3f), FontStyle.Regular);
-            _panel!.BackColor = BG_COLOR;
-            _label.ForeColor = FG_COLOR;
-
-            // Position: top-right of primary monitor
-            var screen = Screen.PrimaryScreen;
-            if (screen != null && _form != null)
-            {
-                int dpiScale = (int)(screen.Bounds.Width * 96.0 / screen.Bounds.Width);
-                if (dpiScale == 0) dpiScale = 96; // fallback
-                int margin = dpiScale / 72 * MARGIN;
-                int padding = dpiScale / 72 * PADDING_X;
-                int height = dpiScale / 72 * 50;
-                int width = _label.PreferredSize.Width + padding * 2 + dpiScale / 72 * 60; // bar width
-
-                _panel.Size = new Size(width, height);
-                _label.SetBounds(padding, (height - _label.PreferredHeight) / 2,
-                    width - padding * 2 - dpiScale / 72 * 60, _label.Height);
-
-                _form.Location = new Point(
-                    screen.WorkingArea.Right - width - margin,
-                    screen.WorkingArea.Top + margin);
-            }
-
-            _form!.TopMost = true;
-            _form.Show();
-            _form.BringToFront();
-
-            // Fade in
-            _fadeTimer = new Timer { Interval = FADE_INTERVAL };
-            _fadeTimer.Tick += (_, _) => FadeIn();
-            _fadeTimer.Start();
-
-            // Auto dismiss
-            _dismissTimer = new Timer { Interval = DISPLAY_MS };
-            _dismissTimer.Tick += (_, _) => FadeOut();
-            _dismissTimer.Start();
+            BrightnessOsd osd;
+            lock (Sync) osd = _shared ??= new BrightnessOsd();
+            osd.ShowCore($"{source ?? DefaultTitle}: {brightness}");
         }
 
-        private static void CreateForm()
+        private BrightnessOsd()
+        {
+            _thread = new Thread(Run) { IsBackground = true, Name = "BrightnessOsd" };
+            _thread.SetApartmentState(ApartmentState.STA);
+            _thread.Start();
+            _ready.Wait(ReadyTimeoutMs);
+        }
+
+        private void Run()
         {
             _form = new Form
             {
                 FormBorderStyle = FormBorderStyle.None,
-                BackColor = Color.Black,
-                Opacity = 0,
+                StartPosition = FormStartPosition.Manual,
                 ShowInTaskbar = false,
                 TopMost = true,
-            };
-            _form.VisibleChanged += (s, e) =>
-            {
-                // Hide immediately when not visible (e.g., minimized)
-                var form = s as Form;
-                if (!_isVisible && form != null && !form.Visible)
-                {
-                    form.Hide();
-                }
-            };
-
-            _panel = new Panel
-            {
                 BackColor = Color.Black,
-                Size = new Size(200, 40),
-                Dock = DockStyle.Fill,
+                Opacity = 0,
+                AutoScaleMode = AutoScaleMode.None
             };
 
             _label = new Label
             {
-                Font = new Font("Segoe UI", 14, FontStyle.Regular),
-                ForeColor = Color.White,
-                Text = "亮度: 0",
-                TextAlign = ContentAlignment.MiddleLeft,
                 AutoSize = true,
+                BackColor = Color.Black,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", FontSize, FontStyle.Regular)
             };
+            _form.Controls.Add(_label);
 
-            _panel.Controls.Add(_label);
-            _form.Controls.Add(_panel);
+            _animTimer = new System.Windows.Forms.Timer { Interval = FadeIntervalMs };
+            _animTimer.Tick += (_, _) => OnAnimationTick();
 
-            // Rounded corner effect via region (simple approach)
-            // Note: region is set once at creation; form size changes later make it stale.
-            // Kept for compatibility; consider removing if rounded corners are not needed.
-            try { _form.Region = CreateRoundedRegion(_form, 12); } catch { }
+            _dismissTimer = new System.Windows.Forms.Timer { Interval = DisplayMs };
+            _dismissTimer.Tick += (_, _) => StartFadeOut();
+
+            _ready.Set();
+            Application.Run(new ApplicationContext());
         }
 
-        private static Region? CreateRoundedRegion(Form form, int radius)
+        private void ShowCore(string text)
         {
+            RunOnUiThread(() =>
+            {
+                if (_form == null || _label == null || _animTimer == null || _dismissTimer == null) return;
+
+                bool sameText = text == _lastText;
+                _lastText = text;
+                _label.Text = text;
+
+                int scale = Math.Max(1, _form.DeviceDpi) / BaseDpi;
+                int padding = Math.Max(1, Padding * scale);
+                int margin = Math.Max(1, Margin * scale);
+
+                int width = _label.PreferredWidth + padding * 2;
+                int height = _label.PreferredHeight + padding;
+                _form.ClientSize = new Size(width, height);
+                _label.Location = new Point(padding, Math.Max(0, (height - _label.PreferredHeight) / 2));
+
+                var screen = Screen.PrimaryScreen;
+                if (screen != null)
+                    _form.Location = new Point(screen.WorkingArea.Right - width - margin, screen.WorkingArea.Top + margin);
+
+                _dismissTimer.Stop();
+                _dismissTimer.Start();
+
+                if (sameText && _form.Visible) return;
+
+                _fadingOut = false;
+                _animTimer.Stop();
+                _form.Opacity = 0;
+                _form.Show();
+                _form.TopMost = true;
+                _animTimer.Start();
+            });
+        }
+
+        private void RunOnUiThread(Action action)
+        {
+            var form = _form;
+            if (form == null || form.IsDisposed) return;
+
             try
             {
-                if (form.Width <= 0 || form.Height <= 0) return null;
-                var g = Graphics.FromHwnd(form.Handle);
-                var path = new System.Drawing.Drawing2D.GraphicsPath();
-                path.AddArc(0, 0, radius * 2, radius * 2, 180, 90);
-                path.AddArc(form.Width - radius * 2, 0, radius * 2, radius * 2, 270, 90);
-                path.AddArc(form.Width - radius * 2, form.Height - radius * 2, radius * 2, radius * 2, 0, 90);
-                path.AddArc(0, form.Height - radius * 2, radius * 2, radius * 2, 90, 90);
-                path.CloseFigure();
-                var region = new Region(path);
-                path.Dispose();
-                g.Dispose();
-                return region;
+                if (form.InvokeRequired) form.BeginInvoke(action);
+                else action();
             }
-            catch
-            {
-                return null;
-            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         }
 
-        private static void FadeIn()
+        private void StartFadeOut()
         {
-            if (_form == null || _panel == null) return;
-            _form.Opacity += 0.05;
-            if (_form.Opacity >= 1.0)
-            {
-                _form.Opacity = MAX_ALPHA / 255.0;
-                _isVisible = true;
-                _fadeTimer!.Stop();
-                _fadeTimer.Dispose();
-                _fadeTimer = null;
-            }
-            // Update panel background alpha
-            _panel.BackColor = Color.FromArgb((int)_form.Opacity * 255, BG_COLOR);
+            if (_form == null || _dismissTimer == null || _animTimer == null) return;
+
+            _dismissTimer.Stop();
+            if (!_form.Visible) return;
+
+            _fadingOut = true;
+            _animTimer.Start();
         }
 
-        private static void FadeOut()
+        private void OnAnimationTick()
         {
-            if (_form == null) return;
-            _form.Opacity -= 0.05;
-            if (_form.Opacity <= 0.01)
+            if (_form == null || _animTimer == null) return;
+
+            if (_fadingOut)
             {
-                _form.Opacity = 0;
-                _isVisible = false;
-                _dismissTimer!.Stop();
-                _dismissTimer.Dispose();
-                _dismissTimer = null;
+                _form.Opacity = Math.Max(0, _form.Opacity - FadeStep);
+                if (_form.Opacity > 0) return;
+
+                _animTimer.Stop();
                 _form.Hide();
+                return;
             }
-            _panel!.BackColor = Color.FromArgb((int)(_form.Opacity * 255), BG_COLOR);
-        }
 
+            _form.Opacity = Math.Min(VisibleOpacity, _form.Opacity + FadeStep);
+            if (_form.Opacity >= VisibleOpacity) _animTimer.Stop();
+        }
     }
 }

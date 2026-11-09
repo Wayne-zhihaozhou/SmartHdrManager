@@ -7,11 +7,10 @@ using System.Threading.Tasks;
 namespace SmartHdrManager
 {
     /// <summary>
-    /// LG webOS 电视亮度控制（纯 C#，无 Node.js 依赖）。
-    /// 写入方式与 pc-control-tv 一致：直接调 setSystemSettings 会被 ACG 拒绝，
-    /// 因此先 createAlert 创建提示框，把 luna 写入挂到它的按钮/关闭回调上，
-    /// 再立即 closeAlert 关闭提示框 —— 关闭动作由电视系统以特权身份执行写入，
-    /// 不需要用户在电视上做任何确认，也不会留下弹窗。
+    /// LG webOS TV brightness control (pure C#, no Node.js).
+    /// A direct setSystemSettings call is refused by the ACG, so an alert is created and the luna write is attached to
+    /// its button / close callback; closing the alert makes the TV apply the write itself with its own privileges.
+    /// Nothing has to be confirmed on the TV and no dialog is left behind.
     /// </summary>
     public static class TvCli
     {
@@ -37,7 +36,7 @@ namespace SmartHdrManager
         private static string? _tvIp;
         private static string? _localAddr;
 
-        /// <summary>初始化电视连接：有已保存的 client-key 时静默连接，否则首次需要配对。</summary>
+        /// <summary>Creates the client and connects in the background (the first connection needs one confirmation on the TV).</summary>
         public static void Init(string tvIp, string localAddr)
         {
             if (string.IsNullOrWhiteSpace(tvIp)) return;
@@ -60,33 +59,11 @@ namespace SmartHdrManager
             {
                 var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
                 if (client != null)
-                {
                     HdrEngine.WriteFileLog($"[TV] 电视已连接: {tvIp} ({client.TvInfo?.ModelName ?? "未知型号"})");
-                }
             });
         }
 
-        /// <summary>读取当前亮度，失败返回 null。</summary>
-        public static async Task<int?> GetBrightnessAsync()
-        {
-            await Gate.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                return client == null ? null : await ReadBrightnessAsync(client, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                HdrEngine.WriteFileLog($"[TV] 读取亮度失败: {ex.Message}");
-                return null;
-            }
-            finally
-            {
-                Gate.Release();
-            }
-        }
-
-        /// <summary>设置亮度（0-100），写入后读回验证。</summary>
+        /// <summary>Sets the brightness (0-100) and reads it back to verify.</summary>
         public static async Task<bool> SetBrightnessAsync(int value)
         {
             if (value < MinBrightness || value > MaxBrightness)
@@ -105,7 +82,7 @@ namespace SmartHdrManager
                 await CloseAlertAsync(client, alertId, CancellationToken.None).ConfigureAwait(false);
                 await Task.Delay(WriteSettleDelayMs).ConfigureAwait(false);
 
-                var applied = await VerifyBrightnessAsync(client, value, CancellationToken.None).ConfigureAwait(false);
+                bool applied = await VerifyBrightnessAsync(client, value, CancellationToken.None).ConfigureAwait(false);
                 if (applied) HdrEngine.WriteFileLog($"[TV] 亮度已设置为 {value}");
                 return applied;
             }
@@ -120,33 +97,16 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>以当前亮度为基准步进调整。</summary>
-        public static async Task<(int from, int to)> StepBrightnessAsync(int delta)
-        {
-            var current = await GetBrightnessAsync().ConfigureAwait(false);
-            if (current == null) return (-1, -1);
-
-            var target = Math.Clamp(current.Value + delta, MinBrightness, MaxBrightness);
-            var applied = await SetBrightnessAsync(target).ConfigureAwait(false);
-            return (current.Value, applied ? target : -1);
-        }
-
-        /// <summary>测试连接并汇报当前亮度（会顺带保存配对凭证）。</summary>
+        /// <summary>Tests the connection and reports the current brightness (also saves the pairing key).</summary>
         public static async Task<(bool success, string message)> TestConnectionAsync()
         {
             string tvIp;
             string localAddr;
             lock (Sync)
             {
-                tvIp = _tvIp ?? TvConfig.TvIp;
-                localAddr = _localAddr ?? TvConfig.LocalAddr;
+                tvIp = _tvIp ?? BrightnessConfig.DefaultTvIp;
+                localAddr = _localAddr ?? BrightnessConfig.DefaultLocalAddr;
             }
-            return await TestConnectionInternalAsync(tvIp, localAddr);
-        }
-
-        /// <summary>测试连接并汇报当前亮度（会顺带保存配对凭证）。</summary>
-        public static async Task<(bool success, string message)> TestConnectionAsync(string tvIp, string localAddr)
-        {
             return await TestConnectionInternalAsync(tvIp, localAddr);
         }
 
@@ -180,7 +140,7 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>强制重新配对：忽略已保存的凭证，让电视重新弹出确认框。</summary>
+        /// <summary>Forces a new pairing: saved credentials are ignored, so the TV asks again.</summary>
         public static async Task<bool> PairAsync()
         {
             string? tvIp;
@@ -220,21 +180,6 @@ namespace SmartHdrManager
             finally
             {
                 client.Dispose();
-            }
-        }
-
-        /// <summary>获取电视型号 / webOS 版本。</summary>
-        public static async Task<string?> GetInfoAsync()
-        {
-            await Gate.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                return client?.TvInfo?.ToString();
-            }
-            finally
-            {
-                Gate.Release();
             }
         }
 
@@ -319,8 +264,8 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// closeAlert 必须是完整的 SSAP 请求（带 id/uri/payload）电视才会执行；
-        /// 关闭提示框时系统触发 onclose -> setSystemSettings，弹窗随之消失。
+        /// closeAlert has to be a complete SSAP request (id/uri/payload). Closing the alert makes the TV run the
+        /// onclose callback, which applies the brightness.
         /// </summary>
         private static async Task CloseAlertAsync(LgeTvClient client, string alertId, CancellationToken ct)
         {
@@ -361,7 +306,7 @@ namespace SmartHdrManager
 
         private static async Task<bool> VerifyBrightnessAsync(LgeTvClient client, int expected, CancellationToken ct)
         {
-            for (var attempt = 1; attempt <= ReadBackAttempts; attempt++)
+            for (int attempt = 1; attempt <= ReadBackAttempts; attempt++)
             {
                 var current = await ReadBrightnessAsync(client, ct).ConfigureAwait(false);
                 if (current == expected) return true;

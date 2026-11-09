@@ -1,190 +1,163 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace SmartHdrManager
 {
     /// <summary>
-    /// 自动亮度切换：监控前台进程，匹配 BrightnessRule，自动设置电视亮度。
+    /// Follows the program in the foreground and applies the brightness rules of the TV configuration.
     /// </summary>
     public static class BrightnessAutoSwitcher
     {
+        private const int PollIntervalMs = 2000;
+        private const int MinBrightness = 0;
+        private const int MaxBrightness = 100;
+        private const int StopTimeoutMs = 2000;
+        private const string AutoSource = "自动";
+
+        private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(3);
+        private static readonly object Sync = new();
+
         private static CancellationTokenSource? _cts;
         private static Task? _task;
-        private static int _lastBrightness;
-        private static string? _lastMatchingRule;
-        private static DateTime _lastSwitchTime;
-        private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(3);
+        private static int _lastBrightness = -1;
+        private static string? _lastRule;
+        private static DateTime _lastSwitchUtc;
 
-        // Win32 API for foreground window detection
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetForegroundWindow();
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-        // Alt key state check
-        [DllImport("user32.dll")]
-        private static extern short GetAsyncKeyState(int vKey);
-
-        private const int VK_MENU = 0x12; // Alt key
-
-        public static void Start()
+        public static void Start(HdrEngine engine)
         {
-            if (_cts != null) return;
-            _cts = new CancellationTokenSource();
-            _task = Task.Run(() => RunLoop(_cts.Token));
+            lock (Sync)
+            {
+                if (_cts != null) return;
+                _cts = new CancellationTokenSource();
+                var token = _cts.Token;
+                _task = Task.Run(() => RunLoop(engine, token));
+            }
             HdrEngine.WriteFileLog("[TV] 自动亮度切换已启动");
         }
 
         public static void Stop()
         {
-            _cts?.Cancel();
-            _cts = null;
-            _task = null;
+            CancellationTokenSource? cts;
+            Task? task;
+            lock (Sync)
+            {
+                cts = _cts;
+                task = _task;
+                _cts = null;
+                _task = null;
+            }
+            if (cts == null) return;
+
+            cts.Cancel();
+            try { task?.Wait(StopTimeoutMs); } catch { }
+            cts.Dispose();
             HdrEngine.WriteFileLog("[TV] 自动亮度切换已停止");
         }
 
-        private static async Task RunLoop(CancellationToken ct)
+        private static async Task RunLoop(HdrEngine engine, CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await CheckForegroundProcess(ct);
+                    if (engine.Read(c => c.Brightness) is { Enabled: true, AutoSwitchEnabled: true } config)
+                        await CheckForegroundAsync(config).ConfigureAwait(false);
+                    else
+                        ResetState();
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
                 }
                 catch (Exception ex)
                 {
                     HdrEngine.WriteFileLog($"[TV] 自动亮度检查异常: {ex.Message}");
                 }
-                await Task.Delay(2000, ct);
+
+                try { await Task.Delay(PollIntervalMs, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
             }
         }
 
-        private static async Task CheckForegroundProcess(CancellationToken ct)
+        private static async Task CheckForegroundAsync(BrightnessConfig config)
         {
-            // Skip while Alt key is pressed (user is switching windows with Alt+Tab)
-            if (GetAsyncKeyState(VK_MENU) != 0) return;
-
-            var foreground = GetForegroundWindow();
-            if (foreground == IntPtr.Zero) return;
-
-            if (GetWindowThreadProcessId(foreground, out uint processId) == 0) return;
-
-            var process = Process.GetProcessById((int)processId);
-            if (process == null || string.IsNullOrEmpty(process.ProcessName)) return;
-
-            var processName = process.ProcessName.ToLowerInvariant();
-
-            // Get window title for keyword matching
-            string windowTitle = process.MainWindowTitle?.ToLowerInvariant() ?? "";
-
-            // Check cooldown
-            if ((DateTime.UtcNow - _lastSwitchTime) < Cooldown) return;
-
-            // Find matching rule
-            var rule = FindMatchingRule(processName, windowTitle);
-            if (rule == null) return;
-
-            int targetBrightness = rule.Brightness;
-
-            // Only switch if brightness changed or different rule matched
-            if (targetBrightness != _lastBrightness || _lastMatchingRule != rule.Name)
+            var rules = config.Rules;
+            if (rules == null || rules.Count == 0)
             {
-                _lastBrightness = targetBrightness;
-                _lastMatchingRule = rule.Name;
-                _lastSwitchTime = DateTime.UtcNow;
-
-                HdrEngine.WriteFileLog($"[TV] 自动亮度: {rule.Name} -> 亮度 {targetBrightness}");
-                await TvCli.SetBrightnessAsync(targetBrightness);
-                BrightnessOsd.Show(targetBrightness, "自动");
+                ResetState();
+                return;
             }
+
+            // Skip while Alt is pressed: the user is switching windows with Alt+Tab
+            if ((Control.ModifierKeys & Keys.Alt) != 0) return;
+
+            var (processName, windowTitle, isFullscreen, _) = WindowDetector.GetActiveWindowInfo();
+            if (string.IsNullOrEmpty(processName)) return;
+
+            var rule = FindMatchingRule(rules, processName, windowTitle, isFullscreen);
+            if (rule == null)
+            {
+                ResetState();
+                return;
+            }
+
+            await ApplyAsync(rule).ConfigureAwait(false);
         }
 
-        private static BrightnessRule? FindMatchingRule(string processName, string windowTitle)
+        private static async Task ApplyAsync(BrightnessRule rule)
         {
-            var rules = TvConfig.Rules;
-            if (rules == null || rules.Count == 0) return null;
+            int brightness = Math.Clamp(rule.Brightness, MinBrightness, MaxBrightness);
+            if (brightness == _lastBrightness && rule.Name == _lastRule) return;
+            if (DateTime.UtcNow - _lastSwitchUtc < Cooldown) return;
 
-            // Find matching rules (non-fallback first)
-            var matches = new List<BrightnessRule>();
+            _lastBrightness = brightness;
+            _lastRule = rule.Name;
+            _lastSwitchUtc = DateTime.UtcNow;
+
+            HdrEngine.WriteFileLog($"[TV] 自动亮度: {rule.Name} -> 亮度 {brightness}");
+            if (await TvCli.SetBrightnessAsync(brightness).ConfigureAwait(false))
+                BrightnessOsd.Show(brightness, AutoSource);
+        }
+
+        private static void ResetState()
+        {
+            _lastBrightness = -1;
+            _lastRule = null;
+        }
+
+        /// <summary>
+        /// First rule that matches the window. A rule without processes, title keywords and fullscreen matching is the
+        /// fallback rule and only applies when nothing else matches.
+        /// </summary>
+        private static BrightnessRule? FindMatchingRule(IReadOnlyList<BrightnessRule> rules, string processName,
+                                                       string windowTitle, bool isFullscreen)
+        {
+            BrightnessRule? fallback = null;
             foreach (var rule in rules)
             {
-                // Check process match
-                bool processMatch = false;
-                if (rule.Processes != null && rule.Processes.Count > 0)
+                if (rule.IsFallback())
                 {
-                    foreach (var p in rule.Processes)
-                    {
-                        if (processName.Contains(p.ToLowerInvariant()) ||
-                            p.ToLowerInvariant().Contains(processName))
-                        {
-                            processMatch = true;
-                            break;
-                        }
-                    }
+                    fallback ??= rule;
+                    continue;
                 }
 
-                // Check title keyword match
-                bool titleMatch = false;
-                if (rule.TitleKeywords != null && rule.TitleKeywords.Count > 0 && !string.IsNullOrEmpty(windowTitle))
-                {
-                    foreach (var kw in rule.TitleKeywords)
-                    {
-                        if (windowTitle.Contains(kw.ToLowerInvariant()))
-                        {
-                            titleMatch = true;
-                            break;
-                        }
-                    }
-                }
-
-                // Check ignore list
-                bool ignored = false;
-                if (rule.IgnoreProcesses != null && rule.IgnoreProcesses.Count > 0)
-                {
-                    foreach (var ig in rule.IgnoreProcesses)
-                    {
-                        if (processName.Contains(ig.ToLowerInvariant()))
-                        {
-                            ignored = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (ignored) continue;
-
-                if (processMatch || titleMatch || rule.MatchFullscreen)
-                {
-                    matches.Add(rule);
-                }
+                if (rule.IgnoreProcesses.Any(token => Contains(processName, token))) continue;
+                if (!Matches(rule, processName, windowTitle, isFullscreen)) continue;
+                return rule;
             }
-
-            // If no matches, return fallback rule
-            if (matches.Count == 0)
-            {
-                foreach (var rule in rules)
-                {
-                    if (rule.IsFallback()) return rule;
-                }
-                return null;
-            }
-
-            // Return the first non-fallback match
-            foreach (var rule in matches)
-            {
-                if (!rule.IsFallback()) return rule;
-            }
-            return matches[0];
+            return fallback;
         }
 
-        public static void Shutdown()
-        {
-            Stop();
-        }
+        private static bool Matches(BrightnessRule rule, string processName, string windowTitle, bool isFullscreen) =>
+            (rule.MatchFullscreen && isFullscreen) ||
+            rule.Processes.Any(token => Contains(processName, token)) ||
+            rule.TitleKeywords.Any(token => Contains(windowTitle, token));
+
+        private static bool Contains(string text, string token) =>
+            token.Length > 0 && text.Contains(token, StringComparison.OrdinalIgnoreCase);
     }
 }

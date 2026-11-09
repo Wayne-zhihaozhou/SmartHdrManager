@@ -60,168 +60,6 @@ namespace SmartHdrManager
         }
     }
 
-    public enum HdrVisualState { Off, On, Paused }
-
-    /// <summary>
-    /// Status card with a coloured dot. When HDR turns on, a soft green tint sweeps across the card from left
-    /// to right and the dot fades from grey to green with a glow; when HDR turns off it fades back.
-    /// Children should use a transparent BackColor so the sweep shows behind them.
-    /// </summary>
-    public sealed class StatusCard : RoundedPanel
-    {
-        private const int SweepInDelayMs = 1500;   // wait until the monitor is back from the HDR mode switch (black screen)
-        private const int SweepInMs = 2200;        // slow, calm sweep from left to right
-        private const int SweepOutMs = 600;
-
-        private static readonly Color DotOn = Color.FromArgb(255, 214, 170);
-
-        private static readonly Color[] HdrGradient =
-        {
-            Color.FromArgb(132, 76, 236),    // violet
-            Color.FromArgb(232, 96, 132),    // pink
-            Color.FromArgb(255, 170, 110)    // warm orange
-        };
-
-        private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15 };
-        private readonly System.Diagnostics.Stopwatch _clock = new();
-        private HdrVisualState _state = HdrVisualState.Off;
-        private float _sweep;          // 0 = no tint, 1 = fully tinted
-        private float _from, _to;
-        private int _durationMs;
-        private int _delayMs;
-
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int IndicatorX { get; set; } = 26;
-
-        public StatusCard()
-        {
-            _timer.Tick += (_, _) => Animate();
-        }
-
-        public void SetState(HdrVisualState state)
-        {
-            if (state == _state) return;
-            _state = state;
-
-            float target = state == HdrVisualState.On ? 1f : 0f;
-            if (Math.Abs(target - _sweep) < 0.001f || !IsHandleCreated || !Visible)
-            {
-                // Already there, or hidden (no animation). Also stops a sweep that is still waiting for its start
-                // delay: HDR on -> off within 1.5 s used to let that sweep run on and colour the card while HDR was off.
-                _timer.Stop();
-                _sweep = _from = _to = target;
-                Invalidate(true);
-                return;
-            }
-
-            _from = _sweep;
-            _to = target;
-            bool sweepingIn = target > _sweep;
-            _durationMs = sweepingIn ? SweepInMs : SweepOutMs;
-            _delayMs = sweepingIn ? SweepInDelayMs : 0;
-            _clock.Restart();
-            _timer.Start();
-        }
-
-        private void Animate()
-        {
-            double elapsed = _clock.Elapsed.TotalMilliseconds - _delayMs;
-            if (elapsed < 0) return;   // still waiting for the display to come back after switching to HDR
-            float t = Math.Min(1f, (float)elapsed / Math.Max(1, _durationMs));
-            // ease-in-out cubic: starts and ends gently
-            float eased = t < 0.5f ? 4f * t * t * t : 1f - (float)Math.Pow(-2f * t + 2f, 3) / 2f;
-            _sweep = _from + (_to - _from) * eased;
-            if (t >= 1f)
-            {
-                _sweep = _to;
-                _timer.Stop();
-            }
-            Invalidate(true);   // children are transparent, so they repaint the new background too
-        }
-
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            base.OnPaintBackground(e);
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            // HDR gradient (violet -> pink -> warm orange, like the app icon) revealed from left to right.
-            // The colours stay fixed relative to the card; the sweep only changes how much of it is visible,
-            // with a feathered leading edge. Built from many colour stops for a smooth result.
-            if (_sweep > 0.001f && Width > 2 && Height > 2)
-            {
-                var state = g.Save();
-                using (var clip = Theme.RoundRect(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), ScaledRadius))
-                    g.SetClip(clip);
-
-                float soft = Width * 0.35f;
-                float edge = _sweep * (Width + soft);
-                const int stops = 32;
-                var colors = new Color[stops];
-                var positions = new float[stops];
-
-                for (int i = 0; i < stops; i++)
-                {
-                    float p = i / (stops - 1f);
-                    float x = p * Width;
-
-                    Color baseColor = p < 0.5f
-                        ? Theme.Blend(HdrGradient[0], HdrGradient[1], p * 2f)
-                        : Theme.Blend(HdrGradient[1], HdrGradient[2], (p - 0.5f) * 2f);
-                    float alpha = 120f - 45f * p;   // a bit stronger on the left, softer on the right
-
-                    float reveal;
-                    if (x <= edge - soft) reveal = 1f;
-                    else if (x >= edge) reveal = 0f;
-                    else
-                    {
-                        float t = (edge - x) / soft;
-                        reveal = t * t * (3f - 2f * t);   // smoothstep
-                    }
-
-                    colors[i] = Color.FromArgb((int)(alpha * reveal), baseColor);
-                    positions[i] = p;
-                }
-
-                using (var brush = new LinearGradientBrush(new PointF(-1f, 0), new PointF(Width + 1f, 0), colors[0], colors[stops - 1]))
-                {
-                    brush.InterpolationColors = new ColorBlend { Colors = colors, Positions = positions };
-                    g.FillRectangle(brush, 0, 0, Width, Height);
-                }
-                g.Restore(state);
-            }
-
-            // Status dot: grey -> warm light (with a warm glow) following the sweep; amber when paused
-            float d = Math.Max(10f, Height * 0.15f);
-            float cx = LogicalToDeviceUnits(IndicatorX);   // IndicatorX is in 96-DPI pixels
-            float cy = Height / 2f;
-
-            Color dot = _state == HdrVisualState.Paused
-                ? Theme.Warn
-                : Theme.Blend(Theme.Idle, DotOn, Math.Clamp(_sweep * 1.6f, 0f, 1f));
-            float glow = _state == HdrVisualState.Paused ? 0f : Math.Clamp((_sweep - 0.3f) / 0.7f, 0f, 1f);
-
-            if (glow > 0f)
-            {
-                for (int i = 3; i >= 1; i--)
-                {
-                    float gd = d + i * d * 0.6f;
-                    using var glowBrush = new SolidBrush(Color.FromArgb((int)(34 * glow), HdrGradient[2]));
-                    g.FillEllipse(glowBrush, cx - gd / 2, cy - gd / 2, gd, gd);
-                }
-            }
-
-            using var brushDot = new SolidBrush(dot);
-            g.FillEllipse(brushDot, cx - d / 2, cy - d / 2, d, d);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) _timer.Dispose();
-            base.Dispose(disposing);
-        }
-    }
-
     /// <summary>Windows 11 style on/off switch with a short animation.</summary>
     public sealed class ToggleSwitch : Control
     {
@@ -659,183 +497,6 @@ namespace SmartHdrManager
         }
     }
 
-    /// <summary>
-    /// "−  value  +" number input (replaces NumericUpDown, whose spin buttons cannot be themed).
-    /// Drawn as ONE control without child controls: everything is computed from the current size when painting,
-    /// so DPI scaling can never position or size its parts twice (which happened with child buttons).
-    /// Keyboard: Left/Down = −1, Right/Up = +1.
-    /// </summary>
-    public sealed class Stepper : Control
-    {
-        private enum Part { None, Minus, Plus }
-
-        private int _current;
-        private Part _hover = Part.None;
-        private Part _pressed = Part.None;
-
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Minimum { get; set; }
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Maximum { get; set; } = 30;
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public string Suffix { get; set; } = " s";
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Step { get; set; } = 1;
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public string? ZeroText { get; set; }   // e.g. "Off" instead of "0 s"
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int[]? Stops { get; set; }       // optional fixed values (ascending): − / + jump to the previous / next one
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public Func<int, string>? Format { get; set; }   // optional display text, e.g. 120 -> "2 min"
-
-        private int NextValue(bool up)
-        {
-            if (Stops == null || Stops.Length == 0) return _current + (up ? Step : -Step);
-            if (up)
-            {
-                foreach (int v in Stops) if (v > _current) return v;
-                return Maximum;
-            }
-            for (int i = Stops.Length - 1; i >= 0; i--) if (Stops[i] < _current) return Stops[i];
-            return Minimum;
-        }
-
-        public event EventHandler? ValueChanged;
-
-        public Stepper()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            SetStyle(ControlStyles.StandardDoubleClick, false);   // fast repeated clicks all count
-            Size = new Size(130, 34);
-            Font = Theme.Body;
-            TabStop = true;
-        }
-
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Value
-        {
-            get => _current;
-            set
-            {
-                int v = Math.Clamp(value, Minimum, Maximum);
-                if (v == _current) return;
-                _current = v;
-                Invalidate();
-                ValueChanged?.Invoke(this, EventArgs.Empty);
-            }
-        }
-
-        private Rectangle MinusRect => new(0, 0, Height, Height);
-        private Rectangle PlusRect => new(Math.Max(0, Width - Height), 0, Height, Height);
-
-        private Part HitTest(Point p) =>
-            MinusRect.Contains(p) ? Part.Minus : PlusRect.Contains(p) ? Part.Plus : Part.None;
-
-        private bool IsEnabled(Part part) =>
-            Enabled && (part == Part.Minus ? _current > Minimum : part == Part.Plus && _current < Maximum);
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            Part h = HitTest(e.Location);
-            if (h != _hover)
-            {
-                _hover = h;
-                Cursor = h != Part.None && IsEnabled(h) ? Cursors.Hand : Cursors.Default;
-                Invalidate();
-            }
-            base.OnMouseMove(e);
-        }
-
-        protected override void OnMouseLeave(EventArgs e)
-        {
-            _hover = Part.None;
-            _pressed = Part.None;
-            Invalidate();
-            base.OnMouseLeave(e);
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            if (e.Button == MouseButtons.Left)
-            {
-                Focus();
-                _pressed = HitTest(e.Location);
-                Invalidate();
-            }
-            base.OnMouseDown(e);
-        }
-
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            Part released = HitTest(e.Location);
-            if (e.Button == MouseButtons.Left && released == _pressed && IsEnabled(released))
-                Value = NextValue(released == Part.Plus);
-            _pressed = Part.None;
-            Invalidate();
-            base.OnMouseUp(e);
-        }
-
-        protected override bool IsInputKey(Keys keyData) =>
-            keyData is Keys.Left or Keys.Right or Keys.Up or Keys.Down || base.IsInputKey(keyData);
-
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            if (e.KeyCode is Keys.Left or Keys.Down) { Value = NextValue(false); e.Handled = true; }
-            else if (e.KeyCode is Keys.Right or Keys.Up) { Value = NextValue(true); e.Handled = true; }
-            base.OnKeyDown(e);
-        }
-
-        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
-        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
-        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            g.Clear(BackColor);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            DrawPart(g, MinusRect, "\u2212", Part.Minus);
-            DrawPart(g, PlusRect, "+", Part.Plus);
-
-            var valueRect = new Rectangle(Height, 0, Math.Max(0, Width - Height * 2), Height);
-            string text = _current == 0 && ZeroText != null ? ZeroText
-                : Format != null ? Format(_current)
-                : _current + Suffix;
-            TextRenderer.DrawText(g, text, Theme.Semibold, valueRect, Enabled ? Theme.Text : Theme.Muted,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-
-            if (Focused && ShowFocusCues)
-            {
-                using var pen = new Pen(Color.FromArgb(120, Theme.Text)) { DashStyle = DashStyle.Dot };
-                g.DrawRectangle(pen, valueRect.X + 4, 2, Math.Max(0, valueRect.Width - 8), Height - 5);
-            }
-        }
-
-        private void DrawPart(Graphics g, Rectangle r, string symbol, Part part)
-        {
-            bool enabled = IsEnabled(part);
-            Color fill = !enabled ? Theme.Blend(Theme.ButtonBack, BackColor, 0.55f)
-                : _pressed == part ? Theme.ButtonPressed
-                : _hover == part ? Theme.ButtonHover
-                : Theme.ButtonBack;
-            Color border = enabled ? Theme.Border : Theme.Blend(Theme.Border, BackColor, 0.55f);
-
-            var rf = new RectangleF(r.X + 0.5f, r.Y + 0.5f, r.Width - 1.5f, r.Height - 1.5f);
-            using (var path = Theme.RoundRect(rf, Math.Max(4f, r.Height * 0.18f)))
-            {
-                using (var brush = new SolidBrush(fill))
-                    g.FillPath(brush, path);
-                using (var pen = new Pen(border))
-                    g.DrawPath(pen, path);
-            }
-
-            TextRenderer.DrawText(g, symbol, Font, r, enabled ? Theme.Text : Theme.Muted,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        }
-    }
-
     // =========================================================================
     // Games list: owner-drawn rows with an on/off switch per game
     // =========================================================================
@@ -961,13 +622,13 @@ namespace SmartHdrManager
         // Softness of the glide: lower = longer, softer deceleration (1/s)
         private const double GlideRate = 8.5;
 
+        // Brightness buttons: one click changes the value by this many steps
+        private const int BrightnessStep = 10;
+
         private readonly Dictionary<string, Bitmap?> _icons = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _iconsLoading = new(StringComparer.OrdinalIgnoreCase);
 
         public event EventHandler<GameItem>? BrightnessToggled;
-
-        /// <summary>Raised after a scroll animation with its measured frame rate (for the Log tab).</summary>
-        public event EventHandler<string>? AnimationStats;
 
         // Each row is drawn once into a bitmap and only re-drawn when it changes; scrolling just copies the bitmaps.
         // (Drawing text, antialiased shapes and scaled icons for every row on every frame was too slow for 144 Hz+.)
@@ -979,12 +640,6 @@ namespace SmartHdrManager
             public int State;
         }
         private readonly Dictionary<GameItem, RowCache> _rowCache = new();
-
-        // frame statistics of the current scroll animation
-        private int _statFrames;
-        private double _statPaintMs;
-        private readonly System.Diagnostics.Stopwatch _statClock = new();
-        private long _lastStatsLogMs = -100000;
 
         public GameList()
         {
@@ -1109,22 +764,8 @@ namespace SmartHdrManager
             if (!_animation.IsRunning)
             {
                 _frameClock.Restart();
-                _statClock.Restart();
-                _statFrames = 0;
-                _statPaintMs = 0;
                 _animation.Start();
             }
-        }
-
-        private void ReportStats()
-        {
-            double seconds = _statClock.Elapsed.TotalSeconds;
-            if (_statFrames < 15 || seconds <= 0) return;
-            long now = Environment.TickCount64;
-            if (now - _lastStatsLogMs < 10000) return;   // at most every 10 s
-            _lastStatsLogMs = now;
-            AnimationStats?.Invoke(this,
-                $"滚动：{_statFrames / seconds:0} 帧/秒，每帧绘制 {_statPaintMs / _statFrames:0.0} 毫秒");
         }
 
         private void AnimateScroll()
@@ -1145,8 +786,6 @@ namespace SmartHdrManager
             UpdateHoverFromCursor();
             Invalidate();
             Update();   // paint now, inside this display frame
-            _statFrames++;
-            if (finished) ReportStats();
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -1287,11 +926,11 @@ namespace SmartHdrManager
             {
                 if (_pressedOnMinus)
                 {
-                    AdjustBrightness(_pressed, -10);
+                    AdjustBrightness(_pressed, -BrightnessStep);
                 }
                 else if (_pressedOnPlus)
                 {
-                    AdjustBrightness(_pressed, 10);
+                    AdjustBrightness(_pressed, BrightnessStep);
                 }
             }
             _pressed = -1;
@@ -1309,11 +948,6 @@ namespace SmartHdrManager
             if (index < 0 || index >= _items.Count) return false;
             Rectangle row = RowRect(index);
             return p.Y >= row.Top && p.Y < row.Bottom;
-        }
-
-        protected override void OnMouseDoubleClick(MouseEventArgs e)
-        {
-            base.OnMouseDoubleClick(e);
         }
 
         protected override bool IsInputKey(Keys keyData) =>
@@ -1371,7 +1005,6 @@ namespace SmartHdrManager
                 return;
             }
 
-            long paintStart = System.Diagnostics.Stopwatch.GetTimestamp();
             int first = Math.Max(0, (int)((_offset - Gap) / RowHeight));
             int last = Math.Min(_items.Count - 1, (int)((_offset + ClientSize.Height) / RowHeight) + 1);
 
@@ -1398,9 +1031,6 @@ namespace SmartHdrManager
                 using var brush = new SolidBrush(Color.FromArgb(_thumbHover || _draggingThumb ? 220 : 170, color));
                 g.FillPath(brush, path);
             }
-
-            if (_animation.IsRunning)
-                _statPaintMs += (System.Diagnostics.Stopwatch.GetTimestamp() - paintStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         }
 
         /// <summary>Everything that changes a row's look; the cached bitmap is re-drawn when this changes.</summary>

@@ -46,23 +46,13 @@ namespace SmartHdrManager
         public static readonly Font IconFont = new(Pick("Segoe Fluent Icons", "Segoe MDL2 Assets"), 10f);
 
         // Icon glyphs (same code points in Segoe Fluent Icons and Segoe MDL2 Assets)
-        public const string GlyphAdd = "";
-        public const string GlyphCancel = "";
-        public const string GlyphSearch = "";
-        public const string GlyphRefresh = "";
-        public const string GlyphPause = "";
-        public const string GlyphPlay = "";
-        public const string GlyphMinimize = "";
-        public const string GlyphDocument = "";
-        public const string GlyphFolder = "";
-        public const string GlyphSettings = "\uE713";
+        public const string GlyphAdd = "\uE710";
+        public const string GlyphSearch = "\uE721";
+        public const string GlyphRefresh = "\uE72C";
+        public const string GlyphDocument = "\uE8A5";
+        public const string GlyphFolder = "\uE8B7";
         public const string GlyphLink = "\uE71B";
-        public const string GlyphPlus = "\uE106";
-        public const string GlyphEdit = "\uE70E";
         public const string GlyphDelete = "\uE74D";
-        public const string GlyphRemove = "\uE107";
-        public const string GlyphUp = "\uE710";
-        public const string GlyphDown = "\uE711";
 
         private static HashSet<string> LoadFamilies()
         {

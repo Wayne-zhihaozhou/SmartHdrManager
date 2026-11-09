@@ -58,13 +58,9 @@ namespace SmartHdrManager
         /// </summary>
         private void RunCommand(CliCommand command)
         {
-            _engine.Log("MANUAL", $"命令行操作：{command}。");
-            switch (command)
-            {
-                case CliCommand.TogglePause:
-                    SetPaused(!_engine.Paused);
-                    break;
-            }
+            if (command != CliCommand.TogglePause) return;
+            _engine.Log("MANUAL", "命令行操作：切换 HDR 控制开关。");
+            SetPaused(!_engine.Paused);
         }
 
         // The settings window only exists while it is open. When hidden it is disposed after a few seconds,
@@ -114,8 +110,7 @@ namespace SmartHdrManager
             // When HDR must stay off right now, tell it so it starts the game without waiting.
             if (_commands.TakeLaunchHold())
             {
-                var st = _engine.Status;
-                if (_engine.Paused || st.BlockedBy)
+                if (_engine.Paused)
                     _commands.RefuseLaunch();
                 else
                     _engine.HoldHdrForLaunch();
@@ -125,8 +120,6 @@ namespace SmartHdrManager
             // Notifications from the engine (crash hint)
             while (_engine.TryTakeNotification(out string noteTitle, out string noteText))
                 _tray.ShowBalloon(noteTitle, noteText);
-            // Only does anything if the app was built as a console exe (see ConsoleWindowHider)
-            ConsoleWindowHider.HideIfMinimized();
 
             var s = _engine.Status;
             string state = s.Paused ? "已暂停" : s.HdrOn ? "HDR 开" : "HDR 关";
@@ -186,15 +179,13 @@ namespace SmartHdrManager
     /// <summary>Named events through which a second launch passes a command-line action to the running tray instance.</summary>
     internal sealed class CommandEvents : IDisposable
     {
-        private readonly (CliCommand Command, EventWaitHandle Event)[] _events =
-        {
-            (CliCommand.TogglePause, new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\SmartHdrManager.TogglePause"))
-        };
+        private const string TogglePauseEventName = @"Local\SmartHdrManager.TogglePause";
+
+        private readonly EventWaitHandle _togglePause = new(false, EventResetMode.AutoReset, TogglePauseEventName);
 
         // "Launch with HDR" (see HdrLauncher): only "hold HDR" / "not now" signals, never a path or command
         private readonly EventWaitHandle _launchHold = new(false, EventResetMode.AutoReset, HdrLauncher.HoldEventName);
         private readonly EventWaitHandle _launchRefused = new(false, EventResetMode.AutoReset, HdrLauncher.RefusedEventName);
-
         private readonly EventWaitHandle _launchRelease = new(false, EventResetMode.AutoReset, HdrLauncher.ReleaseEventName);
 
         public bool TakeLaunchHold() => _launchHold.WaitOne(0);
@@ -205,33 +196,22 @@ namespace SmartHdrManager
 
         public void Signal(CliCommand command)
         {
-            foreach (var (c, e) in _events)
-                if (c == command) e.Set();
+            if (command == CliCommand.TogglePause) _togglePause.Set();
         }
 
         /// <summary>Returns one pending command (and consumes it), or None. Called twice a second by the tray timer.</summary>
-        public CliCommand TakeSignaled()
-        {
-            foreach (var (c, e) in _events)
-                if (e.WaitOne(0)) return c;
-            return CliCommand.None;
-        }
+        public CliCommand TakeSignaled() => _togglePause.WaitOne(0) ? CliCommand.TogglePause : CliCommand.None;
 
         public static CliCommand Parse(string[] args)
         {
-            foreach (var a in args)
-            {
-                switch (a.Trim().ToLowerInvariant())
-                {
-                    case "--toggle-pause": return CliCommand.TogglePause;
-                }
-            }
+            foreach (string arg in args)
+                if (arg.Trim().Equals("--toggle-pause", StringComparison.OrdinalIgnoreCase)) return CliCommand.TogglePause;
             return CliCommand.None;
         }
 
         public void Dispose()
         {
-            foreach (var (_, e) in _events) e.Dispose();
+            _togglePause.Dispose();
             _launchHold.Dispose();
             _launchRefused.Dispose();
             _launchRelease.Dispose();
@@ -293,7 +273,7 @@ namespace SmartHdrManager
             {
                 SetTaskbarIdentity(LauncherUserModelId);
                 Application.EnableVisualStyles();
-                Environment.ExitCode = HdrLauncher.Run(args, launchIndex, false);
+                Environment.ExitCode = HdrLauncher.Run(args, launchIndex);
                 return;
             }
 
@@ -329,10 +309,6 @@ namespace SmartHdrManager
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => HdrEngine.WriteFileLog($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => HdrEngine.WriteFileLog($"FATAL  {e.ExceptionObject}");
-
-            // Built as console exe? Take the console out of the taskbar/Alt-Tab (no-op for WinExe).
-            if (ConsoleWindowHider.HasConsole)
-                ConsoleWindowHider.HideCompletely();
 
             var engine = new HdrEngine();
             using var context = new TrayAppContext(engine, showEvent, commands, command, startHidden, justUpdated);

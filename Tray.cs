@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -156,66 +155,6 @@ namespace SmartHdrManager
             {
                 return false;
             }
-        }
-    }
-
-
-
-    // =========================================================================
-    // OPTIONAL: hide a *console* window from the taskbar and Alt-Tab.
-    // Only relevant if you build the project as OutputType=Exe (console subsystem). With the default
-    // OutputType=WinExe there is no console, GetConsoleWindow() returns 0, and every method below does nothing.
-    //
-    // Why these styles: a top-level window is listed in the taskbar/Alt-Tab when it is visible and has
-    // WS_EX_APPWINDOW (or is an un-owned window without WS_EX_TOOLWINDOW). WS_EX_TOOLWINDOW removes it from both.
-    // The style must be changed while the window is hidden, then SWP_FRAMECHANGED makes the shell re-read it.
-    //
-    // Limitation: under Windows Terminal (default terminal host on Windows 11) GetConsoleWindow() returns a hidden
-    // pseudo-console window, and the visible Terminal window belongs to another process that cannot be restyled.
-    // That is why WinExe is the recommended setup.
-    // =========================================================================
-    public static class ConsoleWindowHider
-    {
-        private const int GWL_EXSTYLE = -20;
-        private const long WS_EX_APPWINDOW = 0x00040000L;
-        private const long WS_EX_TOOLWINDOW = 0x00000080L;
-        private const int SW_HIDE = 0;
-        private const int SW_RESTORE = 9;
-        private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOZORDER = 0x0004,
-                           SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020;
-
-        [DllImport("kernel32.dll")] private static extern IntPtr GetConsoleWindow();
-        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
-        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
-        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
-        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
-
-        public static bool HasConsole => GetConsoleWindow() != IntPtr.Zero;
-
-        /// <summary>Hide the console and take it out of the taskbar / Alt-Tab list.</summary>
-        public static void HideCompletely()
-        {
-            IntPtr hWnd = GetConsoleWindow();
-            if (hWnd == IntPtr.Zero) return;
-
-            ShowWindow(hWnd, SW_HIDE);                                   // 1. hide first
-            long ex = GetWindowLongPtr(hWnd, GWL_EXSTYLE).ToInt64();
-            ex = (ex & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW;             // 2. tool window, not an app window
-            SetWindowLongPtr(hWnd, GWL_EXSTYLE, new IntPtr(ex));
-            SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,                  // 3. make the shell re-read the style
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-        }
-
-        /// <summary>
-        /// Call periodically (the app calls it from a 500 ms timer). A console cannot be subclassed from outside its
-        /// host process, so "minimize" is intercepted by noticing the iconic state and hiding the window.
-        /// </summary>
-        public static void HideIfMinimized()
-        {
-            IntPtr hWnd = GetConsoleWindow();
-            if (hWnd != IntPtr.Zero && IsIconic(hWnd))
-                ShowWindow(hWnd, SW_HIDE);
         }
     }
 }
