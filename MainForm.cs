@@ -170,7 +170,7 @@ namespace SmartHdrManager
             hintRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             var hint = new Label
             {
-                Text = "开启某游戏后，其运行期间将使用 HDR",
+                Text = "开启应用后，其运行期间将使用 HDR",
                 Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, AutoEllipsis = true, Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(2, 0, 0, 0)
             };
