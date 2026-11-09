@@ -44,9 +44,6 @@ namespace SmartHdrManager
         // Monitors to switch, by Windows device path. Empty = use OnlyPrimaryMonitor (primary only / all monitors).
         public List<string> SelectedMonitors { get; set; } = new();
 
-        // Per-game options, keyed by process name (lower case)
-        public Dictionary<string, GameOptions> PerGameOptions { get; set; } = new();
-
         // Games found in the Steam / Epic / GOG / Xbox libraries (refreshed at startup and with "Scan drives")
         public List<LibraryGame> LibraryGames { get; set; } = new();
 
@@ -280,15 +277,6 @@ namespace SmartHdrManager
         public bool IsNewer { get; init; }
         public string VersionText { get; init; } = string.Empty;
         public string ReleaseUrl { get; init; } = string.Empty;
-    }
-
-    public sealed class GameOptions
-    {
-        public int HdrDelaySeconds { get; set; }          // wait this long after the game starts before switching HDR on
-        public int KeepHdrAfterExitSeconds { get; set; }  // keep HDR on this long after the game closes
-
-        [JsonIgnore]
-        public bool IsDefault => HdrDelaySeconds <= 0 && KeepHdrAfterExitSeconds <= 0;
     }
 
     public sealed class LibraryGame

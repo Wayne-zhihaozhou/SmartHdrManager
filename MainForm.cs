@@ -44,7 +44,6 @@ namespace SmartHdrManager
         private readonly TextBox _search = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
         private readonly GameList _games = new() { Dock = DockStyle.Fill };
         private readonly Label _gamesCount = new() { AutoSize = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(12, 0, 2, 0) };
-        private readonly ModernButton _scanButton = new() { Primary = true, Glyph = Theme.GlyphRefresh, Text = "扫描游戏", AutoSize = true };
 
         // Settings page
         private readonly ToggleSwitch _swAutostart = new();
@@ -75,7 +74,6 @@ namespace SmartHdrManager
 
         private bool _reallyExit;
         private int _logCursor;
-        private bool _scanInFlight;
 
         public event EventHandler? HiddenToTray;
 
@@ -248,19 +246,13 @@ namespace SmartHdrManager
             var addExe = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加程序", AutoSize = true };
             var addRunning = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加正在运行", AutoSize = true };
             var exclude = new ModernButton { Glyph = Theme.GlyphCancel, Text = "从不 HDR", AutoSize = true };
-            var options = new ModernButton { Glyph = Theme.GlyphSettings, Text = "选项", AutoSize = true };
-            _toolTip.SetToolTip(options, "所选游戏的每游戏选项：HDR 延迟、关闭后保持 HDR");
-            options.Click += (_, _) => OnGameOptions();
             _toolTip.SetToolTip(addExe, "选择游戏的 .exe 文件");
             _toolTip.SetToolTip(addRunning, "从正在运行的程序中选择");
             _toolTip.SetToolTip(exclude, "选定的游戏将从不使用 HDR。撤销：设置 › 从不 HDR 的游戏，或在此搜索该游戏");
             addExe.Click += (_, _) => OnAddExe();
             addRunning.Click += (_, _) => OnAddRunning();
             exclude.Click += (_, _) => OnExclude();
-            _scanButton.Click += OnScan;
-
-            _toolTip.SetToolTip(_scanButton, "重新读取游戏启动器的游戏库（Steam、Epic、GOG、Xbox 等）并扫描游戏文件夹");
-            foreach (var b in new Control[] { _scanButton, addExe, addRunning, options, exclude })
+            foreach (var b in new Control[] { addExe, addRunning, exclude })
             {
                 b.Margin = new Padding(0, 0, 8, 0);
                 buttons.Controls.Add(b);
@@ -753,10 +745,6 @@ namespace SmartHdrManager
                 {
                     activity = s.RunningGame != null ? $"以 HDR 启动 · {s.RunningGame}" : "以 HDR 启动 · 正在启动 …";
                 }
-                else if (s.WaitingForGame != null)
-                {
-                    activity = $"{s.WaitingForGame} 已启动 · {s.WaitingSecondsLeft} 秒后开启 HDR（游戏选项）";
-                }
                 else if (s.RunningGame != null)
                 {
                     activity = $"HDR 游戏运行中：{s.RunningGame}";
@@ -804,13 +792,6 @@ namespace SmartHdrManager
                     }));
             }
 
-            bool scanning = _scanInFlight || _engine.IsScanning;
-            if (_scanButton.Enabled == scanning)
-            {
-                _scanButton.Enabled = !scanning;
-                _scanButton.Text = scanning ? "扫描中…" : "扫描游戏";
-            }
-
             var lines = _engine.ReadLog(ref _logCursor);
             if (lines.Length > 0)
             {
@@ -849,24 +830,6 @@ namespace SmartHdrManager
             if (IsDisposed) return;
             int enabled = _games.Items.Count(i => i.Hdr);
             _gamesCount.Text = $"{enabled} 个开启 HDR · 显示 {_games.Items.Count} 个";
-        }
-
-        private async void OnScan(object? sender, EventArgs e)
-        {
-            _scanInFlight = true;
-            _scanButton.Enabled = false;
-            _scanButton.Text = "扫描中…";
-            try { await Task.Run(() => _engine.ScanDrives()); }
-            finally
-            {
-                _scanInFlight = false;
-                if (!IsDisposed)
-                {
-                    _scanButton.Text = "扫描游戏";
-                    _scanButton.Enabled = true;
-                    RebuildGames();
-                }
-            }
         }
 
         private void OnAddExe()
@@ -1053,185 +1016,6 @@ namespace SmartHdrManager
             // Raised on a background thread
             if (IsDisposed || !IsHandleCreated) return;
             try { BeginInvoke(new Action(() => { if (!IsDisposed) RebuildGames(); })); } catch { }
-        }
-
-        /// <summary>Per-game options dialog: delay before HDR turns on, keep HDR on after the game closes.</summary>
-        private void OnGameOptions()
-        {
-            if (_games.SelectedItem is not GameItem item)
-            {
-                MessageBox.Show(this, "请先在列表中选择游戏。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var current = _engine.GetGameOptions(item.Processes);
-            int quickExits = _engine.GetQuickExitCount(item.Processes);   // crash hint (2.6)
-            int hintHeight = quickExits > 0 ? 56 : 0;
-            var delay = new Stepper { Minimum = 0, Maximum = 120, Step = 5, ZeroText = "关闭" };
-            var keep = new Stepper { Minimum = 0, Maximum = 600, Step = 15, ZeroText = "关闭" };
-            delay.Value = current.HdrDelaySeconds;
-            keep.Value = current.KeepHdrAfterExitSeconds;
-
-            using var dlg = new Form
-            {
-                Text = $"游戏选项 – {item.Name}",
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false,
-                BackColor = Theme.Back, ForeColor = Theme.Text, Font = Theme.Body,
-                Icon = _windowIcon, KeyPreview = true,
-                Padding = new Padding(16)
-            };
-            dlg.HandleCreated += (_, _) => Theme.StyleWindow(dlg.Handle);
-            dlg.KeyDown += (_, e) =>
-            {
-                if (e.KeyCode == Keys.Escape)
-                {
-                    dlg.DialogResult = DialogResult.Cancel;
-                    e.Handled = e.SuppressKeyPress = true;
-                }
-                else if (e.KeyCode == Keys.Enter && dlg.ActiveControl is not ModernButton)
-                {
-                    dlg.DialogResult = DialogResult.OK;
-                    e.Handled = e.SuppressKeyPress = true;
-                }
-            };
-
-            dlg.SuspendLayout();
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, Margin = new Padding(0) };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, hintHeight));   // "closed right after HDR came on" hint
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));   // hint text for the delay (wraps; scales with DPI)
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));   // "Launch with HDR" buttons
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));   // "Launch with HDR" hint
-            table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-            table.Controls.Add(new Label
-            {
-                Text = item.Name, Font = Theme.Section, ForeColor = Theme.Text, Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true, Margin = new Padding(2, 0, 0, 8)
-            }, 0, 0);
-            if (quickExits > 0)
-            {
-                table.Controls.Add(new Label
-                {
-                    Text = $"该游戏在 HDR 开启后立即关闭（{quickExits} 次）。若发生崩溃：请关闭 RTX HDR（NVIDIA App › " +
-                           "图形 › 全局设置），或使用下面的“以 HDR 启动”。",
-                    Font = Theme.Small, ForeColor = Theme.Warn, AutoSize = false, Dock = DockStyle.Fill, UseMnemonic = false,
-                    TextAlign = ContentAlignment.TopLeft, Margin = new Padding(18, 0, 18, 8)
-                }, 0, 1);
-            }
-            table.Controls.Add(SettingRow("HDR 开启前延迟",
-                "游戏启动后等待一段时间再开启 HDR。", delay), 0, 2);
-            table.Controls.Add(new Label
-            {
-                Text = "大多数游戏保持“关闭”即可。只有当游戏在显示器切换时闪烁或崩溃，才使用 3–5 秒 " +
-                       "– 或者更好的做法，使用下面的“以 HDR 启动”。",
-                Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.TopLeft, Margin = new Padding(18, 0, 18, 8)
-            }, 0, 3);
-            table.Controls.Add(SettingRow("游戏关闭后保持 HDR",
-                "快速重启游戏时不会出现第二次黑屏。", keep), 0, 4);
-
-            // "Launch with HDR": HDR on first, then the game starts (for games that only check HDR at startup)
-            var launch = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(14, 8, 0, 0) };
-            var copySteam = new ModernButton { Text = "复制 Steam 启动选项", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
-            var makeShortcut = new ModernButton { Text = "创建 HDR 桌面快捷方式", AutoSize = true, Margin = new Padding(0), Enabled = !string.IsNullOrEmpty(item.ExePath) };
-            copySteam.Click += (_, _) => CopySteamLaunchOption(dlg);
-            makeShortcut.Click += (_, _) => CreateHdrShortcut(dlg, item);
-            launch.Controls.Add(copySteam);
-            launch.Controls.Add(makeShortcut);
-            table.Controls.Add(launch, 0, 5);
-            table.Controls.Add(new Label
-            {
-                Text = "以 HDR 启动：先开启 HDR，再启动游戏 – 适用于仅在 HDR 已开启时才提供 HDR（或才不崩溃）" +
-                       "的游戏。Steam：粘贴到 属性 › 启动选项。",
-                Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.TopLeft, Margin = new Padding(18, 4, 18, 0)
-            }, 0, 6);
-
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Margin = new Padding(0, 8, 0, 0) };
-            var save = new ModernButton { Text = "保存", Primary = true, AutoSize = true, Margin = new Padding(8, 0, 0, 0) };
-            var cancel = new ModernButton { Text = "取消", AutoSize = true, Margin = new Padding(8, 0, 0, 0) };
-            var reset = new ModernButton { Text = "重置", AutoSize = true, Margin = new Padding(0) };
-            save.Click += (_, _) => dlg.DialogResult = DialogResult.OK;
-            cancel.Click += (_, _) => dlg.DialogResult = DialogResult.Cancel;
-            reset.Click += (_, _) => { delay.Value = 0; keep.Value = 0; };
-            buttons.Controls.Add(save);
-            buttons.Controls.Add(cancel);
-            buttons.Controls.Add(reset);
-            table.Controls.Add(buttons, 0, 7);
-
-            dlg.Controls.Add(table);
-            dlg.AutoScaleDimensions = new SizeF(96F, 96F);
-            dlg.AutoScaleMode = AutoScaleMode.Dpi;
-            dlg.ClientSize = new Size(620, 436 + hintHeight);
-            dlg.ResumeLayout(false);
-
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-
-            _engine.SetGameOptions(item.Processes,
-                new GameOptions { HdrDelaySeconds = delay.Value, KeepHdrAfterExitSeconds = keep.Value }, item.Name);
-            RebuildGames();
-        }
-
-        // ---- Launch with HDR ----
-        private static string LauncherExe => Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "SmartHdrManager.exe");
-
-        private static void CopySteamLaunchOption(IWin32Window owner)
-        {
-            string option = $"\"{LauncherExe}\" --launch %command%";
-            try
-            {
-                Clipboard.SetText(option);
-                MessageBox.Show(owner,
-                    "已复制：\n\n" + option + "\n\n在 Steam 中：右键游戏 › 属性 › 常规 › 启动选项，然后粘贴到那里。\n\n" +
-                    "请将 Smart HDR Manager 保留在此文件夹中 – 如果移动了它，请重新复制启动选项。",
-                    "以 HDR 启动", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(owner, $"无法复制到剪贴板（{ex.Message}）。\n\n{option}", "以 HDR 启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
-        private static void CreateHdrShortcut(IWin32Window owner, GameItem item)
-        {
-            if (string.IsNullOrEmpty(item.ExePath) || !File.Exists(item.ExePath))
-            {
-                MessageBox.Show(owner, "未知该游戏的 exe 文件。请先启动一次游戏，或用“添加程序”添加它。",
-                    "以 HDR 启动", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            CreateLaunchShortcut(owner, item.Name, item.ExePath);
-        }
-
-        private static void CreateLaunchShortcut(IWin32Window owner, string displayName, string exePath)
-        {
-            string name = string.Concat(displayName.Split(Path.GetInvalidFileNameChars())).Trim();
-            if (name.Length == 0) name = Path.GetFileNameWithoutExtension(exePath);
-            string link = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), $"{name} (HDR).lnk");
-            try
-            {
-                var shellType = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException("WScript.Shell is not available");
-                dynamic shell = Activator.CreateInstance(shellType)!;
-                dynamic shortcut = shell.CreateShortcut(link);
-                shortcut.TargetPath = LauncherExe;
-                shortcut.Arguments = $"--launch \"{exePath}\"";
-                shortcut.WorkingDirectory = Path.GetDirectoryName(exePath) ?? string.Empty;
-                shortcut.IconLocation = exePath + ",0";
-                shortcut.Description = $"以 HDR 开启 {displayName}（Smart HDR Manager）";
-                shortcut.Save();
-                MessageBox.Show(owner, $"已在桌面创建快捷方式：\n{Path.GetFileName(link)}", "以 HDR 启动", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(owner, $"无法创建快捷方式（{ex.Message}）。", "以 HDR 启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
         }
 
         // ------------------------------------------------------------------

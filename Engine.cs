@@ -38,8 +38,7 @@ namespace SmartHdrManager
         public List<string> Processes { get; init; } = new();
         public string? ExePath { get; init; }
         public bool Hdr { get; init; }
-        public bool HasOptions { get; init; }
-        public bool Excluded { get; init; }                     // "Never HDR" (2.6.1: shown again so it can be undone)
+        public bool Excluded { get; init; }
     }
 
     /// <summary>
@@ -111,7 +110,6 @@ namespace SmartHdrManager
             public readonly int FallbackSeconds, TickMs;
             public readonly MonitorFilter Monitors;
             public readonly string HotkeyMode;
-            public readonly Dictionary<string, GameOptions> GameOptions;
             public readonly Dictionary<string, (string[] Folders, string[] Exes)> GameFolders;
 
             public Snapshot(AppConfig c)
@@ -122,7 +120,6 @@ namespace SmartHdrManager
                 RefreshApps = c.RefreshAppsAfterSdr;
                 Monitors = new MonitorFilter(c.OnlyPrimaryMonitor, c.SelectedMonitors);
                 HotkeyMode = HotkeySettings.Normalize(c.HotkeyModifier);
-                GameOptions = new Dictionary<string, GameOptions>(c.PerGameOptions ?? new Dictionary<string, GameOptions>(), Cmp);
                 EnableOnProcessStart = c.EnableHdrOnProcessStart;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
                 TickMs = Math.Clamp(c.ProcessScanIntervalMs, 50, 1000);
@@ -199,12 +196,8 @@ namespace SmartHdrManager
         private readonly object _overrideLock = new();
         private int _overrideChanged;          // 1 = engine thread must reset its timers (set by any thread)
 
-        // per-game options
-        private string? _delayGame;
-        private long _delaySinceMs;
+        // per-game options (removed)
         private long _holdHdrUntilMs;          // keep-after-exit
-        private string? _waitingGame;
-        private long _waitingMsLeft;
         private long _holdMsLeft;
 
         private string? _runningGame;
@@ -305,7 +298,7 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// Settings › Reset to defaults: every setting back to its default value. Kept: the game lists, per-game options,
+        /// Settings › Reset to defaults: every setting back to its default value. Kept: the game lists,
         /// found games and program locations, extra game folders.
         /// "Start with Windows" is a Windows setting, not part of config.json, and stays as it is.
         /// </summary>
@@ -321,7 +314,6 @@ namespace SmartHdrManager
                     IgnoredGames = c.IgnoredGames,
                     DiscoveredGames = c.DiscoveredGames,
                     LibraryGames = c.LibraryGames,
-                    PerGameOptions = c.PerGameOptions,
                     ProgramPaths = c.ProgramPaths,
                     CustomGameFolders = c.CustomGameFolders,
                     ShowOtherPrograms = c.ShowOtherPrograms,
@@ -334,7 +326,7 @@ namespace SmartHdrManager
                 InvalidateSnapshot();
                 Save();
             }
-            Log("CONFIG", "设置已恢复默认值（游戏列表、每游戏选项已保留）。");
+            Log("CONFIG", "设置已恢复默认值（游戏列表已保留）。");
         }
 
         // ------------------------------------------------------------------
@@ -584,23 +576,6 @@ namespace SmartHdrManager
                 {
                     foreach (string p in added)
                         if (ignored.Add(p)) { Config.IgnoredGames.Add(p); changed = true; }
-                }
-
-                // Game options (start delay, keep HDR after exit) follow the game as well
-                var options = old.Processes.Select(p => Config.PerGameOptions.TryGetValue(p, out var o) ? o : null)
-                                           .FirstOrDefault(o => o != null && !o.IsDefault);
-                if (options != null)
-                {
-                    foreach (string p in added)
-                    {
-                        if (Config.PerGameOptions.ContainsKey(p)) continue;
-                        Config.PerGameOptions[p] = new GameOptions
-                        {
-                            HdrDelaySeconds = options.HdrDelaySeconds,
-                            KeepHdrAfterExitSeconds = options.KeepHdrAfterExitSeconds
-                        };
-                        changed = true;
-                    }
                 }
 
                 Log("SCAN", $"'{game.Name}'：现在监视 {string.Join(", ", game.Processes.Select(p => p + ".exe"))} " +
@@ -857,13 +832,11 @@ namespace SmartHdrManager
                 _sdrFallbackAtMs = -1;
                 _holdHdrUntilMs = 0;
                 _activeHdrGameProcess = null;
-                _delayGame = null;
                 _handOffDemand = null;   // you decided: the automatic logic starts fresh
                 _restoreHdr = false;
                 _externalEnded = false;
             }
 
-            _waitingGame = null;
             _holdMsLeft = 0;
 
             if (mode == HdrOverride.None && !Paused)
@@ -880,8 +853,6 @@ namespace SmartHdrManager
                 RunningGame = _runningGame,
                 Override = mode,
                 OverrideRemainingMs = mode != HdrOverride.None && until > 0 ? Math.Max(0, until - now) : -1,
-                WaitingForGame = _waitingGame,
-                WaitingSecondsLeft = (int)Math.Ceiling(_waitingMsLeft / 1000.0),
                 HoldSecondsLeft = (int)Math.Ceiling(_holdMsLeft / 1000.0),
                 BlockedBy = false,
                 LaunchHold = now < Interlocked.Read(ref _launchHoldUntilMs),
@@ -1094,24 +1065,7 @@ namespace SmartHdrManager
             string? hdrGame = s.HdrGames.Contains(procName) && !_foregroundElsewhere ? procName : _runningGame;
             if (hdrGame == null)
             {
-                _delayGame = null;
-            }
-            else if (shouldEnableHdr && !_hdrAny && !launchHold &&
-                     s.GameOptions.TryGetValue(hdrGame, out var startOptions) && startOptions.HdrDelaySeconds > 0)
-            {
-                if (!string.Equals(_delayGame, hdrGame, StringComparison.OrdinalIgnoreCase))
-                {
-                    _delayGame = hdrGame;
-                    _delaySinceMs = now;
-                    Log("HDR", $"'{hdrGame}' 已启动 – {startOptions.HdrDelaySeconds} 秒后切换到 HDR（游戏选项）。");
-                }
-                long left = _delaySinceMs + startOptions.HdrDelaySeconds * 1000L - now;
-                if (left > 0)
-                {
-                    _waitingGame = hdrGame;
-                    _waitingMsLeft = left;
-                    return;
-                }
+                // No HDR game detected
             }
 
             if (_runningGame != null)
@@ -1183,15 +1137,6 @@ namespace SmartHdrManager
             }
             else if (_hdrAny)
             {
-                // Per-game option: keep HDR on for a while after the game closes (e.g. quick restart, no double black screen)
-                if (owns && _activeHdrGameProcess != null && _runningGame == null &&
-                    s.GameOptions.TryGetValue(_activeHdrGameProcess, out var exitOptions) && exitOptions.KeepHdrAfterExitSeconds > 0)
-                {
-                    Log("HDR", $"'{_activeHdrGameProcess}' 已关闭 – 保持 HDR 开启 {exitOptions.KeepHdrAfterExitSeconds} 秒（游戏选项）。");
-                    _holdHdrUntilMs = now + exitOptions.KeepHdrAfterExitSeconds * 1000L;
-                    _activeHdrGameProcess = null;
-                }
-
                 // Hold HDR: keep-after-exit. Colour-critical apps still switch at once.
                 long holdUntil = _holdHdrUntilMs;
                 if (owns && now < holdUntil)
@@ -1589,18 +1534,6 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>How often one of these processes closed right after HDR came on (0 = never; game options hint).</summary>
-        public int GetQuickExitCount(IEnumerable<string> processes)
-        {
-            lock (Sync)
-            {
-                int max = 0;
-                foreach (string p in processes)
-                    if (Config.QuickExitCounts.TryGetValue(p, out int n)) max = Math.Max(max, n);
-                return max;
-            }
-        }
-
         /// <summary>Tray notifications from the engine (crash hint). Called by the tray timer on the UI thread.</summary>
         public bool TryTakeNotification(out string title, out string text)
         {
@@ -1659,7 +1592,7 @@ namespace SmartHdrManager
             return found;
         }
 
-        /// <summary>Remembers launcher -> game and turns the game on for HDR (same options as the launcher).</summary>
+        /// <summary>Remembers launcher -> game and turns the game on for HDR.</summary>
         private void LearnLauncherGame(string launcher, string game)
         {
             lock (Sync)
@@ -1673,8 +1606,6 @@ namespace SmartHdrManager
                     Config.HdrGamesAndApps.Add(game);
                     Config.HdrGamesAndApps.Sort(Cmp);
                 }
-                if (Config.PerGameOptions.TryGetValue(launcher, out var o) && o != null && !o.IsDefault && !Config.PerGameOptions.ContainsKey(game))
-                    Config.PerGameOptions[game] = new GameOptions { HdrDelaySeconds = o.HdrDelaySeconds, KeepHdrAfterExitSeconds = o.KeepHdrAfterExitSeconds };
 
                 // Same row in the Games tab as the launcher's library game
                 foreach (var g in Config.LibraryGames)
@@ -2066,10 +1997,7 @@ namespace SmartHdrManager
             {
                 var hdr = new HashSet<string>(Config.HdrGamesAndApps ?? new List<string>(), Cmp);
                 var ignored = new HashSet<string>(Config.IgnoredGames ?? new List<string>(), Cmp);
-                var options = Config.PerGameOptions ?? new Dictionary<string, GameOptions>();
                 var paths = Config.ProgramPaths ?? new Dictionary<string, string>();
-                bool HasOptions(IEnumerable<string> procs) =>
-                    procs.Any(p => options.TryGetValue(p, out var o) && o != null && !o.IsDefault);
 
                 var rows = new List<GameRow>();
                 var covered = new HashSet<string>(Cmp);
@@ -2089,8 +2017,7 @@ namespace SmartHdrManager
                         // library path, or one learned from the drive scan / a running game (e.g. Xbox games)
                         ExePath = game.ExePath ?? procs.Select(p => paths.TryGetValue(p, out var known) ? known : null)
                                                       .FirstOrDefault(p => p != null),
-                        Hdr = procs.Any(hdr.Contains),
-                        HasOptions = HasOptions(procs)
+                        Hdr = procs.Any(hdr.Contains)
                     });
                 }
 
@@ -2108,8 +2035,7 @@ namespace SmartHdrManager
                         Subtitle = hdr.Contains(proc) ? $"程序  ·  {proc}.exe" : $"磁盘扫描发现  ·  {proc}.exe",
                         Processes = new List<string> { proc },
                         ExePath = paths.TryGetValue(proc, out var path) ? path : null,
-                        Hdr = hdr.Contains(proc),
-                        HasOptions = HasOptions(new[] { proc })
+                        Hdr = hdr.Contains(proc)
                     });
                 }
 
@@ -2223,41 +2149,6 @@ namespace SmartHdrManager
                 Save();
             }
             Log("LIST", $"- '{displayName}' 将从不使用 HDR（撤销：设置 › 从不 HDR 的游戏，或在游戏中搜索）");
-        }
-
-        public GameOptions GetGameOptions(IEnumerable<string> processes)
-        {
-            lock (Sync)
-            {
-                foreach (var p in processes)
-                    if (Config.PerGameOptions.TryGetValue(p, out var o) && o != null)
-                        return new GameOptions { HdrDelaySeconds = o.HdrDelaySeconds, KeepHdrAfterExitSeconds = o.KeepHdrAfterExitSeconds };
-                return new GameOptions();
-            }
-        }
-
-        public void SetGameOptions(IEnumerable<string> processes, GameOptions options, string displayName)
-        {
-            var list = processes.ToList();
-            lock (Sync)
-            {
-                foreach (var p in list)
-                {
-                    if (options.IsDefault)
-                        Config.PerGameOptions.Remove(p);
-                    else
-                        Config.PerGameOptions[p] = new GameOptions
-                        {
-                            HdrDelaySeconds = options.HdrDelaySeconds,
-                            KeepHdrAfterExitSeconds = options.KeepHdrAfterExitSeconds
-                        };
-                }
-                InvalidateSnapshot();
-                Save();
-            }
-            Log("LIST", options.IsDefault
-                ? $"'{displayName}'：游戏选项已重置。"
-                : $"'{displayName}'：HDR 延迟 {options.HdrDelaySeconds} 秒，退出后保持 HDR {options.KeepHdrAfterExitSeconds} 秒。");
         }
 
         // ------------------------------------------------------------------
@@ -2452,71 +2343,6 @@ namespace SmartHdrManager
             return false;
         }
 
-        /// <summary>
-        /// Scans all fixed drives for games. Works on a copy of the lists so the engine is never blocked.
-        /// <paramref name="automatic"/> scans (at startup) are skipped while a game or full-screen app is running;
-        /// the "Scan games" button always scans.
-        /// </summary>
-        public int ScanDrives(bool automatic = false)
-        {
-            if (automatic && IsGameOrFullscreenActive(out string what))
-            {
-                Log("SCAN", $"自动磁盘扫描已跳过 – {what} 正在运行。");
-                return 0;
-            }
-
-            if (Interlocked.Exchange(ref _scanning, 1) == 1)
-            {
-                Log("SCAN", "磁盘扫描已在运行。");
-                return 0;
-            }
-
-            try
-            {
-                RefreshLibrary(fullRescan: true);
-
-                Log("SCAN", "正在扫描磁盘中的其他程序 …");
-                AppConfig temp;
-                lock (Sync)
-                {
-                    temp = new AppConfig
-                    {
-                        CustomGameFolders = new List<string>(Config.CustomGameFolders),
-                        IgnoredGames = new List<string>(Config.IgnoredGames),
-                        DiscoveredGames = new List<string>(Config.DiscoveredGames)
-                    };
-                }
-
-                var foundPaths = new Dictionary<string, string>(Cmp);
-                int added = GameScanner.ScanAndAddGames(temp, foundPaths);
-
-                lock (Sync)
-                {
-                    // Exe locations for icons; paths picked by hand ("Add program") are kept
-                    foreach (var kv in foundPaths)
-                        if (!Config.ProgramPaths.TryGetValue(kv.Key, out var known) || !File.Exists(known))
-                            Config.ProgramPaths[kv.Key] = kv.Value;
-
-                    foreach (var g in temp.DiscoveredGames)
-                        if (!Config.DiscoveredGames.Contains(g, Cmp))
-                            Config.DiscoveredGames.Add(g);
-                    Config.DiscoveredGames.Sort(Cmp);
-                    Save();
-                }
-                Log("SCAN", $"磁盘扫描找到 {added} 个新程序。");
-                return added;
-            }
-            catch (Exception ex)
-            {
-                Log("ERROR", $"磁盘扫描失败：{ex.Message}");
-                return 0;
-            }
-            finally
-            {
-                Volatile.Write(ref _scanning, 0);
-            }
-        }
-
         public T Read<T>(Func<AppConfig, T> getter)
         {
             lock (Sync) return getter(Config);
@@ -2586,11 +2412,6 @@ namespace SmartHdrManager
             c.DiscoveredGames ??= new List<string>();
             c.SelectedMonitors ??= new List<string>();
             c.LibraryGames ??= new List<LibraryGame>();
-            // Case-insensitive keys (process names), also after loading from JSON
-            var options = new Dictionary<string, GameOptions>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in c.PerGameOptions ?? new Dictionary<string, GameOptions>())
-                if (kv.Value != null) options[kv.Key] = kv.Value;
-            c.PerGameOptions = options;
 
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in c.ProgramPaths ?? new Dictionary<string, string>())

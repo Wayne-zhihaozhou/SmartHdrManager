@@ -849,7 +849,6 @@ namespace SmartHdrManager
             Processes = row.Processes;
             ExePath = row.ExePath;
             Hdr = row.Hdr;
-            HasOptions = row.HasOptions;
             Excluded = row.Excluded;
         }
 
@@ -859,7 +858,6 @@ namespace SmartHdrManager
         public List<string> Processes { get; }
         public string? ExePath { get; }
         public bool Hdr { get; set; }
-        public bool HasOptions { get; set; }
         public bool Excluded { get; }      // "Never HDR" row (only shown while searching)
         public override string ToString() => Name;
     }
@@ -1307,7 +1305,7 @@ namespace SmartHdrManager
 
             if (_items.Count == 0)
             {
-                TextRenderer.DrawText(g, "未找到游戏。请使用「扫描游戏」或「添加程序」。", Font, ClientRectangle, Theme.Muted,
+                TextRenderer.DrawText(g, "未找到游戏。请使用「添加程序」或「添加正在运行」。", Font, ClientRectangle, Theme.Muted,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
                 return;
             }
@@ -1353,8 +1351,7 @@ namespace SmartHdrManager
             if (index == _hover) state |= 2;
             if (index == _selected && Focused && ShowFocusCues) state |= 4;
             if (item.Hdr) state |= 8;
-            if (item.HasOptions) state |= 16;
-            if (!string.IsNullOrEmpty(item.ExePath) && _icons.TryGetValue(item.ExePath, out var icon) && icon != null) state |= 32;
+            if (!string.IsNullOrEmpty(item.ExePath) && _icons.TryGetValue(item.ExePath, out var icon) && icon != null) state |= 16;
             return state;
         }
 
@@ -1456,8 +1453,7 @@ namespace SmartHdrManager
             TextRenderer.DrawText(g, item.Name, Font, new Rectangle(textX, top, textWidth, nameHeight),
                 item.Hdr ? Theme.Text : Theme.Blend(Theme.Text, Theme.Muted, 0.6f), flags);
 
-            string subtitle = item.HasOptions ? item.Subtitle + "  ·  游戏选项" : item.Subtitle;
-            TextRenderer.DrawText(g, subtitle, Theme.Small, new Rectangle(textX, top + nameHeight, textWidth, subHeight), Theme.Muted, flags);
+            TextRenderer.DrawText(g, item.Subtitle, Theme.Small, new Rectangle(textX, top + nameHeight, textWidth, subHeight), Theme.Muted, flags);
 
             ToggleSwitch.DrawSwitch(g, sw, item.Hdr ? 1f : 0f, hover, true);
         }
