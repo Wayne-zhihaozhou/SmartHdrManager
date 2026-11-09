@@ -15,7 +15,7 @@ namespace SmartHdrManager
             Subtitle = row.Subtitle;
             Processes = row.Processes;
             ExePath = row.ExePath;
-            Hdr = row.Hdr;
+            Tracked = row.Tracked;
             Brightness = row.Brightness;
         }
 
@@ -24,7 +24,7 @@ namespace SmartHdrManager
         public string Subtitle { get; }
         public List<string> Processes { get; }
         public string? ExePath { get; }
-        public bool Hdr { get; set; }
+        public bool Tracked { get; set; }
         public int Brightness { get; set; }
     }
 
@@ -560,7 +560,7 @@ namespace SmartHdrManager
             RectangleF plusRect = BrightnessPlusRect(row);
 
             TextRenderer.DrawText(graphics, $"亮度: {item.Brightness}", Theme.Semibold, Rectangle.Round(textRect),
-                item.Hdr ? Theme.Text : Theme.Muted,
+                item.Tracked ? Theme.Text : Theme.Muted,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
 
             DrawStepperButton(graphics, minusRect, "-", _minusDown, _minusHover);

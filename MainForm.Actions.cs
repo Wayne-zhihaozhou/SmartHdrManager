@@ -15,26 +15,35 @@ namespace SmartHdrManager
         private const int RunningDialogWidth = 560;
         private const int RunningDialogHeight = 420;
 
-        private void RebuildGames()
+        private void RebuildGames(bool sdr)
         {
-            string filter = _search.Text.Trim();
-            GameItem[] items = _engine.GetGameRows()
+            var list = sdr ? _gamesSdr : _gamesHdr;
+            var search = sdr ? _searchSdr : _searchHdr;
+
+            string filter = search.Text.Trim();
+            GameItem[] items = _engine.GetGameRows(sdr)
                 .Where(row => filter.Length == 0 || MatchesFilter(row, filter))
                 .Select(row => new GameItem(row))
                 .ToArray();
 
-            _games.SetItems(items, _games.SelectedItem?.Key);
+            list.SetItems(items, list.SelectedItem?.Key);
+        }
+
+        private void RebuildAllGames()
+        {
+            RebuildGames(sdr: false);
+            RebuildGames(sdr: true);
         }
 
         private static bool MatchesFilter(GameRow row, string filter) =>
             row.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
             row.Subtitle.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
-        private void OnGameBrightnessChanged(GameItem item)
+        private void OnGameBrightnessChanged(GameItem item, bool sdr)
         {
             _engine.SetGameBrightness(item.Key, item.Processes, item.Brightness, item.Name);
-            if (item.Hdr) ApplyGameBrightness(item.Brightness);
-            BeginInvoke(new Action(RebuildGames));
+            if (item.Tracked) ApplyGameBrightness(item.Brightness);
+            BeginInvoke(new Action(() => RebuildGames(sdr)));
         }
 
         private async void ApplyGameBrightness(int brightness)
@@ -88,7 +97,7 @@ namespace SmartHdrManager
 
             _engine.ResetSettings();
             LoadSettings();
-            RebuildGames();
+            RebuildAllGames();
         }
 
         private void ReloadConfig()
@@ -96,7 +105,7 @@ namespace SmartHdrManager
             if (_engine.ReloadConfig())
             {
                 LoadSettings();
-                RebuildGames();
+                RebuildAllGames();
                 return;
             }
 
@@ -104,11 +113,11 @@ namespace SmartHdrManager
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
-        private void OnAddExe()
+        private void OnAddExe(bool sdr)
         {
             using var dialog = new OpenFileDialog
             {
-                Title = "选择应使用 HDR 的游戏或程序（.exe）",
+                Title = sdr ? "选择应保持 SDR 的游戏或程序（.exe）" : "选择应使用 HDR 的游戏或程序（.exe）",
                 Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*",
                 Multiselect = true,
                 InitialDirectory = _engine.GetInitialDirectory() ?? string.Empty
@@ -116,18 +125,18 @@ namespace SmartHdrManager
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
             foreach (string file in dialog.FileNames)
-                _engine.AddGame(HdrEngine.CleanExeInput(file), exePath: file);
+                _engine.AddGame(HdrEngine.CleanExeInput(file), exePath: file, sdr: sdr);
 
-            RebuildGames();
+            RebuildGames(sdr);
         }
 
-        private void OnAddRunning()
+        private void OnAddRunning(bool sdr)
         {
             var picked = PickRunningProcess();
             if (picked == null) return;
 
-            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path);
-            RebuildGames();
+            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, sdr: sdr);
+            RebuildGames(sdr);
         }
 
         private (string Name, string? Path)? PickRunningProcess()
@@ -196,22 +205,26 @@ namespace SmartHdrManager
             return (rows[list.SelectedIndex].Name, rows[list.SelectedIndex].Path);
         }
 
-        private void OnRemoveGame()
+        private void OnRemoveGame(bool sdr)
         {
-            var selected = _games.SelectedItem;
+            var list = sdr ? _gamesSdr : _gamesHdr;
+            var selected = list.SelectedItem;
             if (selected == null)
             {
                 MessageBox.Show(this, "请先选择一个游戏或程序。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
+            string consequence = sdr
+                ? "移除后，该游戏将不再强制保持 SDR。"
+                : "移除后，该游戏将不再自动触发 HDR。";
             var answer = MessageBox.Show(this,
-                $"是否移除 '{selected.Name}'？\n\n移除后，该游戏将不再自动触发 HDR。",
+                $"是否移除 '{selected.Name}'？\n\n{consequence}",
                 "移除游戏", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
             if (answer != DialogResult.Yes) return;
 
-            _engine.RemoveGame(selected.Key, selected.Processes);
-            RebuildGames();
+            _engine.RemoveGame(selected.Key, selected.Processes, sdr);
+            RebuildGames(sdr);
         }
 
         private void OpenInNotepad(string path)

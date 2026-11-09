@@ -55,10 +55,10 @@ namespace SmartHdrManager
             return ok;
         }
 
-        private string? FindRunningHdrGame(Snapshot snapshot, out string? exePath)
+        private string? FindRunningApp(Snapshot snapshot, HashSet<string> games, out string? exePath)
         {
             exePath = null;
-            if (snapshot.HdrGames.Count == 0) return null;
+            if (games.Count == 0) return null;
 
             Process[] processes;
             try { processes = Process.GetProcesses(); }
@@ -72,7 +72,7 @@ namespace SmartHdrManager
                     if (found != null) continue;
 
                     string name = process.ProcessName;
-                    if (!snapshot.HdrGames.Contains(name) || !IsGameLocation(snapshot, name, process.Id)) continue;
+                    if (!games.Contains(name) || !IsGameLocation(snapshot, name, process.Id)) continue;
 
                     found = name.ToLowerInvariant();
                     if (_pathLookupDone.Add(found))

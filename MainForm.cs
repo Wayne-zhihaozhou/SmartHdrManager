@@ -40,8 +40,10 @@ namespace SmartHdrManager
         private readonly List<Control> _pages = new();
         private TableLayoutPanel? _root;
 
-        private readonly TextBox _search = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
-        private readonly GameList _games = new() { Dock = DockStyle.Fill };
+        private readonly TextBox _searchHdr = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
+        private readonly TextBox _searchSdr = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
+        private readonly GameList _gamesHdr = new() { Dock = DockStyle.Fill };
+        private readonly GameList _gamesSdr = new() { Dock = DockStyle.Fill };
 
         private readonly ToggleSwitch _swAutostart = new();
         private readonly ToggleSwitch _swHdrControl = new();
@@ -85,12 +87,14 @@ namespace SmartHdrManager
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             _tabs.AddTab("HDR");
+            _tabs.AddTab("SDR");
             _tabs.AddTab("测试");
             _tabs.AddTab("设置");
             _tabs.AddTab("日志");
             root.Controls.Add(_tabs, 0, 0);
 
-            AddPage(BuildGamesPage());
+            AddPage(BuildGamesPage(sdr: false));
+            AddPage(BuildGamesPage(sdr: true));
             AddPage(BuildTestPage());
             AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
@@ -109,7 +113,7 @@ namespace SmartHdrManager
             ShowPage(0);
             WireEvents();
             LoadSettings();
-            RebuildGames();
+            RebuildAllGames();
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -155,8 +159,12 @@ namespace SmartHdrManager
         private void WireEvents()
         {
             _tabs.SelectedIndexChanged += (_, _) => ShowPage(_tabs.SelectedIndex);
-            _search.TextChanged += (_, _) => RebuildGames();
-            _games.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item);
+
+            _searchHdr.TextChanged += (_, _) => RebuildGames(sdr: false);
+            _searchSdr.TextChanged += (_, _) => RebuildGames(sdr: true);
+
+            _gamesHdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, sdr: false);
+            _gamesSdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, sdr: true);
 
             _swAutostart.CheckedChanged += (_, _) =>
             {
@@ -202,7 +210,7 @@ namespace SmartHdrManager
             if (!Visible)
             {
                 LoadSettings();
-                RebuildGames();
+                RebuildAllGames();
                 Show();
             }
 
@@ -275,6 +283,8 @@ namespace SmartHdrManager
                 return status.RunningGame != null ? $"以 HDR 启动 · {status.RunningGame}" : "以 HDR 启动 · 正在启动 …";
 
             if (status.RunningGame != null) return $"HDR 游戏运行中：{status.RunningGame}";
+
+            if (status.RunningSdrApp != null) return $"SDR 游戏运行中：{status.RunningSdrApp}（HDR 关闭）";
 
             if (status.FollowingLauncher != null) return $"{status.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
 

@@ -23,12 +23,14 @@ namespace SmartHdrManager
                 return Config.CustomGameFolders.FirstOrDefault(Directory.Exists);
         }
 
-        /// <summary>Rows for the games list: every library game (real name, source, icon).</summary>
-        public List<GameRow> GetGameRows()
+        /// <summary>Rows for one of the two lists: every library game (real name, source, icon) plus its own programs.</summary>
+        /// <param name="sdr">True for the SDR list, false for the HDR list.</param>
+        public List<GameRow> GetGameRows(bool sdr = false)
         {
             lock (Sync)
             {
-                var tracked = new HashSet<string>(Config.HdrGamesAndApps ?? new List<string>(), Cmp);
+                var list = sdr ? Config.SdrGamesAndApps : Config.HdrGamesAndApps;
+                var tracked = new HashSet<string>(list ?? new List<string>(), Cmp);
                 var paths = Config.ProgramPaths ?? new Dictionary<string, string>();
                 var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
                 var hdrModes = Config.GameHdrModes;
@@ -52,12 +54,12 @@ namespace SmartHdrManager
                         Processes = processes,
                         ExePath = game.ExePath ?? processes.Select(p => paths.TryGetValue(p, out var known) ? known : null)
                                                            .FirstOrDefault(p => p != null),
-                        Hdr = processes.Any(tracked.Contains) && processes.All(p => IsHdrEnabledFor(hdrModes, p)),
+                        Tracked = IsTracked(processes, tracked, hdrModes, sdr),
                         Brightness = game.Brightness
                     });
                 }
 
-                foreach (string process in Config.HdrGamesAndApps ?? new List<string>())
+                foreach (string process in list ?? new List<string>())
                 {
                     if (covered.Contains(process)) continue;
 
@@ -68,13 +70,19 @@ namespace SmartHdrManager
                         Subtitle = $"程序  ·  {process}.exe",
                         Processes = new List<string> { process },
                         ExePath = paths.TryGetValue(process, out var path) ? path : null,
-                        Hdr = IsHdrEnabledFor(hdrModes, process),
+                        Tracked = sdr || IsHdrEnabledFor(hdrModes, process),
                         Brightness = brightnessMap.TryGetValue(process, out int brightness) ? brightness : DefaultBrightness
                     });
                 }
 
                 return rows.OrderBy(r => r.Name, Cmp).ToList();
             }
+        }
+
+        private static bool IsTracked(List<string> processes, HashSet<string> tracked, Dictionary<string, bool>? hdrModes, bool sdr)
+        {
+            if (!processes.Any(tracked.Contains)) return false;
+            return sdr || processes.All(p => IsHdrEnabledFor(hdrModes, p));
         }
 
         public void SetGameBrightness(string gameKey, IEnumerable<string> processes, int brightness, string displayName)
@@ -105,7 +113,9 @@ namespace SmartHdrManager
             Log("BRIGHT", $"'{displayName}' 亮度设为 {value}");
         }
 
-        public bool AddGame(string procName, string? exePath = null)
+        /// <summary>Adds a program to one of the two lists; it is removed from the other one.</summary>
+        /// <param name="sdr">True for the SDR list, false for the HDR list.</param>
+        public bool AddGame(string procName, string? exePath = null, bool sdr = false)
         {
             if (string.IsNullOrWhiteSpace(procName) || procName is "explorer" or "smarthdrmanager")
             {
@@ -114,20 +124,29 @@ namespace SmartHdrManager
             }
 
             procName = procName.ToLowerInvariant();
+            string listName = sdr ? "SDR" : "HDR";
+
             lock (Sync)
             {
-                if (!Config.HdrGamesAndApps.Contains(procName, Cmp))
+                var target = sdr ? Config.SdrGamesAndApps : Config.HdrGamesAndApps;
+                var other = sdr ? Config.HdrGamesAndApps : Config.SdrGamesAndApps;
+
+                if (!target.Contains(procName, Cmp))
                 {
-                    Config.HdrGamesAndApps.Add(procName);
-                    Config.HdrGamesAndApps.Sort(Cmp);
-                    Log("LIST", $"+ '{procName}' 已添加到 HDR 列表");
+                    target.Add(procName);
+                    target.Sort(Cmp);
+                    Log("LIST", $"+ '{procName}' 已添加到 {listName} 列表");
                 }
                 else
                 {
-                    Log("LIST", $"'{procName}' 已在 HDR 列表中");
+                    Log("LIST", $"'{procName}' 已在 {listName} 列表中");
                 }
 
-                Config.GameHdrModes[procName] = true;
+                if (other.RemoveAll(name => name.Equals(procName, StringComparison.OrdinalIgnoreCase)) > 0)
+                    Log("LIST", $"'{procName}' 已从 {(sdr ? "HDR" : "SDR")} 列表移除");
+
+                if (sdr) Config.GameHdrModes.Remove(procName);
+                else Config.GameHdrModes[procName] = true;
 
                 if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                     Config.ProgramPaths[procName] = exePath;
@@ -139,16 +158,18 @@ namespace SmartHdrManager
             return true;
         }
 
-        public void RemoveGame(string key, IEnumerable<string> processes)
+        public void RemoveGame(string key, IEnumerable<string> processes, bool sdr = false)
         {
             var procList = processes.ToList();
             lock (Sync)
             {
+                var target = sdr ? Config.SdrGamesAndApps : Config.HdrGamesAndApps;
+
                 foreach (string process in procList)
                 {
-                    Config.HdrGamesAndApps.RemoveAll(g => g.Equals(process, StringComparison.OrdinalIgnoreCase));
+                    target.RemoveAll(name => name.Equals(process, StringComparison.OrdinalIgnoreCase));
                     Config.ProgramPaths.Remove(process);
-                    Config.GameHdrModes.Remove(process);
+                    if (!sdr) Config.GameHdrModes.Remove(process);
                 }
 
                 var libraryGames = Config.LibraryGames ?? new List<LibraryGame>();
@@ -159,7 +180,7 @@ namespace SmartHdrManager
                     Log("LIST", $"'- {gameToRemove.Name}' 已从游戏库移除");
                 }
 
-                Config.HdrGamesAndApps.Sort(Cmp);
+                target.Sort(Cmp);
                 InvalidateSnapshot();
                 Save();
             }

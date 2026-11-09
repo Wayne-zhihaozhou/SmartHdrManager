@@ -20,7 +20,7 @@ namespace SmartHdrManager
         private const int RowDescriptionHeight = 20;
         private const int ButtonSpacing = 8;
 
-        private Control BuildGamesPage()
+        private Control BuildGamesPage(bool sdr)
         {
             var page = new TableLayoutPanel { ColumnCount = 1, RowCount = 4, Margin = new Padding(0) };
             page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -29,8 +29,11 @@ namespace SmartHdrManager
             page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             page.RowStyles.Add(new RowStyle(SizeType.Absolute, ActionRowHeight));
 
-            page.Controls.Add(BuildGamesHint(), 0, 0);
-            page.Controls.Add(BuildSearchCard(), 0, 1);
+            var list = sdr ? _gamesSdr : _gamesHdr;
+            var search = sdr ? _searchSdr : _searchHdr;
+
+            page.Controls.Add(BuildGamesHint(sdr), 0, 0);
+            page.Controls.Add(BuildSearchCard(search), 0, 1);
 
             var listCard = new RoundedPanel
             {
@@ -40,20 +43,20 @@ namespace SmartHdrManager
                 Margin = new Padding(0),
                 Padding = new Padding(6)
             };
-            listCard.Controls.Add(_games);
+            listCard.Controls.Add(list);
             page.Controls.Add(listCard, 0, 2);
-            page.Controls.Add(BuildGamesActions(), 0, 3);
+            page.Controls.Add(BuildGamesActions(sdr), 0, 3);
 
             return page;
         }
 
-        private static Control BuildGamesHint()
+        private static Control BuildGamesHint(bool sdr)
         {
             var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = new Padding(0) };
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             row.Controls.Add(new Label
             {
-                Text = "开启应用后，其运行期间将使用 HDR",
+                Text = sdr ? "开启应用后，其运行期间将强制保持 SDR" : "开启应用后，其运行期间将使用 HDR",
                 Font = Theme.Small,
                 ForeColor = Theme.Muted,
                 AutoSize = false,
@@ -65,7 +68,7 @@ namespace SmartHdrManager
             return row;
         }
 
-        private Control BuildSearchCard()
+        private static Control BuildSearchCard(TextBox search)
         {
             var card = new RoundedPanel
             {
@@ -87,17 +90,17 @@ namespace SmartHdrManager
                 AutoSize = false
             };
 
-            _search.BackColor = Theme.Input;
-            _search.ForeColor = Theme.Text;
-            _search.Font = Theme.Body;
+            search.BackColor = Theme.Input;
+            search.ForeColor = Theme.Text;
+            search.Font = Theme.Body;
 
             card.Controls.Add(icon);
-            card.Controls.Add(_search);
-            card.Layout += (_, _) => LayoutSearchCard(card, icon);
+            card.Controls.Add(search);
+            card.Layout += (_, _) => LayoutSearchCard(card, icon, search);
             return card;
         }
 
-        private void LayoutSearchCard(RoundedPanel card, Label icon)
+        private static void LayoutSearchCard(RoundedPanel card, Label icon, TextBox search)
         {
             int S(int value) => card.LogicalToDeviceUnits(value);
 
@@ -105,11 +108,11 @@ namespace SmartHdrManager
             icon.SetBounds(S(8), S(1), S(26), Math.Max(0, height - S(2)));
 
             int textLeft = S(40);
-            _search.SetBounds(textLeft, Math.Max(0, (height - _search.Height) / 2),
-                              Math.Max(0, card.ClientSize.Width - textLeft - S(12)), _search.Height);
+            search.SetBounds(textLeft, Math.Max(0, (height - search.Height) / 2),
+                             Math.Max(0, card.ClientSize.Width - textLeft - S(12)), search.Height);
         }
 
-        private Control BuildGamesActions()
+        private Control BuildGamesActions(bool sdr)
         {
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 12, 0, 0) };
 
@@ -121,9 +124,9 @@ namespace SmartHdrManager
             _toolTip.SetToolTip(addRunning, "从正在运行的程序中选择");
             _toolTip.SetToolTip(remove, "移除选中的游戏或程序");
 
-            addExe.Click += (_, _) => OnAddExe();
-            addRunning.Click += (_, _) => OnAddRunning();
-            remove.Click += (_, _) => OnRemoveGame();
+            addExe.Click += (_, _) => OnAddExe(sdr);
+            addRunning.Click += (_, _) => OnAddRunning(sdr);
+            remove.Click += (_, _) => OnRemoveGame(sdr);
 
             foreach (var button in new Control[] { addExe, addRunning, remove })
             {

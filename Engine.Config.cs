@@ -42,6 +42,7 @@ namespace SmartHdrManager
                 {
                     ConfigVersion = Config.ConfigVersion,
                     HdrGamesAndApps = Config.HdrGamesAndApps,
+                    SdrGamesAndApps = Config.SdrGamesAndApps,
                     LibraryGames = Config.LibraryGames,
                     ProgramPaths = Config.ProgramPaths,
                     CustomGameFolders = Config.CustomGameFolders,
@@ -124,6 +125,7 @@ namespace SmartHdrManager
         {
             config.CustomGameFolders ??= new List<string>();
             config.HdrGamesAndApps ??= new List<string>();
+            config.SdrGamesAndApps ??= new List<string>();
             config.LibraryGames ??= new List<LibraryGame>();
 
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -132,6 +134,7 @@ namespace SmartHdrManager
             config.ProgramPaths = paths;
 
             config.SdrFallbackDelaySeconds = Math.Clamp(config.SdrFallbackDelaySeconds, 0, 30);
+            config.DesktopBrightness = Math.Clamp(config.DesktopBrightness, 0, 100);
             foreach (var game in config.LibraryGames) game.Processes ??= new List<string>();
 
             var hdrModes = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);

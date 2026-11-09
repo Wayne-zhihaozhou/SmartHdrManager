@@ -52,7 +52,6 @@ namespace SmartHdrManager
         };
 
         private readonly string _host;
-        private readonly string? _localAddress;
         private readonly bool _secureFirst;
         private readonly SemaphoreSlim _connectGate = new(1, 1);
         private readonly object _sync = new();
@@ -66,10 +65,9 @@ namespace SmartHdrManager
         private int _nextId;
         private bool _disposed;
 
-        public LgeTvClient(string host, string? localAddress = null, bool secureFirst = true)
+        public LgeTvClient(string host, bool secureFirst = true)
         {
             _host = host;
-            _localAddress = localAddress;
             _secureFirst = secureFirst;
         }
 

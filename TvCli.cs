@@ -34,20 +34,18 @@ namespace SmartHdrManager
 
         private static LgeTvClient? _client;
         private static string? _tvIp;
-        private static string? _localAddr;
 
         /// <summary>
         /// Remembers where the TV is. Nothing is connected here: the connection is made the first time brightness is
         /// actually used, so the app does not touch the network for users who never adjust the TV.
         /// </summary>
-        public static void Configure(string tvIp, string localAddr)
+        public static void Configure(string tvIp)
         {
             lock (Sync)
             {
                 _client?.Dispose();
                 _client = null;
                 _tvIp = tvIp;
-                _localAddr = localAddr;
             }
         }
 
@@ -89,21 +87,19 @@ namespace SmartHdrManager
         public static async Task<(bool success, string message)> TestConnectionAsync()
         {
             string tvIp;
-            string localAddr;
             lock (Sync)
             {
                 tvIp = _tvIp ?? BrightnessConfig.DefaultTvIp;
-                localAddr = _localAddr ?? BrightnessConfig.DefaultLocalAddr;
             }
-            return await TestConnectionInternalAsync(tvIp, localAddr);
+            return await TestConnectionInternalAsync(tvIp);
         }
 
-        private static async Task<(bool success, string message)> TestConnectionInternalAsync(string tvIp, string localAddr)
+        private static async Task<(bool success, string message)> TestConnectionInternalAsync(string tvIp)
         {
             if (string.IsNullOrWhiteSpace(tvIp))
                 return (false, "电视 IP 地址不能为空");
 
-            var client = new LgeTvClient(tvIp, localAddr) { ClientKey = TvClientKeyStore.Load(tvIp) };
+            var client = new LgeTvClient(tvIp) { ClientKey = TvClientKeyStore.Load(tvIp) };
             try
             {
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
@@ -132,15 +128,13 @@ namespace SmartHdrManager
         public static async Task<bool> PairAsync()
         {
             string? tvIp;
-            string? localAddr;
             lock (Sync)
             {
                 tvIp = _tvIp;
-                localAddr = _localAddr;
             }
             if (string.IsNullOrWhiteSpace(tvIp)) return false;
 
-            var client = new LgeTvClient(tvIp, localAddr);
+            var client = new LgeTvClient(tvIp);
             try
             {
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
@@ -156,7 +150,7 @@ namespace SmartHdrManager
                 lock (Sync)
                 {
                     _client?.Dispose();
-                    _client = new LgeTvClient(tvIp, localAddr) { ClientKey = client.ClientKey };
+                    _client = new LgeTvClient(tvIp) { ClientKey = client.ClientKey };
                 }
                 return true;
             }
@@ -178,7 +172,6 @@ namespace SmartHdrManager
                 _client?.Dispose();
                 _client = null;
                 _tvIp = null;
-                _localAddr = null;
             }
         }
 
@@ -190,7 +183,7 @@ namespace SmartHdrManager
                 if (_client == null && !string.IsNullOrWhiteSpace(_tvIp))
                 {
                     string? savedKey = TvClientKeyStore.Load(_tvIp);
-                    _client = new LgeTvClient(_tvIp, _localAddr) { ClientKey = savedKey };
+                    _client = new LgeTvClient(_tvIp) { ClientKey = savedKey };
                     HdrEngine.WriteFileLog(savedKey == null
                         ? $"[TV] {_tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
                         : $"[TV] {_tvIp} 复用已保存的配对凭证");

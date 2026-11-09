@@ -14,6 +14,9 @@ namespace SmartHdrManager
         /// <summary>Active HDR list: only these games switch HDR on automatically.</summary>
         public List<string> HdrGamesAndApps { get; set; } = new();
 
+        /// <summary>SDR list: these games keep HDR off while they run.</summary>
+        public List<string> SdrGamesAndApps { get; set; } = new();
+
         /// <summary>Games found in the Steam / Epic / GOG / Xbox / … libraries.</summary>
         public List<LibraryGame> LibraryGames { get; set; } = new();
 
@@ -41,6 +44,9 @@ namespace SmartHdrManager
         /// <summary>Seconds without HDR content before the desktop goes back to SDR.</summary>
         public int SdrFallbackDelaySeconds { get; set; } = 3;
 
+        /// <summary>TV brightness while no application of either list is running.</summary>
+        public int DesktopBrightness { get; set; } = 50;
+
         public BrightnessConfig? Brightness { get; set; }
     }
 
@@ -48,10 +54,8 @@ namespace SmartHdrManager
     public sealed class BrightnessConfig
     {
         public const string DefaultTvIp = "192.168.1.4";
-        public const string DefaultLocalAddr = "192.168.1.5";
 
         public string TvIp { get; set; } = DefaultTvIp;
-        public string LocalAddr { get; set; } = DefaultLocalAddr;
     }
 
     public sealed class LibraryGame
