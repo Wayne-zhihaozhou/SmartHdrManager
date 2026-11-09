@@ -53,11 +53,5 @@ namespace SmartHdrManager
                 config.Brightness = _cfg;
             }
         }
-
-        public static void SaveTo(AppConfig config)
-        {
-            if (config.Brightness == null) config.Brightness = _cfg;
-            // _cfg is already the same reference, no need to copy
-        }
     }
 }

@@ -267,50 +267,7 @@ namespace SmartHdrManager
             return System.IO.Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant();
         }
 
-        public static List<FoundApp> Find()
-        {
-            return new List<FoundApp>();
-        }
-
-        public static Dictionary<string, AppRule> DefaultRules()
-        {
-            return new Dictionary<string, AppRule>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        public static Dictionary<string, AppRule> FromLegacy(AppConfig config)
-        {
-            return new Dictionary<string, AppRule>(StringComparer.OrdinalIgnoreCase);
-        }
-
         public static void WriteLegacyLists(AppConfig config) { }
-
-        public static bool IsRegisteredAsApp(string exePath) => false;
-        public static bool IsInContextMenu(string exePath) => false;
-        public static string AppName(object player) => string.Empty;
-    }
-
-    public sealed class FoundApp
-    {
-        public string Process { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string? ExePath { get; set; }
-        public string Category { get; set; } = string.Empty;
-        public string DefaultMode { get; set; } = string.Empty;
-    }
-
-    public static class VideoPlayers
-    {
-        public static int RefreshContextMenu(string exe) => 0;
-        public static int RefreshAppRegistrations(string exe) => 0;
-        public static List<PlayerInfo> Find(List<string> paths) => new();
-        public static bool IsRegisteredAsApp(string exePath) => false;
-        public static bool IsInContextMenu(string exePath) => false;
-        public static string AppName(object player) => string.Empty;
-        public static void RegisterAsApp(object player, string launcherExe, out string error) { error = ""; }
-        public static void UnregisterApp(string exePath) { }
-        public static void RemoveFromContextMenu(string exePath) { }
-        public static bool AddToContextMenu(object player, string launcherExe, out string error) { error = ""; return false; }
-        public static void OpenDefaultAppsSettings(string exePath) { }
     }
 
     public sealed class PlayerInfo
@@ -338,84 +295,6 @@ namespace SmartHdrManager
         public string VersionText { get; init; } = string.Empty;
         public string ReleaseUrl { get; init; } = string.Empty;
     }
-
-    // =========================================================================
-    // Video HDR stubs (VideoPlayback.cs deleted; video HDR functionality removed)
-    // =========================================================================
-    public static class VideoHdrModes
-    {
-        public const string Smart = "Smart";
-        public const string NativeOnly = "NativeOnly";
-        public const string Always = "Always";
-        public static string Normalize(string mode) => mode;
-    }
-
-    public static class VideoTriggers
-    {
-        public const string Fullscreen = "Fullscreen";
-        public const string Any = "Any";
-        public static string Normalize(string trigger) => trigger;
-    }
-
-    public sealed class VideoScanOptions
-    {
-        public HashSet<string> Browsers { get; set; } = new();
-        public HashSet<string> Players { get; set; } = new();
-        public bool IncludeBrowsers { get; set; }
-        public bool IncludePlayers { get; set; }
-        public bool FullscreenOnly { get; set; }
-        public bool AllowSdr { get; set; }
-        public string[] HdrKeywords { get; set; } = Array.Empty<string>();
-        public HashSet<string> HdrOnly { get; set; } = new();
-        public string HdrToken { get; set; } = string.Empty;
-        public string SdrToken { get; set; } = string.Empty;
-    }
-
-    public sealed class VideoCandidate
-    {
-        public string Key { get; set; } = string.Empty;
-        public string Text { get; set; } = string.Empty;
-        public IntPtr Hwnd { get; set; }
-        public MonitorFilter Target { get; set; } = new(true, null);
-    }
-
-    public sealed class RtxVideoStatus
-    {
-        public bool Enabled { get; set; }
-        public string Describe() => "RTX Video HDR 不可用";
-        public bool CanUpgradeSdr => false;
-        public static RtxVideoStatus Query() => new() { Enabled = false };
-    }
-
-    public sealed class VideoPlaybackMonitor
-    {
-        public VideoCandidate? Find(VideoScanOptions opts)
-        {
-            var procs = Process.GetProcesses();
-            foreach (var p in procs)
-            {
-                try
-                {
-                    if (p.MainWindowHandle != IntPtr.Zero)
-                    {
-                        var c = new VideoCandidate
-                        {
-                            Key = p.ProcessName,
-                            Text = p.MainWindowTitle,
-                            Hwnd = p.MainWindowHandle,
-                            Target = new(true, null)
-                        };
-                        return c;
-                    }
-                }
-                catch { }
-                finally { p.Dispose(); }
-            }
-            return null;
-        }
-    }
-
-
 
     public sealed class GameOptions
     {

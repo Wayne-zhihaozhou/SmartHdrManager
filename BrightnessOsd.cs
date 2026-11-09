@@ -131,13 +131,16 @@ namespace SmartHdrManager
             _form.Controls.Add(_panel);
 
             // Rounded corner effect via region (simple approach)
-            _form.Region = CreateRoundedRegion(_form, 12);
+            // Note: region is set once at creation; form size changes later make it stale.
+            // Kept for compatibility; consider removing if rounded corners are not needed.
+            try { _form.Region = CreateRoundedRegion(_form, 12); } catch { }
         }
 
-        private static Region CreateRoundedRegion(Form form, int radius)
+        private static Region? CreateRoundedRegion(Form form, int radius)
         {
             try
             {
+                if (form.Width <= 0 || form.Height <= 0) return null;
                 var g = Graphics.FromHwnd(form.Handle);
                 var path = new System.Drawing.Drawing2D.GraphicsPath();
                 path.AddArc(0, 0, radius * 2, radius * 2, 180, 90);
@@ -152,7 +155,7 @@ namespace SmartHdrManager
             }
             catch
             {
-                return null!;
+                return null;
             }
         }
 
@@ -162,7 +165,6 @@ namespace SmartHdrManager
             _form.Opacity += 0.05;
             if (_form.Opacity >= 1.0)
             {
-                _form.Opacity = 1.0;
                 _form.Opacity = MAX_ALPHA / 255.0;
                 _isVisible = true;
                 _fadeTimer!.Stop();
@@ -189,22 +191,5 @@ namespace SmartHdrManager
             _panel!.BackColor = Color.FromArgb((int)(_form.Opacity * 255), BG_COLOR);
         }
 
-        public static void ForceHide()
-        {
-            if (_fadeTimer != null) { _fadeTimer.Stop(); _fadeTimer.Dispose(); _fadeTimer = null; }
-            if (_dismissTimer != null) { _dismissTimer.Stop(); _dismissTimer.Dispose(); _dismissTimer = null; }
-            if (_form != null && !_form.IsDisposed)
-            {
-                _form.Opacity = 0;
-                _isVisible = false;
-                _form.Hide();
-            }
-        }
-
-        public static void Shutdown()
-        {
-            ForceHide();
-            _lastBrightness = 0;
-        }
     }
 }
