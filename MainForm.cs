@@ -496,11 +496,6 @@ namespace SmartHdrManager
                 Add(SectionDescription(description), 30);
             }
 
-            // ---- TV Control ----
-            var _tvEnabledSwitch = new ToggleSwitch { Checked = true };
-            var tvEnabledRow = SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _tvEnabledSwitch);
-            Add(tvEnabledRow, 68);
-
             // ---- Test ----
             Section("测试", "测试电视连接和设置亮度。");
 
@@ -577,12 +572,18 @@ namespace SmartHdrManager
                 }
             };
 
+            // ---- TV Control ----
+            var _tvEnabledSwitch = new ToggleSwitch { Checked = true };
+            var tvEnabledRow = SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _tvEnabledSwitch);
+            Add(tvEnabledRow, 68);
+
             // ---- Auto Switch ----
             var _autoSwitchEnabled = new ToggleSwitch { Checked = true };
             var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
             Add(autoSwitchRow, 68);
 
-            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // Fill remaining space
+            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             // ---- Wire events ----
             _tvEnabledSwitch.CheckedChanged += (_, _) => SaveTvPageSettings();
