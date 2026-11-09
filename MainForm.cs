@@ -592,6 +592,8 @@ namespace SmartHdrManager
             // Load saved TV settings into controls
             LoadTvPageControls();
 
+            // Filler row to consume remaining space (prevents the last row from stretching)
+            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             return page;
         }
 
