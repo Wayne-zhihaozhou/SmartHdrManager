@@ -220,7 +220,7 @@ namespace SmartHdrManager
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 12, 0, 0), Padding = new Padding(0) };
             var addExe = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加程序", AutoSize = true };
             var addRunning = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加正在运行", AutoSize = true };
-            var removeBtn = new ModernButton { Glyph = Theme.GlyphRemove, Text = "移除", AutoSize = true };
+            var removeBtn = new ModernButton { Glyph = Theme.GlyphDelete, Text = "移除", AutoSize = true };
             _toolTip.SetToolTip(addExe, "选择游戏的 .exe 文件");
             _toolTip.SetToolTip(addRunning, "从正在运行的程序中选择");
             _toolTip.SetToolTip(removeBtn, "移除选中的游戏或程序");
