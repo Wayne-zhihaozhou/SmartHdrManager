@@ -49,6 +49,8 @@ namespace SmartHdrManager
         // Settings page
         private readonly ToggleSwitch _swAutostart = new();
         private ToggleSwitch _swPauseAutomation = null!;
+        private Label _hdrStatusLabel = null!;
+        private Label _activityLabel = null!;
         // Automatic drive scan: off / at every start / daily / weekly / monthly (2.6)
         private readonly Stepper _scanInterval = new()
         {
@@ -289,6 +291,20 @@ namespace SmartHdrManager
 
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
+            
+            // Status row
+            _hdrStatusLabel = new Label { AutoSize = true, Font = Theme.Title, ForeColor = Theme.Text };
+            _activityLabel = new Label { AutoSize = false, AutoEllipsis = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill };
+            var statusRow = new RoundedPanel { Padding = new Padding(12, 8, 12, 8), Height = 56, Margin = new Padding(0, 0, 0, 4) };
+            var statusPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            statusPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+            statusPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            statusPanel.Controls.Add(_hdrStatusLabel, 0, 0);
+            statusPanel.Controls.Add(_activityLabel, 0, 1);
+            statusRow.Controls.Add(statusPanel);
+            page.AddRow(statusRow, 56);
+            
             _swPauseAutomation = new ToggleSwitch();
             var pauseRow = SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", _swPauseAutomation);
             page.AddRow(pauseRow, 68);
@@ -729,7 +745,73 @@ namespace SmartHdrManager
         public void RefreshView()
         {
             var s = _engine.Status;
+            int state = (s.Paused && s.Override == HdrOverride.None ? 2 : s.HdrOn ? 1 : 0) + (int)s.Override * 10;
 
+            // Update HDR status label
+            if (_hdrStatusLabel != null)
+            {
+                string statusText = s.Override switch
+                {
+                    HdrOverride.ForceHdr => "HDR 已强制开启",
+                    HdrOverride.ForceSdr => "SDR 已强制",
+                    _ => state == 2 ? (s.HdrOn ? "HDR 开 · 已暂停" : "自动化已暂停")
+                         : s.HdrOn ? "HDR 已开启" : "HDR 已关闭"
+                };
+                if (_hdrStatusLabel.Text != statusText)
+                    BeginInvoke(new Action(() => { if (!_hdrStatusLabel.IsDisposed) _hdrStatusLabel.Text = statusText; }));
+            }
+
+            // Update activity label
+            if (_activityLabel != null)
+            {
+                string activity;
+                if (s.Override != HdrOverride.None)
+                {
+                    string length = s.OverrideRemainingMs >= 0
+                        ? $"{Math.Max(1, (int)Math.Ceiling(s.OverrideRemainingMs / 60000.0))} 分钟剩余"
+                        : "直到您手动恢复";
+                    string shortcut = HotkeySettings.Describe(_engine.Read(c => c.HotkeyModifier), 'O');
+                    activity = shortcut.Length > 0 ? $"手动覆盖 · {length}  ({shortcut})" : $"手动覆盖 · {length}";
+                }
+                else if (s.Paused)
+                {
+                    activity = "在恢复前不会自动切换 HDR。";
+                }
+                else if (s.BlockedBy)
+                {
+                    activity = $"HDR 已被阻止 – {s.BlockedBy} 正在运行（程序 › 录制与直播）";
+                }
+                else if (s.LaunchHold)
+                {
+                    activity = s.RunningGame != null ? $"以 HDR 启动 · {s.RunningGame}" : "以 HDR 启动 · 正在启动 …";
+                }
+                else if (s.WaitingForGame != null)
+                {
+                    activity = $"{s.WaitingForGame} 已启动 · {s.WaitingSecondsLeft} 秒后开启 HDR（游戏选项）";
+                }
+                else if (s.RunningGame != null)
+                {
+                    activity = $"HDR 游戏运行中：{s.RunningGame}";
+                }
+                else if (s.FollowingLauncher != null)
+                {
+                    activity = $"{s.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
+                }
+                else if (s.HoldSecondsLeft > 0)
+                {
+                    activity = $"再保持 HDR {s.HoldSecondsLeft} 秒";
+                }
+                else
+                {
+                    activity = string.IsNullOrEmpty(s.ActiveProcess)
+                        ? "等待中 …"
+                        : $"活动窗口：{s.ActiveProcess}{(s.IsFullscreen ? "（全屏）" : "")}";
+                }
+                if (_activityLabel.Text != activity)
+                    BeginInvoke(new Action(() => { if (!_activityLabel.IsDisposed) _activityLabel.Text = activity; }));
+            }
+
+            // Update pause automation switch state
             if (_swPauseAutomation != null)
             {
                 bool wasPaused = _swPauseAutomation.Checked;
