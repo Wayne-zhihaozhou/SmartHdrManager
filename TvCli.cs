@@ -42,13 +42,19 @@ namespace SmartHdrManager
         {
             if (string.IsNullOrWhiteSpace(tvIp)) return;
 
+            string? savedKey;
             lock (Sync)
             {
                 _tvIp = tvIp;
                 _localAddr = localAddr;
                 _client?.Dispose();
-                _client = new LgeTvClient(tvIp, localAddr) { ClientKey = TvClientKeyStore.Load(tvIp) };
+                savedKey = TvClientKeyStore.Load(tvIp);
+                _client = new LgeTvClient(tvIp, localAddr) { ClientKey = savedKey };
             }
+
+            HdrEngine.WriteFileLog(savedKey == null
+                ? $"[TV] {tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
+                : $"[TV] {tvIp} 复用已保存的配对凭证，电视不会再询问");
 
             _ = Task.Run(async () =>
             {
@@ -252,7 +258,7 @@ namespace SmartHdrManager
         {
             var key = client.ClientKey;
             if (string.IsNullOrEmpty(key)) return;
-            if (TvClientKeyStore.Load(client.Host) == key) return;
+            if (string.Equals(TvClientKeyStore.Load(client.Host), key, StringComparison.Ordinal)) return;
 
             TvClientKeyStore.Save(client.Host, key);
             HdrEngine.WriteFileLog("[TV] 已保存配对凭证，之后启动不再弹出配对确认");

@@ -14,6 +14,9 @@ namespace SmartHdrManager
     /// 握手流程：WebSocket(wss:3001/ws:3000) → hello → getSystemInfo → register。
     /// 所有入站消息由单一接收循环按 type + id 分发：握手等待者拿 hello/registered，
     /// 请求等待者拿 response/error，避免响应被错误路由导致请求必然超时。
+    /// 注册结果只认电视真正完成注册的消息（registered 或带 client-key 的响应）：
+    /// 部分固件会先回一条 returnValue 确认再回 registered，把确认当成注册完成会拿不到
+    /// client-key，导致凭证无法持久化、电视每次启动都重新弹窗要确认。
     /// </summary>
     public sealed class LgeTvClient : IDisposable
     {
@@ -107,11 +110,12 @@ namespace SmartHdrManager
                 StartReceiveLoop(socket);
 
                 var hello = await SendHandshakeAsync(HelloType, new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
-                TvInfo = ReadTvInfo(hello);
+                TvInfo = ReadTvInfo(hello, null);
 
                 try
                 {
-                    await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
+                    var systemInfo = await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
+                    TvInfo = ReadTvInfo(hello, systemInfo);
                 }
                 catch (Exception ex)
                 {
@@ -120,6 +124,11 @@ namespace SmartHdrManager
 
                 var registered = await SendHandshakeAsync(RegisterType, BuildRegisterPayload(), RegisterTimeoutMs, ct).ConfigureAwait(false);
                 ClientKey = ReadClientKey(registered) ?? ClientKey;
+
+                if (string.IsNullOrEmpty(ClientKey))
+                {
+                    HdrEngine.WriteFileLog("[TV] 电视未下发 client-key：本次连接仍需在电视上确认，下次启动会再次询问");
+                }
             }
             finally
             {
@@ -296,13 +305,9 @@ namespace SmartHdrManager
                     BufferOrCompleteHello(message);
                     return;
                 case RegisteredType:
-                    CompleteRegistered(message);
-                    return;
                 case ResponseType when id == RegisterType:
-                    CompleteRegistered(message);
-                    return;
                 case ErrorType when id == RegisterType:
-                    FailRegister(message);
+                    DispatchRegister(message, type);
                     return;
                 case ResponseType when id == HelloType:
                     BufferOrCompleteHello(message);
@@ -312,6 +317,41 @@ namespace SmartHdrManager
                     ResolveRequest(id, message);
                     return;
             }
+        }
+
+        /// <summary>
+        /// 注册结果分派。只有电视明确完成注册才唤醒等待者：
+        /// registered、或带 client-key 的响应视为成功；error 视为失败；
+        /// 其余 id=register 的响应只是确认消息（部分固件随后才会下发 client-key），
+        /// 若此时就当作注册完成，凭证永远拿不到，电视每次启动都会重新弹窗要确认。
+        /// </summary>
+        private void DispatchRegister(JsonElement message, string? type)
+        {
+            if (type == ErrorType)
+            {
+                FailRegister(message);
+                return;
+            }
+
+            if (type == RegisteredType || ReadClientKey(message) != null)
+            {
+                CompleteRegistered(message);
+                return;
+            }
+
+            if (!ReadReturnValue(message))
+            {
+                FailRegister(message);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(ClientKey))
+            {
+                CompleteRegistered(message);
+                return;
+            }
+
+            HdrEngine.WriteFileLog("[TV] 已收到注册确认，继续等待电视下发 client-key…");
         }
 
         /// <summary>部分固件在连接建立后主动推送 hello，早于客户端发送 hello 请求，先缓存再交付。</summary>
@@ -518,18 +558,50 @@ namespace SmartHdrManager
             FailAll(new InvalidOperationException("电视连接已重置"));
         }
 
-        private static TvDeviceInfo? ReadTvInfo(JsonElement hello)
+        /// <summary>
+        /// 型号只在 getSystemInfo 的响应里（hello 只带 deviceOSVersion），因此两者都读：
+        /// 版本取 hello，型号取 getSystemInfo，都缺失时返回 null。
+        /// </summary>
+        private static TvDeviceInfo? ReadTvInfo(JsonElement hello, JsonElement? systemInfo)
         {
-            if (!hello.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object)
-                return null;
-            return new TvDeviceInfo(GetString(payload, "modelName"), GetString(payload, "deviceOSVersion"));
+            var helloPayload = ReadPayload(hello);
+            var infoPayload = systemInfo is JsonElement info ? ReadPayload(info) : null;
+            var modelName = GetString(infoPayload, "modelName") ?? GetString(helloPayload, "modelName");
+            var version = GetString(helloPayload, "deviceOSVersion") ?? GetString(infoPayload, "deviceOSVersion");
+            return modelName == null && version == null ? null : new TvDeviceInfo(modelName, version);
+        }
+
+        private static JsonElement? ReadPayload(JsonElement message)
+        {
+            if (message.ValueKind != JsonValueKind.Object) return null;
+            if (!message.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object) return null;
+            return payload;
+        }
+
+        private static bool ReadReturnValue(JsonElement message)
+        {
+            var payload = ReadPayload(message);
+            if (payload is not JsonElement body || !body.TryGetProperty("returnValue", out var value)) return true;
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.False => false,
+                JsonValueKind.Number => value.GetInt32() != 0,
+                JsonValueKind.String => value.GetString() is "true" or "1",
+                _ => true,
+            };
         }
 
         private static string? ReadClientKey(JsonElement registered)
         {
-            if (!registered.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object)
-                return null;
-            return GetString(payload, ClientKeyField) ?? GetString(payload, ClientKeyAltField);
+            var payload = ReadPayload(registered);
+            if (payload is not JsonElement body) return null;
+            return GetString(body, ClientKeyField) ?? GetString(body, ClientKeyAltField);
+        }
+
+        private static string? GetString(JsonElement? element, string property)
+        {
+            return element is JsonElement value ? GetString(value, property) : null;
         }
 
         private static string? GetString(JsonElement element, string property)
