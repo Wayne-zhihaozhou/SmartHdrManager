@@ -1,7 +1,6 @@
 using System;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -9,11 +8,12 @@ namespace SmartHdrManager
 {
     /// <summary>
     /// Owns the tray icon, the background engine and (only while it is open) the settings window.
-    /// There is no ApplicationContext.MainForm, so closing the window never ends the process; only "Exit" does.
+    /// There is no MainForm in the application context, so closing the window never ends the process; only "Exit" does.
     /// </summary>
     internal sealed class TrayAppContext : ApplicationContext
     {
         private const int DisposeHiddenWindowAfterMs = 5000;
+        private const int TrayTimerIntervalMs = 500;
 
         private readonly HdrEngine _engine;
         private readonly EventWaitHandle _showEvent;
@@ -26,9 +26,8 @@ namespace SmartHdrManager
         private bool _exiting;
         private string _lastTooltip = string.Empty;
 
-
-        public TrayAppContext(HdrEngine engine, EventWaitHandle showEvent, CommandEvents commands, CliCommand startCommand, bool startHidden,
-                              bool justUpdated)
+        public TrayAppContext(HdrEngine engine, EventWaitHandle showEvent, CommandEvents commands, CliCommand startCommand,
+                              bool startHidden)
         {
             _engine = engine;
             _showEvent = showEvent;
@@ -36,11 +35,10 @@ namespace SmartHdrManager
 
             _tray = new TrayAndStartupManager(ShowMain, Exit);
 
-            // Re-read the HDR state right away when monitors change or the PC wakes up
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
-            _timer = new System.Windows.Forms.Timer { Interval = 500 };
+            _timer = new System.Windows.Forms.Timer { Interval = TrayTimerIntervalMs };
             _timer.Tick += OnTick;
             _timer.Start();
 
@@ -52,84 +50,66 @@ namespace SmartHdrManager
             if (!startHidden) ShowMain();
         }
 
-        /// <summary>
-        /// Command-line actions (--force-hdr, --force-sdr, --auto, --toggle-pause), e.g. for Stream Deck buttons,
-        /// desktop shortcuts or scripts. A second launch only signals the running instance and exits.
-        /// </summary>
+        /// <summary>Command-line action of this launch (a second launch only signals the running instance).</summary>
         private void RunCommand(CliCommand command)
         {
             if (command != CliCommand.TogglePause) return;
+
             _engine.Log("MANUAL", "命令行操作：切换 HDR 控制开关。");
             SetPaused(!_engine.Paused);
         }
 
-        // The settings window only exists while it is open. When hidden it is disposed after a few seconds,
-        // which frees its memory and window handles while the app sits in the tray.
         private void ShowMain()
         {
             if (_exiting) return;
+
             if (_form == null || _form.IsDisposed)
             {
-                _form = new MainForm(_engine, SetPaused, Exit);
+                _form = new MainForm(_engine, SetPaused);
                 _form.HiddenToTray += OnFormHidden;
             }
             _form.ShowFromTray();
         }
 
-        // No notification when the window goes to the tray (2.6): the tray icon itself shows that the app still runs
         private void OnFormHidden(object? sender, EventArgs e) => _formHiddenAt = Environment.TickCount64;
 
         private void SetPaused(bool paused)
         {
             _engine.Paused = paused;
             _engine.Log("PAUSE", paused ? "自动化已暂停 – 不再自动切换 HDR。" : "自动化已重新启用。");
-            if (_form != null && !_form.IsDisposed && _form.Visible) _form.RefreshView();
+            if (_form is { IsDisposed: false, Visible: true }) _form.RefreshView();
         }
 
         private void OnDisplaySettingsChanged(object? sender, EventArgs e) => _engine.InvalidateHdrState();
 
         private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
         {
-            if (e.Mode == PowerModes.Resume)
-            {
-                _engine.Log("INFO", "从睡眠中恢复 – 正在重新检查 HDR 状态。");
-                _engine.InvalidateHdrState(resumed: true);
-            }
+            if (e.Mode != PowerModes.Resume) return;
+
+            _engine.Log("INFO", "从睡眠中恢复 – 正在重新检查 HDR 状态。");
+            _engine.InvalidateHdrState(resumed: true);
         }
 
         private void OnTick(object? sender, EventArgs e)
         {
-            // A second launch asks the running instance to show its window
             if (_showEvent.WaitOne(0)) ShowMain();
 
-            // ... or to run a command-line action (--force-hdr, --force-sdr, --auto, --toggle-pause)
             var command = _commands.TakeSignaled();
             if (command != CliCommand.None) RunCommand(command);
 
-            // "Launch with HDR": a launcher process (--launch) asks to hold HDR while its game starts and runs.
-            // When HDR must stay off right now, tell it so it starts the game without waiting.
+            // "Launch with HDR": a launcher asks to hold HDR while its game starts. When HDR must stay off right now,
+            // tell it so that it starts the game without waiting.
             if (_commands.TakeLaunchHold())
             {
-                if (_engine.Paused)
-                    _commands.RefuseLaunch();
-                else
-                    _engine.HoldHdrForLaunch();
+                if (_engine.Paused) _commands.RefuseLaunch();
+                else _engine.HoldHdrForLaunch();
             }
             if (_commands.TakeLaunchRelease()) _engine.ReleaseLaunchHold();   // the game / player was closed
 
-            // Notifications from the engine (crash hint)
             while (_engine.TryTakeNotification(out string noteTitle, out string noteText))
                 _tray.ShowBalloon(noteTitle, noteText);
 
-            var s = _engine.Status;
-            string state = s.Paused ? "已暂停" : s.HdrOn ? "HDR 开" : "HDR 关";
-            string tooltip = $"Smart HDR Manager – {state}";
-            if (tooltip != _lastTooltip)
-            {
-                _lastTooltip = tooltip;
-                _tray.UpdateTooltip(tooltip);
-            }
-            _tray.UpdateState(s.HdrOn, s.Paused);
+            UpdateTrayStatus();
 
             if (_form == null) return;
 
@@ -151,6 +131,19 @@ namespace SmartHdrManager
             }
         }
 
+        private void UpdateTrayStatus()
+        {
+            var status = _engine.Status;
+            string state = status.Paused ? "已暂停" : status.HdrOn ? "HDR 开" : "HDR 关";
+            string tooltip = $"Smart HDR Manager – {state}";
+            if (tooltip != _lastTooltip)
+            {
+                _lastTooltip = tooltip;
+                _tray.UpdateTooltip(tooltip);
+            }
+            _tray.UpdateState(status.HdrOn, status.Paused);
+        }
+
         private void Exit()
         {
             if (_exiting) return;
@@ -161,7 +154,7 @@ namespace SmartHdrManager
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             _engine.Stop();
 
-            if (_form != null && !_form.IsDisposed)
+            if (_form is { IsDisposed: false })
             {
                 _form.AllowExit();
                 _form.Close();
@@ -199,7 +192,7 @@ namespace SmartHdrManager
             if (command == CliCommand.TogglePause) _togglePause.Set();
         }
 
-        /// <summary>Returns one pending command (and consumes it), or None. Called twice a second by the tray timer.</summary>
+        /// <summary>Returns one pending command (and consumes it), or None.</summary>
         public CliCommand TakeSignaled() => _togglePause.WaitOne(0) ? CliCommand.TogglePause : CliCommand.None;
 
         public static CliCommand Parse(string[] args)
@@ -220,11 +213,13 @@ namespace SmartHdrManager
 
     internal static class Program
     {
-        // Own taskbar identity. Without it Windows groups the app by its exe path and may take the icon of ANY
-        // shortcut that points to SmartHdrManager.exe – e.g. a "Launch with HDR" desktop shortcut that shows the
-        // game's icon – for the app's taskbar button.
+        // Own taskbar identity: without it Windows groups the app by its exe path and may take the icon of ANY shortcut
+        // that points to SmartHdrManager.exe for the app's taskbar button.
         private const string AppUserModelId = "VantaCode420.SmartHdrManager";
         private const string LauncherUserModelId = "VantaCode420.SmartHdrManager.Launcher";
+        private const string NotificationIconFileName = "app.ico";
+        private const int NotificationIconSize = 64;
+        private const int UpdateMutexWaitSeconds = 30;
 
         [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
@@ -235,23 +230,23 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// Windows shows the app identity as the sender of notifications. Without a registered name that is the raw
-        /// id ("VantaCode420.SmartHdrManager"); this gives it the name "Smart HDR Manager" and the app icon.
-        /// Per user (HKCU), no administrator rights. Removed by hand only (see README › Uninstall).
+        /// Windows shows the app identity as the sender of notifications. Without a registered name that is the raw id;
+        /// this gives it the name "Smart HDR Manager" and the app icon. Per user (HKCU), no administrator rights.
         /// </summary>
         private static void RegisterNotificationName()
         {
             try
             {
-                string iconPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(HdrEngine.LogPath)!, "app.ico");
+                string iconPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(HdrEngine.LogPath)!,
+                                                          NotificationIconFileName);
                 try
                 {
                     System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(iconPath)!);
                     if (!System.IO.File.Exists(iconPath))
                     {
-                        using var icon = AppIcons.Create(IconStyle.Vivid, 64);
-                        using var file = System.IO.File.Create(iconPath);
-                        icon.Save(file);
+                        using var icon = AppIcons.Create(IconStyle.Vivid, NotificationIconSize);
+                        using var stream = System.IO.File.Create(iconPath);
+                        icon.Save(stream);
                     }
                 }
                 catch { iconPath = string.Empty; }
@@ -266,9 +261,7 @@ namespace SmartHdrManager
         [STAThread]
         private static void Main(string[] args)
         {
-            // "Launch with HDR": SmartHdrManager.exe --launch <game> [arguments] – starts a game with HDR already on.
-            // Runs as its own small process (no window, no tray icon) and exits when the game has closed.
-            int launchIndex = Array.FindIndex(args, a => a.Equals("--launch", StringComparison.OrdinalIgnoreCase));
+            int launchIndex = Array.FindIndex(args, arg => arg.Equals("--launch", StringComparison.OrdinalIgnoreCase));
             if (launchIndex >= 0)
             {
                 SetTaskbarIdentity(LauncherUserModelId);
@@ -279,41 +272,41 @@ namespace SmartHdrManager
 
             SetTaskbarIdentity(AppUserModelId);
             var command = CommandEvents.Parse(args);
-            // A command-line action never opens the window: the app (re)starts quietly in the tray
-            bool startHidden = command != CliCommand.None || args.Any(a => a.Equals("--tray", StringComparison.OrdinalIgnoreCase));
+            bool startHidden = command != CliCommand.None ||
+                               args.Any(arg => arg.Equals("--tray", StringComparison.OrdinalIgnoreCase));
 
             using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\SmartHdrManager.ShowWindow");
             using var commands = new CommandEvents();
             using var mutex = new Mutex(true, @"Local\SmartHdrManager.SingleInstance", out bool isFirstInstance);
-            // Started by "Check for updates › Update now": the old version is still closing – wait for it (up to 30 s)
-            bool justUpdated = args.Any(a => a.Equals("--updated", StringComparison.OrdinalIgnoreCase));
+
+            // Started by an update: the old version is still closing – wait for it
+            bool justUpdated = args.Any(arg => arg.Equals("--updated", StringComparison.OrdinalIgnoreCase));
             if (!isFirstInstance && justUpdated)
             {
-                try { isFirstInstance = mutex.WaitOne(TimeSpan.FromSeconds(30)); }
-                catch (AbandonedMutexException) { isFirstInstance = true; }   // the old version has exited: the mutex is ours
+                try { isFirstInstance = mutex.WaitOne(TimeSpan.FromSeconds(UpdateMutexWaitSeconds)); }
+                catch (AbandonedMutexException) { isFirstInstance = true; }   // the old version has exited: it is ours
             }
+
             if (!isFirstInstance)
             {
-                if (command != CliCommand.None) commands.Signal(command);   // the running instance applies it
-                else if (!startHidden) showEvent.Set();                    // bring the running instance's window to the front
+                if (command != CliCommand.None) commands.Signal(command);
+                else if (!startHidden) showEvent.Set();
                 return;
             }
 
-            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);   // physical pixels: needed for the fullscreen check
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            // Only after the DPI mode is set: it draws the app icon, and the first drawing call fixes the process DPI mode
             RegisterNotificationName();
 
-            // Errors must never pop up dialogs or vanish silently while the app lives in the tray: write them to the log file.
+            // Errors must never pop up dialogs or vanish silently while the app lives in the tray: write them to the log.
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => HdrEngine.WriteFileLog($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => HdrEngine.WriteFileLog($"FATAL  {e.ExceptionObject}");
 
             var engine = new HdrEngine();
-            using var context = new TrayAppContext(engine, showEvent, commands, command, startHidden, justUpdated);
+            using var context = new TrayAppContext(engine, showEvent, commands, command, startHidden);
             Application.Run(context);
         }
     }
 }
-
