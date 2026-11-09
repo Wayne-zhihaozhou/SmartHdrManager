@@ -943,8 +943,6 @@ namespace SmartHdrManager
         private int _hover = -1;
         private int _selected = -1;
         private int _pressed = -1;
-        private bool _pressedOnSwitch;
-        private bool _pressedOnBrightness;
 
         private bool _thumbHover;
         private bool _draggingThumb;
@@ -959,9 +957,6 @@ namespace SmartHdrManager
 
         private readonly Dictionary<string, Bitmap?> _icons = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _iconsLoading = new(StringComparer.OrdinalIgnoreCase);
-
-        public event EventHandler<GameItem>? HdrToggled;
-        public event EventHandler<GameItem>? BrightnessToggled;
 
         /// <summary>Raised after a scroll animation with its measured frame rate (for the Log tab).</summary>
         public event EventHandler<string>? AnimationStats;
@@ -1034,67 +1029,6 @@ namespace SmartHdrManager
             if (y < 0) return -1;
             int index = (int)(y / RowHeight);
             return index >= 0 && index < _items.Count ? index : -1;
-        }
-
-        private RectangleF SwitchRect(Rectangle row)
-        {
-            float h = row.Height * 0.4f;
-            float w = h * 2f;
-            return new RectangleF(row.Right - w - row.Height * 0.35f, row.Y + (row.Height - h) / 2f, w, h);
-        }
-
-        private RectangleF BrightnessRect(Rectangle row)
-        {
-            float h = row.Height * 0.4f;
-            float w = LogicalToDeviceUnits(90);
-            float right = SwitchRect(row).Left - LogicalToDeviceUnits(16);
-            return new RectangleF(right - w, row.Y + (row.Height - h) / 2f, w, h);
-        }
-
-        private bool IsOnBrightness(Point p, int index)
-        {
-            if (index < 0) return false;
-            Rectangle row = RowRect(index);
-            RectangleF hit = BrightnessRect(row);
-            hit.Inflate(LogicalToDeviceUnits(4), LogicalToDeviceUnits(4));
-            return hit.Contains(p);
-        }
-
-        private int IndexAtBrightPart(Point p, int index)
-        {
-            if (index < 0 || index >= _items.Count) return 0;
-            Rectangle row = RowRect(index);
-            RectangleF br = BrightnessRect(row);
-            float mid = br.X + br.Width / 2f;
-            return p.X < (int)mid ? -1 : 1;
-        }
-
-        private bool IsOnSwitch(Point p, int index)
-        {
-            if (index < 0) return false;
-            Rectangle row = RowRect(index);
-            RectangleF hit = SwitchRect(row);
-            int pad = LogicalToDeviceUnits(3);
-            hit.Inflate(pad, pad);
-            return hit.Contains(p);
-        }
-
-        private void Toggle(int index)
-        {
-            if (index < 0 || index >= _items.Count) return;
-            var item = _items[index];
-            item.Hdr = !item.Hdr;
-            Invalidate();
-            HdrToggled?.Invoke(this, item);
-        }
-
-        private void AdjustBrightness(int index, int delta)
-        {
-            if (index < 0 || index >= _items.Count) return;
-            var item = _items[index];
-            item.Brightness = Math.Clamp(item.Brightness + delta, 0, 100);
-            Invalidate();
-            BrightnessToggled?.Invoke(this, item);
         }
 
         // ------------------------------------------------------------------
@@ -1254,8 +1188,6 @@ namespace SmartHdrManager
                 else
                 {
                     _pressed = IndexAt(e.Location);
-                    _pressedOnSwitch = IsOnSwitch(e.Location, _pressed);
-                    _pressedOnBrightness = _pressed >= 0 && _items[_pressed].Hdr && IsOnBrightness(e.Location, _pressed);
                     if (_pressed >= 0) _selected = _pressed;
                     Invalidate();
                 }
@@ -1273,12 +1205,7 @@ namespace SmartHdrManager
             }
             else if (e.Button == MouseButtons.Left && PressedRowHit(e.Location))
             {
-                if (_pressedOnSwitch) Toggle(_pressed);
-                else if (_pressedOnBrightness && IsOnBrightness(e.Location, _pressed))
-                {
-                    int delta = IndexAtBrightPart(e.Location, _pressed);
-                    if (delta != 0) AdjustBrightness(_pressed, delta);
-                }
+                // 规则状态已改为固定执行，不再处理亮度切换
             }
             _pressed = -1;
             base.OnMouseUp(e);
@@ -1324,11 +1251,6 @@ namespace SmartHdrManager
                 EnsureVisible(next);
                 Invalidate();
                 e.Handled = true;
-            }
-            else if (e.KeyCode == Keys.Space && _selected >= 0)
-            {
-                Toggle(_selected);
-                e.Handled = e.SuppressKeyPress = true;
             }
             base.OnKeyDown(e);
         }
@@ -1400,7 +1322,6 @@ namespace SmartHdrManager
             if (index == _selected) state |= 1;
             if (index == _hover) state |= 2;
             if (index == _selected && Focused && ShowFocusCues) state |= 4;
-            if (item.Hdr) state |= 8;
             if (!string.IsNullOrEmpty(item.ExePath) && _icons.TryGetValue(item.ExePath, out var icon) && icon != null) state |= 16;
             return state;
         }
@@ -1467,53 +1388,37 @@ namespace SmartHdrManager
                 }
             }
 
-            // Icon (exe icon, or a coloured letter) — dimmed while HDR is off for this game
+            // Icon (exe icon, or a coloured letter)
             float iconSize = row.Height * 0.6f;
             var iconRect = new RectangleF(row.X + row.Height * 0.25f, row.Y + (row.Height - iconSize) / 2f, iconSize, iconSize);
             var icon = GetIcon(item.ExePath);
             if (icon != null)
             {
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                if (item.Hdr)
-                {
-                    g.DrawImage(icon, iconRect);
-                }
-                else
-                {
-                    using var attributes = new System.Drawing.Imaging.ImageAttributes();
-                    var matrix = new System.Drawing.Imaging.ColorMatrix { Matrix33 = 0.55f };   // 55 % opacity
-                    attributes.SetColorMatrix(matrix);
-                    g.DrawImage(icon, Rectangle.Round(iconRect), 0, 0, icon.Width, icon.Height, GraphicsUnit.Pixel, attributes);
-                }
+                g.DrawImage(icon, iconRect);
             }
             else
             {
                 DrawLetterIcon(g, iconRect, item.Name);
             }
 
-            // Name + source line ("Steam · cyberpunk2077.exe")
-            RectangleF sw = SwitchRect(row);
-            RectangleF br = BrightnessRect(row);
+            // Name + source line
             int textX = (int)(iconRect.Right + row.Height * 0.25f);
-            int textWidth = Math.Max(0, (int)br.X - textX - 8);
+            int textWidth = Math.Max(0, row.Width - textX - Gap * 2);
             int nameHeight = Font.Height;
             int subHeight = Theme.Small.Height;
             int top = row.Y + (row.Height - nameHeight - subHeight) / 2;
             const TextFormatFlags flags = TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
 
-            TextRenderer.DrawText(g, item.Name, Font, new Rectangle(textX, top, textWidth, nameHeight),
-                item.Hdr ? Theme.Text : Theme.Blend(Theme.Text, Theme.Muted, 0.6f), flags);
+            TextRenderer.DrawText(g, item.Name, Font, new Rectangle(textX, top, textWidth, nameHeight), Theme.Text, flags);
 
             TextRenderer.DrawText(g, item.Subtitle, Theme.Small, new Rectangle(textX, top + nameHeight, textWidth, subHeight), Theme.Muted, flags);
 
-            // Brightness display
-            string brightText = $"亮度: {item.Brightness}";
-            Color brightColor = item.Hdr ? Theme.Text : Theme.Muted;
-            TextRenderer.DrawText(g, brightText, Theme.Semibold, Rectangle.Round(br), brightColor,
+            // Rule status display
+            string ruleText = $"规则: 执行中";
+            Rectangle ruleRect = new Rectangle(row.Width - Gap - LogicalToDeviceUnits(120), top, LogicalToDeviceUnits(120), nameHeight + subHeight);
+            TextRenderer.DrawText(g, ruleText, Theme.Semibold, ruleRect, Theme.Text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-
-            ToggleSwitch.DrawSwitch(g, sw, item.Hdr ? 1f : 0f, hover, true);
-        }
 
         // ------------------------------------------------------------------
         // Icons

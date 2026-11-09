@@ -539,26 +539,6 @@ namespace SmartHdrManager
             _tabs.SelectedIndexChanged += (_, _) => ShowPage(_tabs.SelectedIndex);
             _search.TextChanged += (_, _) => RebuildGames();
 
-            _games.HdrToggled += (_, item) =>
-            {
-                _engine.SetGameHdr(item.Processes, item.Hdr, item.Name);
-                // When turning HDR on, apply the game's brightness setting
-                if (item.Hdr)
-                {
-                    ApplyGameBrightness(item.Brightness);
-                }
-                BeginInvoke(new Action(RebuildGames));
-            };
-            _games.BrightnessToggled += (_, item) =>
-            {
-                _engine.SetGameBrightness(item.Key, item.Processes, item.Brightness, item.Name);
-                // Only apply brightness when HDR is enabled for this game
-                if (item.Hdr)
-                {
-                    ApplyGameBrightness(item.Brightness);
-                }
-                BeginInvoke(new Action(RebuildGames));
-            };
             // _games.AnimationStats reports the scroll frame rate (diagnostics) – not logged in releases: it filled the log
             foreach (var (_, sw) in _monitorSwitches)
                 sw.CheckedChanged += (_, _) => OnMonitorToggled(sw);
