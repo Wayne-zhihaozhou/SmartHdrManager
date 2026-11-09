@@ -22,9 +22,6 @@ namespace SmartHdrManager
         // (missing in files from 2.5.0 and older = 0).
         public int ConfigVersion { get; set; } = 0;
 
-        // 2.5: on/off for the weekly scan. 2.6 uses DriveScanIntervalDays (this one is kept in step for older versions).
-        public bool AutoScanDrivesOnStartup { get; set; } = true;
-
         // Only toggle HDR on the primary monitor (main display at desktop coordinates 0,0)
         public bool OnlyPrimaryMonitor { get; set; } = true;
 
@@ -43,9 +40,6 @@ namespace SmartHdrManager
         // After leaving HDR, tell open windows that the display changed so apps like Chrome stop rendering
         // with their cached HDR brightness (which makes them look dimmed until minimized/restored).
         public bool RefreshAppsAfterSdr { get; set; } = true;
-
-        // When the drives were last scanned for games. The automatic scan at startup runs at most once a week.
-        public DateTime? LastDriveScanUtc { get; set; }
 
         // ---- v2.3 ----
         // Once HDR is on, keep it on at least this long (0 = off). Colour-critical apps and manual SDR still switch at once.
@@ -78,8 +72,6 @@ namespace SmartHdrManager
         // Off (default): the app only switches back HDR that it turned on itself; HDR turned on by you or another
         // program is left alone. On: the 2.5 behaviour – back to SDR whenever nothing in the lists needs HDR.
         public bool KeepDesktopSdr { get; set; } = false;
-        // Automatic drive scan for newly installed games: -1 = off, 0 = at every start, N = every N days (default weekly)
-        public int DriveScanIntervalDays { get; set; } = 7;
         // Games that closed within seconds after HDR was switched on for them (possible crash, e.g. with NVIDIA RTX HDR)
         public Dictionary<string, int> QuickExitCounts { get; set; } = new();
 

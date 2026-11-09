@@ -52,13 +52,7 @@ namespace SmartHdrManager
         private Label _hdrStatusLabel = null!;
         private Label _activityLabel = null!;
         private Panel _activityPanel = null!;
-        // Automatic drive scan: off / at every start / daily / weekly / monthly (2.6)
-        private readonly Stepper _scanInterval = new()
-        {
-            Minimum = -1, Maximum = 30, Size = new Size(150, 34),
-            Format = v => v switch { < 0 => "关闭", 0 => "每次启动", 1 => "每天", 7 => "每周", 30 => "每月", _ => $"{v} 天" }
-        };
-        private Label? _scanIntervalDesc;
+
         private Label? _neverHdrDesc;
         private readonly ToggleSwitch _swShowOthers = new();
         private readonly Stepper _minimumHdr = new() { Minimum = 0, Maximum = 120, Step = 5, ZeroText = "关闭" };
@@ -310,9 +304,6 @@ namespace SmartHdrManager
             var pauseRow = SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", _swPauseAutomation);
             page.AddRow(pauseRow, 68);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
-            var scanRow = SettingRow("查找新游戏", "在磁盘上搜索新安装的游戏。", _scanInterval);
-            _scanIntervalDesc = RowDescription(scanRow);
-            page.AddRow(scanRow, 68);
             page.AddRow(SettingRow("键盘快捷键", "+ H：此游戏使用 HDR  ·  + I：从不使用 HDR  ·  + O：强制 HDR / SDR", _hotkeyChoice), 68);
             var neverButton = new ModernButton { Text = "显示列表", AutoSize = true };
             neverButton.Click += (_, _) => OnManageNeverHdr();
@@ -646,13 +637,6 @@ namespace SmartHdrManager
                 _setPaused(_swPauseAutomation.Checked);
             };
 
-            _scanInterval.ValueChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                int days = _scanInterval.Value;
-                _engine.Update(c => c.DriveScanIntervalDays = days);
-                UpdateScanDescription();
-            };
             _swColorProfile.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.ReloadColorProfileAfterSdr = _swColorProfile.Checked); };
             _swRefreshApps.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.RefreshAppsAfterSdr = _swRefreshApps.Checked); };
 
@@ -1354,8 +1338,6 @@ namespace SmartHdrManager
             {
                 _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
-                _scanInterval.Value = _engine.Read(c => c.DriveScanIntervalDays);
-                UpdateScanDescription();
                 _swShowOthers.Checked = _engine.Read(c => c.ShowOtherPrograms);
                 _minimumHdr.Value = _engine.Read(c => c.MinimumHdrSeconds);
                 _hotkeyChoice.SelectedIndex = Math.Max(0, Array.IndexOf(HotkeyModes, _engine.Read(c => HotkeySettings.Normalize(c.HotkeyModifier))));
@@ -1372,20 +1354,6 @@ namespace SmartHdrManager
                 UpdateNeverHdrDescription();
             }
             finally { _loadingSettings = false; }
-        }
-
-        /// <summary>"Looks for newly installed games · last scan: 3 days ago".</summary>
-        private void UpdateScanDescription()
-        {
-            if (_scanIntervalDesc == null) return;
-            DateTime? last = _engine.Read(c => c.LastDriveScanUtc);
-            string when = last == null ? "尚未扫描"
-                : (DateTime.UtcNow - last.Value).TotalDays >= 2 ? $"上次扫描 {(int)(DateTime.UtcNow - last.Value).TotalDays} 天前"
-                : (DateTime.UtcNow - last.Value).TotalHours >= 20 ? "上次扫描在昨天"
-                : "上次扫描在今天";
-            _scanIntervalDesc.Text = _scanInterval.Value < 0
-                ? $"关闭 – 使用 游戏选项卡 中的“扫描游戏”  ·  {when}"
-                : $"搜索您磁盘中的新游戏  ·  {when}";
         }
 
         private void OpenInNotepad(string path)

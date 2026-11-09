@@ -73,8 +73,7 @@ namespace SmartHdrManager
         private const int FailuresBeforeCooldown = 3;
         private const int FailureCooldownMs = 30000;      // stop retrying for 30 s after repeated failures
         private const int StartupScanDelayMs = 20000;     // let Windows finish logging in before scanning drives
-        private const int ScanDueCheckMs = 3600000;       // while running: once an hour, check whether the automatic scan is due
-        private const int AutoScanRecheckMs = 60000;      // automatic scan waits while a game / full-screen app runs
+
         private const int DisplayEventGraceMs = 5000;     // HDR lost this soon after a display change / wake-up = not a user decision
         private const int QuickExitMs = 12000;            // a game closing this soon after HDR came on may have crashed (crash hint)
         private const int QuickExitClearMs = 60000;       // a game that ran this long with HDR is fine again (hint cleared)
@@ -266,8 +265,7 @@ namespace SmartHdrManager
         private readonly ConcurrentQueue<(string Title, string Text)> _notifications = new();
 
         // Automatic drive scan (2.6: interval setting, also checked while the app runs)
-        private long _nextScanDueCheckMs;
-        private int _autoScanRunning;
+
 
 
 
@@ -330,7 +328,6 @@ namespace SmartHdrManager
                     PerGameOptions = c.PerGameOptions,
                     ProgramPaths = c.ProgramPaths,
                     CustomGameFolders = c.CustomGameFolders,
-                    LastDriveScanUtc = c.LastDriveScanUtc,
                     ShowOtherPrograms = c.ShowOtherPrograms,
                     LauncherGames = c.LauncherGames,
                     QuickExitCounts = c.QuickExitCounts
@@ -426,9 +423,6 @@ namespace SmartHdrManager
                 }
             }
 
-            // Settings › General › Scan drives automatically (manual "Scan games" still works any time)
-            if (IsDriveScanDue(atStartup: true)) StartAutoScan(StartupScanDelayMs);
-            _nextScanDueCheckMs = Now + ScanDueCheckMs;   // later checks: once an hour on the engine thread (Tick)
             MonitorsChanged();                             // remember the connected monitors (for display events)
 
             // Game library (Steam / Epic / GOG / Xbox): quick refresh in the background at every start
@@ -445,57 +439,6 @@ namespace SmartHdrManager
             _thread.Start();
         }
 
-        /// <summary>
-        /// True when the automatic drive scan should run: -1 = never, 0 = at every start, N = when the last scan is more
-        /// than N days old (checked at startup and once an hour while the app runs).
-        /// </summary>
-        private bool IsDriveScanDue(bool atStartup)
-        {
-            lock (Sync)
-            {
-                int days = Config.DriveScanIntervalDays;
-                if (days < 0) return false;
-                if (days == 0) return atStartup;
-                return Config.LastDriveScanUtc == null || DateTime.UtcNow - Config.LastDriveScanUtc.Value > TimeSpan.FromDays(days);
-            }
-        }
-
-        /// <summary>
-        /// Starts the automatic drive scan in the background: low priority, delayed, and never while a game or a
-        /// full-screen app runs (it waits until that is closed). Only one at a time.
-        /// </summary>
-        private void StartAutoScan(int delayMs)
-        {
-            if (Interlocked.Exchange(ref _autoScanRunning, 1) == 1) return;
-            var scanThread = new Thread(() =>
-            {
-                try
-                {
-                    for (int waited = 0; waited < delayMs && !_stop; waited += 1000) Thread.Sleep(1000);
-                    bool deferLogged = false;
-                    while (!_stop && IsGameOrFullscreenActive(out string what))
-                    {
-                        if (!deferLogged)
-                        {
-                            Log("SCAN", $"自动磁盘扫描已推迟 – {what} 正在运行，关闭后自动开始。");
-                            deferLogged = true;
-                        }
-                        for (int i = 0; i < AutoScanRecheckMs / 1000 && !_stop; i++) Thread.Sleep(1000);
-                    }
-                    if (!_stop) ScanDrives(automatic: true);
-                }
-                catch (Exception ex)
-                {
-                    Log("ERROR", $"自动磁盘扫描失败：{ex.Message}");
-                }
-                finally
-                {
-                    Volatile.Write(ref _autoScanRunning, 0);
-                }
-            })
-            { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "GameScan" };
-            scanThread.Start();
-        }
 
         /// <summary>True when the set of connected monitors changed since the last call (first call: false).</summary>
         private bool MonitorsChanged()
@@ -886,14 +829,6 @@ namespace SmartHdrManager
                 _nextProcessScanMs = now + ProcessScanIntervalMs;
                 if (_runningGame != null && runningPath != null) RememberProgramPath(_runningGame, runningPath);
                 TrackLauncherFollow(s, now);
-            }
-
-            // Automatic drive scan due (daily / weekly / monthly setting)? Checked once an hour.
-            if (now >= _nextScanDueCheckMs)
-            {
-                _nextScanDueCheckMs = now + ScanDueCheckMs;
-                if (!IsScanning && Volatile.Read(ref _autoScanRunning) == 0 && IsDriveScanDue(atStartup: false))
-                    StartAutoScan(0);
             }
 
             // Manual override has priority over everything (also over "pause")
@@ -2571,7 +2506,6 @@ namespace SmartHdrManager
                         if (!Config.DiscoveredGames.Contains(g, Cmp))
                             Config.DiscoveredGames.Add(g);
                     Config.DiscoveredGames.Sort(Cmp);
-                    Config.LastDriveScanUtc = DateTime.UtcNow;
                     Save();
                 }
                 Log("SCAN", $"磁盘扫描找到 {added} 个新程序。");
@@ -2688,7 +2622,6 @@ namespace SmartHdrManager
 
             // AppRules field kept for backward compatibility with old config files
             c.AppRules ??= new Dictionary<string, AppRule>(StringComparer.OrdinalIgnoreCase);
-            c.DriveScanIntervalDays = c.DriveScanIntervalDays < 0 ? -1 : Math.Min(c.DriveScanIntervalDays, 365);
 
             var quick = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in c.QuickExitCounts ?? new Dictionary<string, int>())
@@ -2705,7 +2638,6 @@ namespace SmartHdrManager
                 Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
                 // The 2.5 lists and switch are no longer read, but kept in step: an older version started later still works
                 AppCatalog.WriteLegacyLists(Config);
-                Config.AutoScanDrivesOnStartup = Config.DriveScanIntervalDays >= 0;
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 string tmp = ConfigPath + ".tmp";
                 File.WriteAllText(tmp, JsonSerializer.Serialize(Config, options));
