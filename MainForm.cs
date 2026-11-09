@@ -551,6 +551,11 @@ namespace SmartHdrManager
             _games.BrightnessToggled += (_, item) =>
             {
                 _engine.SetGameBrightness(item.Key, item.Processes, item.Brightness, item.Name);
+                // Only apply brightness when HDR is enabled for this game
+                if (item.Hdr)
+                {
+                    ApplyGameBrightness(item.Brightness);
+                }
                 BeginInvoke(new Action(RebuildGames));
             };
             // _games.AnimationStats reports the scroll frame rate (diagnostics) – not logged in releases: it filled the log
