@@ -46,7 +46,6 @@ namespace SmartHdrManager
         private Label _activityLabel = null!;
         private Panel _activityPanel = null!;
         private ToggleSwitch _swTvEnabled = null!;
-        private ToggleSwitch _swAutoSwitch = null!;
 
         private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
 
@@ -281,17 +280,10 @@ namespace SmartHdrManager
             }
 
             // ---- TV Control ----
-            Section("电视控制", "启用电视控制和自动切换。");
+            Section("电视控制", "启用电视控制。");
             _swTvEnabled = new ToggleSwitch { Checked = TvConfig.Enabled };
-            _swAutoSwitch = new ToggleSwitch { Checked = TvConfig.AutoSwitchEnabled };
-            page.AddRow(SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _swTvEnabled), 68);
-            page.AddRow(SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _swAutoSwitch), 68);
+            page.AddRow(SettingRow("启用电视控制", "允许通过快捷键控制电视亮度", _swTvEnabled), 68);
             _swTvEnabled.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                SaveTvPageSettings();
-            };
-            _swAutoSwitch.CheckedChanged += (_, _) =>
             {
                 if (_loadingSettings) return;
                 SaveTvPageSettings();
@@ -488,7 +480,6 @@ namespace SmartHdrManager
             try
             {
                 _swTvEnabled.Checked = TvConfig.Enabled;
-                _swAutoSwitch.Checked = TvConfig.AutoSwitchEnabled;
             }
             finally { _loadingSettings = false; }
         }
@@ -499,7 +490,6 @@ namespace SmartHdrManager
             if (config.Brightness == null) config.Brightness = new BrightnessConfig();
             var bc = config.Brightness;
             bc.Enabled = _swTvEnabled.Checked;
-            bc.AutoSwitchEnabled = _swAutoSwitch.Checked;
             _engine.Update(c => c.Brightness = bc);
             
             // 同步更新 TvConfig 静态字段，确保快捷键回调读取最新值
@@ -881,7 +871,6 @@ namespace SmartHdrManager
                 _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
                 _swTvEnabled.Checked = TvConfig.Enabled;
-                _swAutoSwitch.Checked = TvConfig.AutoSwitchEnabled;
 
                 // Monitors: explicit selection if set, otherwise "primary only" / "all HDR monitors"
                 var selection = _engine.Read(c => (c.SelectedMonitors ?? new List<string>()).ToList());
