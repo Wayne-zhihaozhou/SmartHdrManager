@@ -2007,7 +2007,6 @@ namespace SmartHdrManager
                 Save();
             }
 
-            TurnHdrOn($"'{procName}' 被添加", GetSnapshot().Monitors);
             return true;
         }
 
