@@ -72,6 +72,7 @@ namespace SmartHdrManager
                 Font = new Font("Segoe UI", FontSize, FontStyle.Regular)
             };
             _form.Controls.Add(_label);
+            _ = _form.Handle;   // create the window handle on this thread before any caller posts to it
 
             _animTimer = new System.Windows.Forms.Timer { Interval = FadeIntervalMs };
             _animTimer.Tick += (_, _) => OnAnimationTick();
@@ -93,9 +94,9 @@ namespace SmartHdrManager
                 _lastText = text;
                 _label.Text = text;
 
-                int scale = Math.Max(1, _form.DeviceDpi) / BaseDpi;
-                int padding = Math.Max(1, Padding * scale);
-                int margin = Math.Max(1, Margin * scale);
+                double scale = Math.Max(1, _form.DeviceDpi) / (double)BaseDpi;
+                int padding = Math.Max(1, (int)Math.Round(Padding * scale));
+                int margin = Math.Max(1, (int)Math.Round(Margin * scale));
 
                 int width = _label.PreferredWidth + padding * 2;
                 int height = _label.PreferredHeight + padding;
@@ -123,7 +124,7 @@ namespace SmartHdrManager
         private void RunOnUiThread(Action action)
         {
             var form = _form;
-            if (form == null || form.IsDisposed) return;
+            if (form == null || form.IsDisposed || !form.IsHandleCreated) return;
 
             try
             {

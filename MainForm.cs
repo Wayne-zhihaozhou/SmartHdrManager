@@ -215,7 +215,7 @@ namespace SmartHdrManager
 
             if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
             TopMost = true;
-            TopMost = false;   // reliably bring to front from a background process
+            TopMost = false;
             Activate();
             RefreshView();
         }
@@ -224,7 +224,6 @@ namespace SmartHdrManager
         {
             if (IsDisposed) return;
 
-            // Hide first: restoring a minimized window while it is still visible made it flash up before it vanished
             Hide();
             if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
             HiddenToTray?.Invoke(this, EventArgs.Empty);

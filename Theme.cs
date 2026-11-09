@@ -37,7 +37,6 @@ namespace SmartHdrManager
         public static readonly Font Mono = new(Pick("Cascadia Mono", "Consolas"), 9f);
         public static readonly Font IconFont = new(Pick("Segoe Fluent Icons", "Segoe MDL2 Assets"), 10f);
 
-        // Same code points in Segoe Fluent Icons and Segoe MDL2 Assets
         public const string GlyphAdd = "\uE710";
         public const string GlyphSearch = "\uE721";
         public const string GlyphRefresh = "\uE72C";
@@ -161,11 +160,11 @@ namespace SmartHdrManager
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hwnd, string? subAppName, string? subIdList);
 
-        private const int DwmUseImmersiveDarkModeOld = 19;   // older Windows 10 builds
-        private const int DwmUseImmersiveDarkMode = 20;      // Windows 10 20H1+ / Windows 11
-        private const int DwmWindowCornerPreference = 33;    // Windows 11
-        private const int DwmBorderColor = 34;               // Windows 11
-        private const int DwmCaptionColor = 35;              // Windows 11
+        private const int DwmUseImmersiveDarkModeOld = 19;
+        private const int DwmUseImmersiveDarkMode = 20;
+        private const int DwmWindowCornerPreference = 33;
+        private const int DwmBorderColor = 34;
+        private const int DwmCaptionColor = 35;
         private const int DwmWindowCornerRound = 2;
 
         /// <summary>Dark title bar; on Windows 11 also rounded corners and a title bar in the window colour.</summary>
@@ -288,7 +287,7 @@ namespace SmartHdrManager
             try
             {
                 using var temporary = Icon.FromHandle(handle);
-                return (Icon)temporary.Clone();   // owned copy, so the GDI handle can be released right away
+                return (Icon)temporary.Clone();
             }
             finally
             {

@@ -23,7 +23,6 @@ namespace SmartHdrManager
                 .Select(row => new GameItem(row))
                 .ToArray();
 
-            // Keeps the selection and scroll position
             _games.SetItems(items, _games.SelectedItem?.Key);
         }
 

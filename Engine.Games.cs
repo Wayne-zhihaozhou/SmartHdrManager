@@ -50,16 +50,13 @@ namespace SmartHdrManager
                             ? $"{game.Source}  ·  {processes[0]}.exe +{processes.Count - 1}"
                             : $"{game.Source}  ·  {processes[0]}.exe",
                         Processes = processes,
-                        // library path, or one learned from a running game (e.g. Xbox games)
                         ExePath = game.ExePath ?? processes.Select(p => paths.TryGetValue(p, out var known) ? known : null)
                                                            .FirstOrDefault(p => p != null),
-                        // on = the game is watched and its switch is on (turning the switch on starts watching it)
                         Hdr = processes.Any(tracked.Contains) && processes.All(p => IsHdrEnabledFor(hdrModes, p)),
                         Brightness = game.Brightness
                     });
                 }
 
-                // Programs added by the user that are not in a library game
                 foreach (string process in Config.HdrGamesAndApps ?? new List<string>())
                 {
                     if (covered.Contains(process)) continue;
@@ -78,31 +75,6 @@ namespace SmartHdrManager
 
                 return rows.OrderBy(r => r.Name, Cmp).ToList();
             }
-        }
-
-        public void SetGameHdr(IEnumerable<string> processes, bool enabled, string displayName)
-        {
-            var list = processes.Distinct(Cmp).ToList();
-            lock (Sync)
-            {
-                var modes = Config.GameHdrModes;
-                var tracked = Config.HdrGamesAndApps;
-                bool added = false;
-
-                foreach (string process in list)
-                {
-                    // the switch state is always stored explicitly: "no entry" must not read back as the opposite
-                    modes[process] = enabled;
-                    if (!enabled || tracked.Contains(process, Cmp)) continue;
-                    tracked.Add(process);
-                    added = true;
-                }
-                if (added) tracked.Sort(Cmp);
-
-                InvalidateSnapshot();
-                Save();
-            }
-            Log("LIST", enabled ? $"+ '{displayName}' 将使用 HDR" : $"- '{displayName}' 不再使用 HDR");
         }
 
         public void SetGameBrightness(string gameKey, IEnumerable<string> processes, int brightness, string displayName)

@@ -37,7 +37,7 @@ namespace SmartHdrManager
             lock (_gate)
             {
                 _running = true;
-                if (_thread != null) return;   // the loop thread is still alive and keeps going
+                if (_thread != null) return;
 
                 _thread = new Thread(Loop) { IsBackground = true, Name = "FrameLoop" };
                 _thread.Start();
@@ -59,7 +59,7 @@ namespace SmartHdrManager
                     }
                 }
 
-                if (DwmFlush() != 0) Thread.Sleep(CompositionOffDelayMs);   // composition off: fall back to ~250 Hz pacing
+                if (DwmFlush() != 0) Thread.Sleep(CompositionOffDelayMs);
 
                 try
                 {
@@ -68,11 +68,11 @@ namespace SmartHdrManager
                         _running = false;
                         continue;
                     }
-                    _owner.Invoke(_frame);   // one step + immediate repaint, then wait for the next display frame
+                    _owner.Invoke(_frame);
                 }
                 catch
                 {
-                    _running = false;        // control closed meanwhile
+                    _running = false;
                 }
             }
         }

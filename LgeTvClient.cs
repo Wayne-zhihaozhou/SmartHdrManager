@@ -10,13 +10,9 @@ using System.Threading.Tasks;
 namespace SmartHdrManager
 {
     /// <summary>
-    /// LG webOS 电视 SSAP 客户端（纯 C# 实现）。
-    /// 握手流程：WebSocket(wss:3001/ws:3000) → hello → getSystemInfo → register。
-    /// 所有入站消息由单一接收循环按 type + id 分发：握手等待者拿 hello/registered，
-    /// 请求等待者拿 response/error，避免响应被错误路由导致请求必然超时。
-    /// 注册结果只认电视真正完成注册的消息（registered 或带 client-key 的响应）：
-    /// 部分固件会先回一条 returnValue 确认再回 registered，把确认当成注册完成会拿不到
-    /// client-key，导致凭证无法持久化、电视每次启动都重新弹窗要确认。
+    /// LG webOS TV SSAP client (pure C#). Handshake: WebSocket (wss:3001 / ws:3000) → hello → getSystemInfo → register.
+    /// All inbound messages are dispatched by one receive loop per type + id, so a handshake waiter and a request waiter
+    /// can never receive each other's response.
     /// </summary>
     public sealed class LgeTvClient : IDisposable
     {
@@ -70,9 +66,6 @@ namespace SmartHdrManager
         private int _nextId;
         private bool _disposed;
 
-        /// <param name="host">电视 IP。</param>
-        /// <param name="localAddress">绑定的本机源地址（可为空）。</param>
-        /// <param name="secureFirst">是否先尝试 wss:3001。</param>
         public LgeTvClient(string host, string? localAddress = null, bool secureFirst = true)
         {
             _host = host;
@@ -82,7 +75,7 @@ namespace SmartHdrManager
 
         public string Host => _host;
 
-        /// <summary>已配对凭证；首次注册后由电视下发，需要持久化才能免配对弹窗。</summary>
+        /// <summary>Pairing key the TV handed out; it has to be persisted or the TV asks again on every start.</summary>
         public string? ClientKey { get; set; }
 
         public TvDeviceInfo? TvInfo { get; private set; }
@@ -95,7 +88,7 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>连接并完成 hello + getSystemInfo + register 握手。</summary>
+        /// <summary>Connects and runs the hello + getSystemInfo + register handshake.</summary>
         public async Task ConnectAsync(CancellationToken ct = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -109,12 +102,14 @@ namespace SmartHdrManager
                 var socket = await OpenSocketAsync(ct).ConfigureAwait(false);
                 StartReceiveLoop(socket);
 
-                var hello = await SendHandshakeAsync(HelloType, new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
+                var hello = await SendHandshakeAsync(HelloType, new Dictionary<string, object>(), HelloTimeoutMs, ct)
+                    .ConfigureAwait(false);
                 TvInfo = ReadTvInfo(hello, null);
 
                 try
                 {
-                    var systemInfo = await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(), HelloTimeoutMs, ct).ConfigureAwait(false);
+                    var systemInfo = await RequestAsync("ssap://system/getSystemInfo", new Dictionary<string, object>(),
+                        HelloTimeoutMs, ct).ConfigureAwait(false);
                     TvInfo = ReadTvInfo(hello, systemInfo);
                 }
                 catch (Exception ex)
@@ -122,13 +117,12 @@ namespace SmartHdrManager
                     HdrEngine.WriteFileLog($"[TV] getSystemInfo 未返回（部分固件允许跳过）: {ex.Message}");
                 }
 
-                var registered = await SendHandshakeAsync(RegisterType, BuildRegisterPayload(), RegisterTimeoutMs, ct).ConfigureAwait(false);
+                var registered = await SendHandshakeAsync(RegisterType, BuildRegisterPayload(), RegisterTimeoutMs, ct)
+                    .ConfigureAwait(false);
                 ClientKey = ReadClientKey(registered) ?? ClientKey;
 
                 if (string.IsNullOrEmpty(ClientKey))
-                {
                     HdrEngine.WriteFileLog("[TV] 电视未下发 client-key：本次连接仍需在电视上确认，下次启动会再次询问");
-                }
             }
             finally
             {
@@ -136,8 +130,9 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>发送 SSAP 请求并等待对应 id 的响应。</summary>
-        public async Task<JsonElement> RequestAsync(string uri, Dictionary<string, object>? payload = null, int timeoutMs = RequestTimeoutMs, CancellationToken ct = default)
+        /// <summary>Sends an SSAP request and waits for the response with the same id.</summary>
+        public async Task<JsonElement> RequestAsync(string uri, Dictionary<string, object>? payload = null,
+                                                   int timeoutMs = RequestTimeoutMs, CancellationToken ct = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -198,9 +193,10 @@ namespace SmartHdrManager
             var urls = _secureFirst ? new[] { secureUrl, plainUrl } : new[] { plainUrl, secureUrl };
 
             Exception? lastError = null;
-            foreach (var url in urls)
+            foreach (string url in urls)
             {
                 ct.ThrowIfCancellationRequested();
+
                 var socket = new ClientWebSocket();
                 if (url.StartsWith("wss:", StringComparison.Ordinal))
                     socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
@@ -210,6 +206,7 @@ namespace SmartHdrManager
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     timeout.CancelAfter(ConnectTimeoutMs);
                     await socket.ConnectAsync(new Uri(url), timeout.Token).ConfigureAwait(false);
+
                     lock (_sync)
                     {
                         _socket = socket;
@@ -256,6 +253,7 @@ namespace SmartHdrManager
                             HandleSocketClosed(socket, new InvalidOperationException("电视连接已关闭"));
                             return;
                         }
+
                         message.Write(buffer, 0, result.Count);
                         if (message.Length > MaxMessageBytes)
                         {
@@ -290,7 +288,8 @@ namespace SmartHdrManager
 
         private static JsonElement ParseMessage(MemoryStream message)
         {
-            using var document = JsonDocument.Parse(message.ToArray());
+            string json = Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
+            using var document = JsonDocument.Parse(json);
             return document.RootElement.Clone();
         }
 
@@ -302,15 +301,13 @@ namespace SmartHdrManager
             switch (type)
             {
                 case HelloType:
+                case ResponseType when id == HelloType:
                     BufferOrCompleteHello(message);
                     return;
                 case RegisteredType:
                 case ResponseType when id == RegisterType:
                 case ErrorType when id == RegisterType:
                     DispatchRegister(message, type);
-                    return;
-                case ResponseType when id == HelloType:
-                    BufferOrCompleteHello(message);
                     return;
                 case ResponseType:
                 case ErrorType:
@@ -320,10 +317,9 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// 注册结果分派。只有电视明确完成注册才唤醒等待者：
-        /// registered、或带 client-key 的响应视为成功；error 视为失败；
-        /// 其余 id=register 的响应只是确认消息（部分固件随后才会下发 client-key），
-        /// 若此时就当作注册完成，凭证永远拿不到，电视每次启动都会重新弹窗要确认。
+        /// Only a message that really finished the registration wakes the waiter: "registered", or a response carrying
+        /// a client-key. Other id=register responses are just an acknowledgement some firmwares send before the key, and
+        /// treating those as done would leave the client-key unread, so the TV would ask again on every start.
         /// </summary>
         private void DispatchRegister(JsonElement message, string? type)
         {
@@ -354,7 +350,7 @@ namespace SmartHdrManager
             HdrEngine.WriteFileLog("[TV] 已收到注册确认，继续等待电视下发 client-key…");
         }
 
-        /// <summary>部分固件在连接建立后主动推送 hello，早于客户端发送 hello 请求，先缓存再交付。</summary>
+        /// <summary>Some firmwares push hello right after connecting, before the client asks; it is buffered until then.</summary>
         private void BufferOrCompleteHello(JsonElement message)
         {
             TaskCompletionSource<JsonElement>? waiter;
@@ -409,7 +405,8 @@ namespace SmartHdrManager
             waiter?.TrySetException(new InvalidOperationException($"配对被拒绝: {ExtractErrorText(message)}"));
         }
 
-        private async Task<JsonElement> SendHandshakeAsync(string type, Dictionary<string, object> payload, int timeoutMs, CancellationToken ct)
+        private async Task<JsonElement> SendHandshakeAsync(string type, Dictionary<string, object> payload, int timeoutMs,
+                                                           CancellationToken ct)
         {
             if (type == HelloType && TryTakeBufferedHello(out var buffered))
                 return buffered;
@@ -558,16 +555,14 @@ namespace SmartHdrManager
             FailAll(new InvalidOperationException("电视连接已重置"));
         }
 
-        /// <summary>
-        /// 型号只在 getSystemInfo 的响应里（hello 只带 deviceOSVersion），因此两者都读：
-        /// 版本取 hello，型号取 getSystemInfo，都缺失时返回 null。
-        /// </summary>
+        /// <summary>Model name comes from getSystemInfo, the webOS version from hello; both may be missing.</summary>
         private static TvDeviceInfo? ReadTvInfo(JsonElement hello, JsonElement? systemInfo)
         {
             var helloPayload = ReadPayload(hello);
             var infoPayload = systemInfo is JsonElement info ? ReadPayload(info) : null;
-            var modelName = GetString(infoPayload, "modelName") ?? GetString(helloPayload, "modelName");
-            var version = GetString(helloPayload, "deviceOSVersion") ?? GetString(infoPayload, "deviceOSVersion");
+
+            string? modelName = GetString(infoPayload, "modelName") ?? GetString(helloPayload, "modelName");
+            string? version = GetString(helloPayload, "deviceOSVersion") ?? GetString(infoPayload, "deviceOSVersion");
             return modelName == null && version == null ? null : new TvDeviceInfo(modelName, version);
         }
 
@@ -599,16 +594,15 @@ namespace SmartHdrManager
             return GetString(body, ClientKeyField) ?? GetString(body, ClientKeyAltField);
         }
 
-        private static string? GetString(JsonElement? element, string property)
-        {
-            return element is JsonElement value ? GetString(value, property) : null;
-        }
+        private static string? GetString(JsonElement? element, string property) =>
+            element is JsonElement value ? GetString(value, property) : null;
 
         private static string? GetString(JsonElement element, string property)
         {
             if (element.ValueKind != JsonValueKind.Object) return null;
             if (!element.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String) return null;
-            var text = value.GetString();
+
+            string? text = value.GetString();
             return string.IsNullOrEmpty(text) ? null : text;
         }
 
@@ -645,7 +639,7 @@ namespace SmartHdrManager
         }
     }
 
-    /// <summary>电视设备信息。</summary>
+    /// <summary>Model name and webOS version of the connected TV.</summary>
     public readonly struct TvDeviceInfo
     {
         public string? ModelName { get; }
@@ -656,7 +650,5 @@ namespace SmartHdrManager
             ModelName = modelName;
             WebOSVersion = webOSVersion;
         }
-
-        public override string ToString() => $"{ModelName ?? "Unknown"} / webOS {WebOSVersion ?? "Unknown"}";
     }
 }

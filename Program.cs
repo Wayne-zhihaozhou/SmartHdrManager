@@ -97,14 +97,12 @@ namespace SmartHdrManager
             var command = _commands.TakeSignaled();
             if (command != CliCommand.None) RunCommand(command);
 
-            // "Launch with HDR": a launcher asks to hold HDR while its game starts. When HDR must stay off right now,
-            // tell it so that it starts the game without waiting.
             if (_commands.TakeLaunchHold())
             {
                 if (_engine.Paused) _commands.RefuseLaunch();
                 else _engine.HoldHdrForLaunch();
             }
-            if (_commands.TakeLaunchRelease()) _engine.ReleaseLaunchHold();   // the game / player was closed
+            if (_commands.TakeLaunchRelease()) _engine.ReleaseLaunchHold();
 
             while (_engine.TryTakeNotification(out string noteTitle, out string noteText))
                 _tray.ShowBalloon(noteTitle, noteText);
@@ -176,7 +174,6 @@ namespace SmartHdrManager
 
         private readonly EventWaitHandle _togglePause = new(false, EventResetMode.AutoReset, TogglePauseEventName);
 
-        // "Launch with HDR" (see HdrLauncher): only "hold HDR" / "not now" signals, never a path or command
         private readonly EventWaitHandle _launchHold = new(false, EventResetMode.AutoReset, HdrLauncher.HoldEventName);
         private readonly EventWaitHandle _launchRefused = new(false, EventResetMode.AutoReset, HdrLauncher.RefusedEventName);
         private readonly EventWaitHandle _launchRelease = new(false, EventResetMode.AutoReset, HdrLauncher.ReleaseEventName);
@@ -213,8 +210,6 @@ namespace SmartHdrManager
 
     internal static class Program
     {
-        // Own taskbar identity: without it Windows groups the app by its exe path and may take the icon of ANY shortcut
-        // that points to SmartHdrManager.exe for the app's taskbar button.
         private const string AppUserModelId = "VantaCode420.SmartHdrManager";
         private const string LauncherUserModelId = "VantaCode420.SmartHdrManager.Launcher";
         private const string NotificationIconFileName = "app.ico";
@@ -226,7 +221,7 @@ namespace SmartHdrManager
 
         private static void SetTaskbarIdentity(string id)
         {
-            try { SetCurrentProcessExplicitAppUserModelID(id); } catch { }   // cosmetic only
+            try { SetCurrentProcessExplicitAppUserModelID(id); } catch { }
         }
 
         /// <summary>
@@ -255,7 +250,7 @@ namespace SmartHdrManager
                 key.SetValue("DisplayName", "Smart HDR Manager");
                 if (iconPath.Length > 0) key.SetValue("IconUri", iconPath);
             }
-            catch { }   // cosmetic only
+            catch { }
         }
 
         [STAThread]
@@ -279,12 +274,11 @@ namespace SmartHdrManager
             using var commands = new CommandEvents();
             using var mutex = new Mutex(true, @"Local\SmartHdrManager.SingleInstance", out bool isFirstInstance);
 
-            // Started by an update: the old version is still closing – wait for it
             bool justUpdated = args.Any(arg => arg.Equals("--updated", StringComparison.OrdinalIgnoreCase));
             if (!isFirstInstance && justUpdated)
             {
                 try { isFirstInstance = mutex.WaitOne(TimeSpan.FromSeconds(UpdateMutexWaitSeconds)); }
-                catch (AbandonedMutexException) { isFirstInstance = true; }   // the old version has exited: it is ours
+                catch (AbandonedMutexException) { isFirstInstance = true; }
             }
 
             if (!isFirstInstance)
@@ -299,7 +293,6 @@ namespace SmartHdrManager
             Application.SetCompatibleTextRenderingDefault(false);
             RegisterNotificationName();
 
-            // Errors must never pop up dialogs or vanish silently while the app lives in the tray: write them to the log.
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => HdrEngine.WriteFileLog($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => HdrEngine.WriteFileLog($"FATAL  {e.ExceptionObject}");

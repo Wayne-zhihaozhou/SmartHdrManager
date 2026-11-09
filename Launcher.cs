@@ -62,7 +62,7 @@ namespace SmartHdrManager
             {
                 if (appRunning)
                 {
-                    hold.Set();   // the tray app switches the display and keeps its own state consistent
+                    hold.Set();
                 }
                 else
                 {
@@ -99,8 +99,6 @@ namespace SmartHdrManager
                 }
             }
 
-            // Launcher stubs (Ubisoft, Rockstar, some Steam games) start the real game and exit at once. Look for the
-            // real game – any program from the game's own folder – and keep HDR on until it has closed too.
             if (game == null || started.ElapsedMilliseconds < ShortRunMs)
                 FollowRealGame(GameFolder(file), hold, appRunning);
 
@@ -161,7 +159,6 @@ namespace SmartHdrManager
                     dir = Path.GetDirectoryName(dir);
                 }
 
-                // Never a drive root or a shared folder like "S:\Games": that would match other programs
                 if (dir == null || dir.TrimEnd('\\').IndexOf('\\') < 0) return null;
                 if (sharedFolders.Contains(Path.GetFileName(dir.TrimEnd('\\')), StringComparer.OrdinalIgnoreCase)) return null;
                 return dir;
@@ -187,7 +184,6 @@ namespace SmartHdrManager
                 foreach (string exe in Directory.EnumerateFiles(folder, "*.exe", options))
                 {
                     string name = Path.GetFileNameWithoutExtension(exe);
-                    // installers / crash reporters may linger after the game closed
                     if (name.Contains("unins", StringComparison.OrdinalIgnoreCase) ||
                         name.Contains("crash", StringComparison.OrdinalIgnoreCase) ||
                         name.Contains("redist", StringComparison.OrdinalIgnoreCase) ||
@@ -222,7 +218,6 @@ namespace SmartHdrManager
             long nextSignal = SignalIntervalMs;
             while (stopwatch.ElapsedMilliseconds < WaitForHdrMs)
             {
-                // The tray app refuses while it is paused
                 if (refused.WaitOne(200))
                 {
                     Log("以 HDR 启动：托盘应用当前保持 SDR（已暂停）– 将不以 HDR 启动。");
@@ -257,7 +252,6 @@ namespace SmartHdrManager
                 return Process.Start(startInfo);
             }
 
-            // Shortcut (.lnk), URL (steam://rungameid/…) or anything else Windows knows how to open
             var shell = new ProcessStartInfo(file) { UseShellExecute = true };
             if (arguments.Count > 0) shell.Arguments = string.Join(" ", arguments.Select(Quote));
             return Process.Start(shell);

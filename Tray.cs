@@ -40,7 +40,6 @@ namespace SmartHdrManager
             };
             menu.Items.Add(exitItem);
 
-            // Tray icon shows the state at a glance: colourful = HDR on, grey = SDR, amber = paused
             int iconSize = Math.Max(MinIconSize, SystemInformation.SmallIconSize.Width);
             _iconOff = AppIcons.Create(IconStyle.Gray, iconSize);
             _iconOn = AppIcons.Create(IconStyle.Vivid, iconSize);
@@ -136,13 +135,11 @@ namespace SmartHdrManager
                 if (string.IsNullOrEmpty(exePath)) return false;
 
                 using var key = Registry.CurrentUser.OpenSubKey(RunRegistryKey, true);
-                if (key?.GetValue(AppRegistryName) is not string current) return false;   // autostart is off
+                if (key?.GetValue(AppRegistryName) is not string current) return false;
 
                 string wanted = $"\"{exePath}\" {AutostartArguments}";
                 if (string.Equals(current, wanted, StringComparison.OrdinalIgnoreCase)) return false;
 
-                // Only fix a broken entry: if the registered exe still exists (another copy of the app, e.g. a test
-                // build started from a different folder), leave it alone.
                 string registered = current.TrimStart();
                 registered = registered.StartsWith('"')
                     ? registered[1..Math.Max(1, registered.IndexOf('"', 1))]

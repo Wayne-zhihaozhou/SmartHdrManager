@@ -26,8 +26,6 @@ namespace SmartHdrManager
         public string? ExePath { get; }
         public bool Hdr { get; set; }
         public int Brightness { get; set; }
-
-        public override string ToString() => Name;
     }
 
     /// <summary>
@@ -94,8 +92,6 @@ namespace SmartHdrManager
             Font = Theme.Body;
             _animation = new FrameLoop(this, AnimateScroll);
         }
-
-        public IReadOnlyList<GameItem> Items => _items;
 
         public GameItem? SelectedItem => _selected >= 0 && _selected < _items.Count ? _items[_selected] : null;
 
@@ -226,7 +222,6 @@ namespace SmartHdrManager
 
         protected override void OnMouseWheel(MouseEventArgs e)
         {
-            // Touchpads send many small deltas, mouse wheels steps of 120: both scroll proportionally
             int lines = SystemInformation.MouseWheelScrollLines;
             float perNotch = lines < 0 ? ClientSize.Height * 0.9f : Math.Max(RowHeight * 1.2f, lines * Font.Height * 1.6f);
             ScrollTo(_target - e.Delta / 120f * perNotch);
@@ -428,7 +423,7 @@ namespace SmartHdrManager
             int first = Math.Max(0, (int)((_offset - Gap) / RowHeight));
             int last = Math.Min(_items.Count - 1, (int)((_offset + ClientSize.Height) / RowHeight) + 1);
 
-            graphics.CompositingMode = CompositingMode.SourceCopy;          // rows are opaque: plain copy, fastest path
+            graphics.CompositingMode = CompositingMode.SourceCopy;
             graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
             graphics.PixelOffsetMode = PixelOffsetMode.Half;
             for (int i = first; i <= last; i++)
@@ -476,7 +471,6 @@ namespace SmartHdrManager
 
             cache?.Bitmap.Dispose();
 
-            // 32bpp RGB (no alpha): GDI text (TextRenderer) renders correctly into it; the row is opaque anyway
             var bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
             using (var graphics = Graphics.FromImage(bitmap))
             {

@@ -27,7 +27,6 @@ namespace SmartHdrManager
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-                // Never delete the log at startup (after a crash it is exactly what is needed): a large one is rotated
                 if (File.Exists(LogPath) && new FileInfo(LogPath).Length > MaxLogBytes)
                     File.Move(LogPath, Path.ChangeExtension(LogPath, ".old.txt"), overwrite: true);
             }
@@ -94,7 +93,7 @@ namespace SmartHdrManager
                 Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
                 File.Copy(LegacyConfigPath, ConfigPath);
                 Log("CONFIG", $"设置已迁移到 {ConfigPath}。");
-                try { File.Move(LegacyConfigPath, LegacyConfigPath + ".old", overwrite: true); } catch { }   // read-only folder: keep it
+                try { File.Move(LegacyConfigPath, LegacyConfigPath + ".old", overwrite: true); } catch { }
             }
             catch (Exception ex)
             {
@@ -172,7 +171,7 @@ namespace SmartHdrManager
                 Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
                 string temporaryPath = ConfigPath + ".tmp";
                 File.WriteAllText(temporaryPath, JsonSerializer.Serialize(Config, new JsonSerializerOptions { WriteIndented = true }));
-                File.Move(temporaryPath, ConfigPath, overwrite: true);   // atomic replace: never leaves a half-written file
+                File.Move(temporaryPath, ConfigPath, overwrite: true);
             }
             catch (Exception ex)
             {

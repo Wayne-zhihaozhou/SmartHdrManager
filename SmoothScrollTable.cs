@@ -77,7 +77,6 @@ namespace SmartHdrManager
 
             _frameClock.Restart();
             _animation.Start();
-            // no base call: the base class would jump immediately
         }
 
         private void Animate()

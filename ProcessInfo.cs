@@ -77,11 +77,10 @@ namespace SmartHdrManager
             try
             {
                 using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
-                string display = (key?.GetValue("DisplayVersion") as string ?? string.Empty).Trim();   // "25H2"
-                string buildText = (key?.GetValue("CurrentBuild") as string ?? string.Empty).Trim();   // "26200"
-                object? ubr = key?.GetValue("UBR");                                                     // 9711
+                string display = (key?.GetValue("DisplayVersion") as string ?? string.Empty).Trim();
+                string buildText = (key?.GetValue("CurrentBuild") as string ?? string.Empty).Trim();
+                object? ubr = key?.GetValue("UBR");
                 int build = int.TryParse(buildText, out int parsed) ? parsed : Environment.OSVersion.Version.Build;
-                // "ProductName" still says "Windows 10" on Windows 11, so the build number decides
                 string name = build >= WINDOWS_11_BUILD ? "Windows 11" : "Windows 10";
                 string fullBuild = ubr is int updateBuild ? $"{build}.{updateBuild}" : build.ToString();
                 result = display.Length > 0 ? $"{name} {display} (build {fullBuild})" : $"{name} (build {fullBuild})";

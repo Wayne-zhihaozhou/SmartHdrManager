@@ -92,7 +92,6 @@ namespace SmartHdrManager
                 return;
             }
 
-            // Skip while Alt is pressed: the user is switching windows with Alt+Tab
             if ((Control.ModifierKeys & Keys.Alt) != 0) return;
 
             var (processName, windowTitle, isFullscreen, _) = WindowDetector.GetActiveWindowInfo();

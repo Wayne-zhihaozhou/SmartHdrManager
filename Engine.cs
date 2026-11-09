@@ -32,7 +32,7 @@ namespace SmartHdrManager
 
     /// <summary>
     /// The HDR / SDR decision loop. Runs on its own background thread and owns every display switch.
-    /// The UI only changes the configuration (under <see cref="Sync"/>) or posts work with <see cref="Post"/>.
+    /// The UI only changes the configuration, which it always does under <see cref="Sync"/>.
     /// </summary>
     public sealed partial class HdrEngine
     {
@@ -76,7 +76,6 @@ namespace SmartHdrManager
         private Thread? _thread;
         private volatile bool _stop;
         private readonly AutoResetEvent _wake = new(false);
-        private readonly ConcurrentQueue<Action> _posted = new();
 
         private sealed class Snapshot
         {
@@ -217,9 +216,6 @@ namespace SmartHdrManager
             Save();
         }
 
-        // ------------------------------------------------------------------
-        // Lifecycle
-        // ------------------------------------------------------------------
         public void Start()
         {
             Log("INFO", "Smart HDR Manager 已启动 – 监控中。");
@@ -281,13 +277,6 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>Runs an action on the engine thread (all display switching stays on one thread).</summary>
-        public void Post(Action action)
-        {
-            _posted.Enqueue(action);
-            _wake.Set();
-        }
-
         /// <summary>
         /// "Launch with HDR": a launcher process asks to hold HDR while its game starts and runs. It repeats the request
         /// every 2 s; the hold ends a few seconds after the last one.
@@ -321,12 +310,6 @@ namespace SmartHdrManager
                 int waitMs = 100;
                 try
                 {
-                    while (_posted.TryDequeue(out var action))
-                    {
-                        try { action(); }
-                        catch (Exception ex) { Log("ERROR", $"操作失败：{ex.Message}"); }
-                    }
-
                     var snapshot = GetSnapshot();
                     waitMs = snapshot.TickMs;
                     Tick(snapshot);
@@ -359,9 +342,6 @@ namespace SmartHdrManager
             _wake.Set();
         }
 
-        // ------------------------------------------------------------------
-        // One monitoring tick
-        // ------------------------------------------------------------------
         private void Tick(Snapshot snapshot)
         {
             long now = Now;
@@ -389,7 +369,7 @@ namespace SmartHdrManager
             }
 
             if (!Paused)
-                Decide(snapshot, now, procName, isFullscreen);
+                Decide(snapshot, now, procName);
 
             Status = new EngineStatus
             {
@@ -484,7 +464,7 @@ namespace SmartHdrManager
                 Log("HDR", $"HDR 由您或其他程序关闭 – 在 {DescribeDemand(_lastDemand)} 结束前（或下一个游戏 / 视频启动前）不再开启。");
         }
 
-        private void Decide(Snapshot snapshot, long now, string procName, bool isFullscreen)
+        private void Decide(Snapshot snapshot, long now, string procName)
         {
             bool shouldEnableHdr = EvaluateHdrRequirement(snapshot, procName, _foregroundElsewhere, out string reason);
 
@@ -684,9 +664,6 @@ namespace SmartHdrManager
         /// </summary>
         private void UndoOwnHdr(string reason) => TurnHdrOff(reason);
 
-        // ------------------------------------------------------------------
-        // Switching HDR / SDR (engine thread only)
-        // ------------------------------------------------------------------
         private void TurnHdrOn(string reason)
         {
             long now = Now;

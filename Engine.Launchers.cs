@@ -41,19 +41,15 @@ namespace SmartHdrManager
                 if (!string.Equals(game, _seenGame, StringComparison.OrdinalIgnoreCase))
                 {
                     _seenGame = game;
-                    // Already running when the app started: it has been running for a while, never a "short run"
                     _seenGameSinceMs = _launcherTrackingStarted ? now : now - LauncherShortRunMs;
                 }
                 _launcherTrackingStarted = true;
                 if (_followLauncher != null) EndFollow();
 
-                // Crash hint: the same game started again right after it closed (restarted after a crash) still counts;
-                // another game from the list taking over means the first one was a launcher
                 if (_quickExitGame != null && string.Equals(game, _quickExitGame, StringComparison.OrdinalIgnoreCase))
                     ReportQuickExit();
                 _quickExitGame = null;
 
-                // Crash hint: a game that runs fine with HDR for a minute no longer gets the hint
                 if (_hdrOnForGame != null && string.Equals(game, _hdrOnForGame, StringComparison.OrdinalIgnoreCase) &&
                     now - _hdrOnForGameAtMs > QuickExitClearMs)
                 {
@@ -70,7 +66,6 @@ namespace SmartHdrManager
                 long ranMs = now - _seenGameSinceMs;
                 _seenGame = null;
 
-                // Crash hint: closed within seconds after this app switched HDR on for it
                 if (_hdrOnForGame != null && string.Equals(closed, _hdrOnForGame, StringComparison.OrdinalIgnoreCase) &&
                     now - _hdrOnForGameAtMs <= QuickExitMs && !IsLauncher(closed))
                 {
@@ -82,7 +77,6 @@ namespace SmartHdrManager
                 if (_followLauncher == null && ranMs < LauncherShortRunMs && !Paused)
                     StartFollow(snapshot, now, closed, ranMs);
 
-                // A launcher hands over to the real game: only count it once the launcher check is over
                 if (_quickExitGame != null && _followLauncher == null) ReportQuickExit();
             }
 
@@ -94,10 +88,9 @@ namespace SmartHdrManager
             {
                 string launcher = _followLauncher;
                 EndFollow();
-                _quickExitGame = null;   // it was a launcher, not a crash
+                _quickExitGame = null;
                 LearnLauncherGame(launcher, child);
 
-                // Take over right away (the next process scan finds it on its own): no SDR switch in between
                 _runningGame = child;
                 _activeHdrGameProcess = child;
                 _seenGame = child;
@@ -119,13 +112,11 @@ namespace SmartHdrManager
             string? folder = exe == null ? null : HdrLauncher.GameFolder(exe);
             if (folder == null) return;
 
-            // Never a Windows folder: its programs (svchost, explorer, …) are always running and are no game
             string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             if (windows.Length > 0 && folder.StartsWith(windows, StringComparison.OrdinalIgnoreCase)) return;
 
             _followLauncher = closed;
             _followUntilMs = now + LauncherFollowMs;
-            // The game must have started after the launcher (not a program from that folder that was already running)
             _followNotBefore = DateTime.Now - TimeSpan.FromMilliseconds(Math.Max(0, ranMs)) - TimeSpan.FromSeconds(3);
             _followHoldsHdr = _hdrAny;
             _followNames = null;
@@ -135,7 +126,6 @@ namespace SmartHdrManager
                        (_hdrAny ? $"在等待它启动的游戏期间，最长保持 HDR 开启 {LauncherFollowMs / 1000} 秒。"
                                 : $"监视它启动的游戏，最长 {LauncherFollowMs / 1000} 秒。"));
 
-            // The folder listing can take a moment on a hard disk: done in the background, HDR is held meanwhile
             Task.Run(() =>
             {
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -239,7 +229,6 @@ namespace SmartHdrManager
                     Config.HdrGamesAndApps.Sort(Cmp);
                 }
 
-                // Same row in the games list as the launcher's library game
                 foreach (var libraryGame in Config.LibraryGames)
                     if (libraryGame.Processes.Contains(launcher, Cmp) && !libraryGame.Processes.Contains(game, Cmp))
                         libraryGame.Processes.Add(game);

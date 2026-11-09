@@ -16,7 +16,6 @@ namespace SmartHdrManager
         private const int ERROR_INVALID_PARAMETER = 87;
         private const int ERROR_NOT_SUPPORTED = 50;
 
-        // Advanced colour info bits of the classic API and of the 24H2 API
         private const uint ADVANCED_COLOR_SUPPORTED = 0x1;
         private const uint ADVANCED_COLOR_ENABLED = 0x2;
         private const uint HDR_SUPPORTED = 0x10;
@@ -76,7 +75,7 @@ namespace SmartHdrManager
             public uint value;
             public int colorEncoding;
             public uint bitsPerColorChannel;
-            public int activeColorMode;   // 0 = SDR, 1 = WCG, 2 = HDR
+            public int activeColorMode;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -90,7 +89,7 @@ namespace SmartHdrManager
         private struct DISPLAYCONFIG_SET_HDR_STATE
         {
             public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
-            public uint value;            // bit 0: enableHdr
+            public uint value;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -179,7 +178,7 @@ namespace SmartHdrManager
                 enabled = isOn;
                 return true;
             }
-            return true;   // no HDR-capable display: report "off" instead of "unreadable"
+            return true;
         }
 
         /// <summary>Switches HDR on the HDR-capable display.</summary>
@@ -237,12 +236,10 @@ namespace SmartHdrManager
                     return true;
                 }
 
-                // Only decide "old Windows" before the new API ever worked. Once it has worked, an error is transient
-                // (e.g. a monitor disappearing during hot-plug or resume) and must not switch APIs for the session.
                 if (_hdrApi == API_UNKNOWN && (rc == ERROR_INVALID_PARAMETER || rc == ERROR_NOT_SUPPORTED) && !IsWindows24H2OrNewer)
                     _hdrApi = API_CLASSIC;
                 if (_hdrApi == API_MODERN)
-                    return false;   // new API known to exist: don't mix in the classic one for this display
+                    return false;
             }
 
             var classic = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO();

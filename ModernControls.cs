@@ -72,7 +72,7 @@ namespace SmartHdrManager
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            SetStyle(ControlStyles.StandardDoubleClick, false);   // every click toggles, even quick double-taps
+            SetStyle(ControlStyles.StandardDoubleClick, false);
             Size = new Size(44, 22);
             Cursor = Cursors.Hand;
             TabStop = true;
@@ -202,7 +202,7 @@ namespace SmartHdrManager
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            SetStyle(ControlStyles.StandardDoubleClick, false);   // quick repeated clicks all count
+            SetStyle(ControlStyles.StandardDoubleClick, false);
             SetStyle(ControlStyles.SupportsTransparentBackColor, true);
             Cursor = Cursors.Hand;
             TabStop = true;

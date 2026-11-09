@@ -12,11 +12,11 @@ namespace SmartHdrManager
 
         private readonly HashSet<string> _pathLookupDone = new(StringComparer.OrdinalIgnoreCase);
 
-        // Exe location check, by process id and name: true = runs from its game's folder (or the location is unknown)
+        /// <summary>Cached exe location check per process: true = runs from its game's folder (or the location is unknown).</summary>
         private readonly Dictionary<(int Pid, string Name), bool> _locationOk = new();
         private Snapshot? _locationSnapshot;
 
-        // The program in front has an HDR game's name but runs from another folder
+        /// <summary>The program in front has an HDR game's name but runs from another folder.</summary>
         private bool _foregroundElsewhere;
 
         /// <summary>
@@ -38,11 +38,9 @@ namespace SmartHdrManager
             if (_locationOk.TryGetValue(key, out bool ok)) return ok;
 
             string? path = ProcessPaths.TryGetExePath(pid);
-            // Xbox / Microsoft Store games run from a WindowsApps path that is not their XboxGames folder
             ok = path == null || path.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase) ||
                  known.Folders.Any(folder => path.StartsWith(folder + "\\", StringComparison.OrdinalIgnoreCase));
 
-            // Slower checks only for a process outside the known folders (once per process)
             if (!ok) ok = !known.Exes.Any(File.Exists);
             if (!ok)
             {
@@ -130,7 +128,6 @@ namespace SmartHdrManager
                     if (found != null || process.Id == ownProcessId) continue;
 
                     string name = process.ProcessName;
-                    // StartTime needs only limited query access (like Task Manager); unreadable = not a candidate
                     if (names.Contains(name) && !name.Equals(launcher, StringComparison.OrdinalIgnoreCase) &&
                         process.StartTime >= notBefore)
                         found = name.ToLowerInvariant();

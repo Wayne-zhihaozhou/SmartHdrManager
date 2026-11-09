@@ -60,7 +60,6 @@ namespace SmartHdrManager
             IntPtr hWnd = GetForegroundWindow();
             if (hWnd == IntPtr.Zero) return (string.Empty, string.Empty, false, 0);
 
-            // One reusable buffer per thread instead of a new StringBuilder 10x per second
             var title = _titleBuffer ??= new StringBuilder(512);
             title.Clear();
             GetWindowText(hWnd, title, title.Capacity);

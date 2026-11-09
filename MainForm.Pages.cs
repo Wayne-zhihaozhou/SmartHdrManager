@@ -200,7 +200,6 @@ namespace SmartHdrManager
             panel.Controls.Add(statusLabel);
             page.AddRow(panel, ActionRowHeight);
 
-            // Commands stay clickable while one runs: the result is shown when each finishes.
             testButton.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "测试中...", TvCli.TestConnectionAsync);
             pairButton.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "配对中...", DescribePairAsync);
             brightnessLow.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "设置中...", () => DescribeBrightnessAsync(0));
@@ -268,7 +267,7 @@ namespace SmartHdrManager
 
         private static Label SectionHeader(string text) => new()
         {
-            UseMnemonic = false,   // "&" must show as "&", not underline the next letter
+            UseMnemonic = false,
             Text = text,
             Font = Theme.Section,
             ForeColor = Theme.Text,
@@ -294,7 +293,7 @@ namespace SmartHdrManager
         /// <summary>Card with a title, a description on the left and a control on the right.</summary>
         private static RoundedPanel SettingRow(string title, string description, Control control)
         {
-            const int width = CardWidth - 8;   // a little narrower: room for the scrollbar
+            const int width = CardWidth - 8;
             const int height = 60;
 
             var row = new RoundedPanel
@@ -335,7 +334,6 @@ namespace SmartHdrManager
             row.Controls.Add(titleLabel);
             row.Controls.Add(descriptionLabel);
 
-            // Explicit layout (DPI-safe): control on the right, text uses the remaining width
             row.Layout += (_, _) => LayoutSettingRow(row, control, titleLabel, descriptionLabel);
             return row;
         }
