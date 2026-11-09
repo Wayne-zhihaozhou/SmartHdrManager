@@ -132,7 +132,25 @@ namespace SmartHdrManager
         }
 
         /// <summary>测试连接并汇报当前亮度（会顺带保存配对凭证）。</summary>
+        public static async Task<(bool success, string message)> TestConnectionAsync()
+        {
+            string tvIp;
+            string localAddr;
+            lock (Sync)
+            {
+                tvIp = _tvIp ?? TvConfig.TvIp;
+                localAddr = _localAddr ?? TvConfig.LocalAddr;
+            }
+            return await TestConnectionInternalAsync(tvIp, localAddr);
+        }
+
+        /// <summary>测试连接并汇报当前亮度（会顺带保存配对凭证）。</summary>
         public static async Task<(bool success, string message)> TestConnectionAsync(string tvIp, string localAddr)
+        {
+            return await TestConnectionInternalAsync(tvIp, localAddr);
+        }
+
+        private static async Task<(bool success, string message)> TestConnectionInternalAsync(string tvIp, string localAddr)
         {
             if (string.IsNullOrWhiteSpace(tvIp))
                 return (false, "电视 IP 地址不能为空");

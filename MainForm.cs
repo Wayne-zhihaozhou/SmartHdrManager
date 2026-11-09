@@ -496,37 +496,88 @@ namespace SmartHdrManager
                 Add(SectionDescription(description), 30);
             }
 
-            // ---- TV Connection ----
-            Section("电视连接", "LG webOS 电视的 SSAP 协议配置。");
-
-            var tvIpLabel = new Label { UseMnemonic = false, Text = "电视 IP 地址", Font = Theme.Semibold, ForeColor = Theme.Text, AutoSize = false, AutoEllipsis = true };
-            var tvIpBox = new TextBox { BorderStyle = BorderStyle.FixedSingle, Font = Theme.Body, Width = 200 };
-            tvIpBox.PlaceholderText = "192.168.1.4";
-            var tvIpRow = SettingRow("电视 IP", "电视的局域网 IP 地址", tvIpBox);
-            tvIpLabel.SetBounds(18, 10, tvIpRow.ClientSize.Width - 18 - tvIpBox.Width - 34, 22);
-            tvIpRow.Controls.Add(tvIpLabel);
-            Add(tvIpRow, 68);
-
-            var localAddrLabel = new Label { UseMnemonic = false, Text = "本机源地址", Font = Theme.Semibold, ForeColor = Theme.Text, AutoSize = false, AutoEllipsis = true };
-            var localAddrBox = new TextBox { BorderStyle = BorderStyle.FixedSingle, Font = Theme.Body, Width = 200 };
-            localAddrBox.PlaceholderText = "192.168.1.5";
-            var localAddrRow = SettingRow("源地址", "本机用于连接的 IP（绕过 VPN 劫持）", localAddrBox);
-            localAddrLabel.SetBounds(18, 10, localAddrRow.ClientSize.Width - 18 - localAddrBox.Width - 34, 22);
-            localAddrRow.Controls.Add(localAddrLabel);
-            Add(localAddrRow, 68);
+            // ---- TV Control ----
+            Section("电视控制", "LG webOS 电视的 SSAP 协议配置。");
 
             var _tvEnabledSwitch = new ToggleSwitch { Checked = true };
             var tvEnabledRow = SettingRow("启用电视控制", "允许通过快捷键和自动切换控制电视亮度", _tvEnabledSwitch);
             Add(tvEnabledRow, 68);
 
+            // ---- Test ----
+            Section("测试", "测试电视连接和设置亮度。");
+
             var testBtn = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "测试连接", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
             var pairBtn = new ModernButton { Glyph = Theme.GlyphLink, Text = "重新配对", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
-            var statusLabel = new Label { UseMnemonic = false, Text = "未测试", Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Left, AutoSize = true };
-            var connPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
-            connPanel.Controls.Add(testBtn);
-            connPanel.Controls.Add(pairBtn);
-            connPanel.Controls.Add(statusLabel);
-            Add(connPanel, 52);
+            var btnBrightness0 = new ModernButton { Text = "亮度 0", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
+            var btnBrightness100 = new ModernButton { Text = "亮度 100", AutoSize = true };
+            var testStatusLabel = new Label { UseMnemonic = false, Text = "就绪", Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Left, AutoSize = true };
+            var testPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
+            testPanel.Controls.Add(testBtn);
+            testPanel.Controls.Add(pairBtn);
+            testPanel.Controls.Add(btnBrightness0);
+            testPanel.Controls.Add(btnBrightness100);
+            testPanel.Controls.Add(testStatusLabel);
+            Add(testPanel, 52);
+
+            testBtn.Click += async (_, _) =>
+            {
+                testStatusLabel.Text = "测试中...";
+                testStatusLabel.ForeColor = Theme.Muted;
+                try
+                {
+                    var (success, message) = await TvCli.TestConnectionAsync();
+                    testStatusLabel.Text = message;
+                    testStatusLabel.ForeColor = success ? Color.Green : Color.Red;
+                }
+                catch (Exception ex)
+                {
+                    testStatusLabel.Text = $"失败: {ex.Message}";
+                    testStatusLabel.ForeColor = Color.Red;
+                }
+            };
+
+            pairBtn.Click += async (_, _) =>
+            {
+                testStatusLabel.Text = "配对中...";
+                testStatusLabel.ForeColor = Theme.Muted;
+                var ok = await TvCli.PairAsync();
+                testStatusLabel.Text = ok ? "配对成功" : "配对失败";
+                testStatusLabel.ForeColor = ok ? Color.Green : Color.Red;
+            };
+
+            btnBrightness0.Click += async (_, _) =>
+            {
+                testStatusLabel.Text = "设置中...";
+                testStatusLabel.ForeColor = Theme.Muted;
+                try
+                {
+                    var result = await TvCli.SetBrightnessAsync(0);
+                    testStatusLabel.Text = result ? "设置成功" : "设置失败";
+                    testStatusLabel.ForeColor = result ? Color.Green : Color.Red;
+                }
+                catch (Exception ex)
+                {
+                    testStatusLabel.Text = $"失败: {ex.Message}";
+                    testStatusLabel.ForeColor = Color.Red;
+                }
+            };
+
+            btnBrightness100.Click += async (_, _) =>
+            {
+                testStatusLabel.Text = "设置中...";
+                testStatusLabel.ForeColor = Theme.Muted;
+                try
+                {
+                    var result = await TvCli.SetBrightnessAsync(100);
+                    testStatusLabel.Text = result ? "设置成功" : "设置失败";
+                    testStatusLabel.ForeColor = result ? Color.Green : Color.Red;
+                }
+                catch (Exception ex)
+                {
+                    testStatusLabel.Text = $"失败: {ex.Message}";
+                    testStatusLabel.ForeColor = Color.Red;
+                }
+            };
 
             // ---- Auto Switch ----
             Section("自动切换", "根据前台窗口自动调节电视亮度。");
@@ -535,105 +586,14 @@ namespace SmartHdrManager
             var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
             Add(autoSwitchRow, 68);
 
-            // ---- Brightness Buttons ----
-            Section("亮度调节", "快速设置电视亮度。");
-
-            var brightnessPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
-            var btnBrightness0 = new ModernButton { Text = "亮度 0", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
-            var btnBrightness100 = new ModernButton { Text = "亮度 100", AutoSize = true };
-            var brightnessStatusLabel = new Label { UseMnemonic = false, Text = "就绪", Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Left, AutoSize = true };
-            brightnessPanel.Controls.Add(btnBrightness0);
-            brightnessPanel.Controls.Add(btnBrightness100);
-            brightnessPanel.Controls.Add(brightnessStatusLabel);
-            Add(brightnessPanel, 52);
-
-            btnBrightness0.Click += async (_, _) =>
-            {
-                btnBrightness0.Enabled = false;
-                btnBrightness100.Enabled = false;
-                brightnessStatusLabel.Text = "设置中...";
-                brightnessStatusLabel.ForeColor = Theme.Muted;
-                try
-                {
-                    var result = await TvCli.SetBrightnessAsync(0);
-                    brightnessStatusLabel.Text = result ? "设置成功" : "设置失败";
-                    brightnessStatusLabel.ForeColor = result ? Color.Green : Color.Red;
-                }
-                catch (Exception ex)
-                {
-                    brightnessStatusLabel.Text = $"失败: {ex.Message}";
-                    brightnessStatusLabel.ForeColor = Color.Red;
-                }
-                finally
-                {
-                    btnBrightness0.Enabled = true;
-                    btnBrightness100.Enabled = true;
-                }
-            };
-
-            btnBrightness100.Click += async (_, _) =>
-            {
-                btnBrightness0.Enabled = false;
-                btnBrightness100.Enabled = false;
-                brightnessStatusLabel.Text = "设置中...";
-                brightnessStatusLabel.ForeColor = Theme.Muted;
-                try
-                {
-                    var result = await TvCli.SetBrightnessAsync(100);
-                    brightnessStatusLabel.Text = result ? "设置成功" : "设置失败";
-                    brightnessStatusLabel.ForeColor = result ? Color.Green : Color.Red;
-                }
-                catch (Exception ex)
-                {
-                    brightnessStatusLabel.Text = $"失败: {ex.Message}";
-                    brightnessStatusLabel.ForeColor = Color.Red;
-                }
-                finally
-                {
-                    btnBrightness0.Enabled = true;
-                    btnBrightness100.Enabled = true;
-                }
-            };
-
             page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             // ---- Wire events ----
-            testBtn.Click += async (_, _) =>
-            {
-                statusLabel.Text = "测试中...";
-                statusLabel.ForeColor = Theme.Muted;
-                try
-                {
-                    var tvIp = tvIpBox.Text?.Trim() ?? string.Empty;
-                    var localAddr = localAddrBox.Text?.Trim() ?? string.Empty;
-                    var (success, message) = await TvCli.TestConnectionAsync(tvIp, localAddr);
-                    statusLabel.Text = message;
-                    statusLabel.ForeColor = success ? Color.Green : Color.Red;
-                }
-                catch (Exception ex)
-                {
-                    statusLabel.Text = $"失败: {ex.Message}";
-                    statusLabel.ForeColor = Color.Red;
-                }
-            };
-
-            pairBtn.Click += async (_, _) =>
-            {
-                statusLabel.Text = "配对中...";
-                statusLabel.ForeColor = Theme.Muted;
-                var ok = await TvCli.PairAsync();
-                statusLabel.Text = ok ? "配对成功" : "配对失败";
-                statusLabel.ForeColor = ok ? Color.Green : Color.Red;
-            };
-
-            // Control change events
-            tvIpBox.TextChanged += (_, _) => SaveTvPageSettings();
-            localAddrBox.TextChanged += (_, _) => SaveTvPageSettings();
             _tvEnabledSwitch.CheckedChanged += (_, _) => SaveTvPageSettings();
             _autoSwitchEnabled.CheckedChanged += (_, _) => SaveTvPageSettings();
 
             // Store controls for save/load
-            _tvPageControls = (tvIpBox, localAddrBox, _tvEnabledSwitch, _autoSwitchEnabled);
+            _tvPageControls = (_tvEnabledSwitch, _autoSwitchEnabled);
 
             // Load saved TV settings into controls
             LoadTvPageControls();
@@ -642,7 +602,7 @@ namespace SmartHdrManager
         }
 
         // TV page controls for save/load
-        private (TextBox tvIp, TextBox localAddr, ToggleSwitch enabled, ToggleSwitch autoSwitch)
+        private (ToggleSwitch enabled, ToggleSwitch autoSwitch)
             _tvPageControls;
 
         private void LoadTvPageControls()
@@ -650,8 +610,6 @@ namespace SmartHdrManager
             _loadingSettings = true;
             try
             {
-                _tvPageControls.tvIp.Text = TvConfig.TvIp;
-                _tvPageControls.localAddr.Text = TvConfig.LocalAddr;
                 _tvPageControls.enabled.Checked = TvConfig.Enabled;
                 _tvPageControls.autoSwitch.Checked = TvConfig.AutoSwitchEnabled;
             }
@@ -663,8 +621,6 @@ namespace SmartHdrManager
             var config = _engine.Read(c => c);
             if (config.Brightness == null) config.Brightness = new BrightnessConfig();
             var bc = config.Brightness;
-            bc.TvIp = _tvPageControls.tvIp.Text ?? TvConfig.TvIp;
-            bc.LocalAddr = _tvPageControls.localAddr.Text ?? TvConfig.LocalAddr;
             bc.Enabled = _tvPageControls.enabled.Checked;
             bc.AutoSwitchEnabled = _tvPageControls.autoSwitch.Checked;
             _engine.Update(c => c.Brightness = bc);

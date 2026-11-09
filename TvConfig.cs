@@ -11,17 +11,11 @@ namespace SmartHdrManager
     {
         private static BrightnessConfig _cfg = new();
 
-        public static string TvIp
-        {
-            get => _cfg.TvIp;
-            set => _cfg.TvIp = value;
-        }
+        /// <summary>电视 IP 地址（固定配置）。</summary>
+        public const string TvIp = "192.168.1.4";
 
-        public static string LocalAddr
-        {
-            get => _cfg.LocalAddr;
-            set => _cfg.LocalAddr = value;
-        }
+        /// <summary>本机源地址（固定配置）。</summary>
+        public const string LocalAddr = "192.168.1.5";
 
         public static bool Enabled
         {
