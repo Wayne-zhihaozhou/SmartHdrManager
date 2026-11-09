@@ -22,7 +22,7 @@ namespace SmartHdrManager
         private readonly Icon _iconPaused;
         private int _iconState = -1;
 
-        public TrayAndStartupManager(Action exit)
+        public TrayAndStartupManager(Action openMainWindow, Action exit)
         {
             var exitItem = new ToolStripMenuItem("退出");
             exitItem.Click += (_, _) => exit();
@@ -50,10 +50,10 @@ namespace SmartHdrManager
                 Visible = true
             };
 
-            // Left click / double click opens the window; right click shows the menu.
+            // Left click opens the window; right click shows the menu.
             _icon.MouseClick += (_, e) =>
             {
-                if (e.Button == MouseButtons.Left) { }
+                if (e.Button == MouseButtons.Left) openMainWindow();
             };
         }
 

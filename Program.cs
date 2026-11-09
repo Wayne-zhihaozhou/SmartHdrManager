@@ -34,7 +34,7 @@ namespace SmartHdrManager
             _showEvent = showEvent;
             _commands = commands;
 
-            _tray = new TrayAndStartupManager(Exit);
+            _tray = new TrayAndStartupManager(ShowMain, Exit);
 
             // Re-read the HDR state right away when monitors change or the PC wakes up
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
