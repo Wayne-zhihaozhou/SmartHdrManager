@@ -1043,11 +1043,19 @@ namespace SmartHdrManager
             return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
         }
 
+        private RectangleF BrightnessTextRect(Rectangle row)
+        {
+            float h = row.Height * 0.35f;
+            float left = row.Right - Gap - LogicalToDeviceUnits(75);
+            float w = LogicalToDeviceUnits(35);
+            return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
+        }
+
         private RectangleF BrightnessPlusRect(Rectangle row)
         {
             float h = row.Height * 0.35f;
             float w = LogicalToDeviceUnits(30);
-            float left = row.Right - Gap - LogicalToDeviceUnits(60);
+            float left = row.Right - Gap - LogicalToDeviceUnits(40);
             return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
         }
 
@@ -1471,11 +1479,12 @@ namespace SmartHdrManager
             TextRenderer.DrawText(g, item.Subtitle, Theme.Small, new Rectangle(textX, top + nameHeight, textWidth, subHeight), Theme.Muted, flags);
 
             // Brightness buttons: - 亮度值  +
-            Rectangle minusRect = BrightnessRect(row);
-            Rectangle plusRect = BrightnessPlusRect(row);
+            RectangleF minusRect = BrightnessRect(row);
+            RectangleF textRect = BrightnessTextRect(row);
+            RectangleF plusRect = BrightnessPlusRect(row);
             string brightText = $"亮度: {item.Brightness}";
             Color brightColor = item.Hdr ? Theme.Text : Theme.Muted;
-            TextRenderer.DrawText(g, brightText, Theme.Semibold, Rectangle.Round(minusRect), brightColor,
+            TextRenderer.DrawText(g, brightText, Theme.Semibold, Rectangle.Round(textRect), brightColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
             
             // Draw minus button
