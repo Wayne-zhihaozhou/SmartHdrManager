@@ -96,7 +96,7 @@ namespace SmartHdrManager
         private sealed class Snapshot
         {
             public readonly HashSet<string> HdrGames;
-            public readonly bool EnableOnProcessStart, ReloadProfile, RefreshApps;
+            public readonly bool EnableOnProcessStart;
             public readonly int FallbackSeconds, TickMs;
             public readonly MonitorFilter Monitors;
             public readonly Dictionary<string, (string[] Folders, string[] Exes)> GameFolders;
@@ -105,8 +105,6 @@ namespace SmartHdrManager
             {
                 HdrGames = new HashSet<string>(c.HdrGamesAndApps ?? new List<string>(), Cmp);
                 HdrGames.RemoveWhere(process => !IsHdrEnabledFor(c.GameHdrModes, process));
-                ReloadProfile = c.ReloadColorProfileAfterSdr;
-                RefreshApps = c.RefreshAppsAfterSdr;
                 Monitors = new MonitorFilter(c.OnlyPrimaryMonitor, c.SelectedMonitors);
                 EnableOnProcessStart = c.EnableHdrOnProcessStart;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
@@ -251,8 +249,6 @@ namespace SmartHdrManager
         // A full-screen game switched Windows HDR on by itself: keep it on while that game runs instead of fighting it
         private string? _externalHoldProcess;
         private long _nextExternalCheckMs;
-
-        private List<DisplayColorState>? _sdrBaseline;   // colour state right before HDR was switched on
 
         private long _sdrFallbackAtMs = -1;
         private long _lastAttemptMs = long.MinValue / 2;
@@ -864,7 +860,7 @@ namespace SmartHdrManager
                     {
                         _externalEnded = false;
                         _sdrFallbackAtMs = -1;
-                        TurnHdrOff($"'{_externalEndedWhat}' 已关闭（它曾自行开启 HDR）", s.Monitors, s.ReloadProfile);
+                        TurnHdrOff($"'{_externalEndedWhat}' 已关闭（它曾自行开启 HDR）", s.Monitors);
                     }
                 }
                 else if (_launchEnded)
@@ -965,7 +961,7 @@ namespace SmartHdrManager
                 Log("HDR", $"{reason} – HDR 保持开启：'{_restoreFor}' 之前 HDR 就是开启的（由您或其他程序开启）。");
                 return;
             }
-            TurnHdrOff(reason, s.Monitors, s.ReloadProfile);
+            TurnHdrOff(reason, s.Monitors);
         }
 
         // ------------------------------------------------------------------
@@ -1435,13 +1431,6 @@ namespace SmartHdrManager
             _lastAttemptMs = now;
             Log("HDR", $"开启 HDR（{monitors.Describe()}）– {reason}");
 
-            CancelColorProfileReload();   // a reload must not run while we are going back into HDR
-            if (!_hdrAny)
-            {
-                // Remember how the displays looked in SDR, to check (and repair) them after switching back
-                try { _sdrBaseline = HdrController.CaptureColorState(monitors); }
-                catch { _sdrBaseline = null; }
-            }
             bool ok = HdrController.SetHdrState(true, monitors);
             if (ok)
             {
@@ -1461,7 +1450,7 @@ namespace SmartHdrManager
         }
 
         /// <param name="partial">Only some monitors (HDR moves to another monitor): HDR stays on elsewhere and stays ours.</param>
-        private void TurnHdrOff(string reason, MonitorFilter monitors, bool reloadProfile, bool partial = false)
+        private void TurnHdrOff(string reason, MonitorFilter monitors, bool partial = false)
         {
             long now = Now;
             _lastAttemptMs = now;
@@ -1481,10 +1470,6 @@ namespace SmartHdrManager
                 _hdrAny = false;
                 _hdrAll = false;
                 _verifyAllOn = false;
-                var snapshot = GetSnapshot();
-                var baseline = _sdrBaseline;
-                if (reloadProfile || snapshot.RefreshApps || baseline != null)
-                    SchedulePostSdrFixes(monitors, reloadProfile, snapshot.RefreshApps, baseline);
             }
             else
             {
@@ -1515,175 +1500,6 @@ namespace SmartHdrManager
                 _cooldownUntilMs = now + FailureCooldownMs;
                 Log("ERROR", $"HDR 切换连续失败 {FailuresBeforeCooldown} 次 – 暂停自动尝试 {FailureCooldownMs / 1000} 秒。");
             }
-        }
-
-        private int _profileReloadGeneration;
-        private volatile bool _calibrationLoaderDenied;   // the Windows task needs admin rights on some PCs
-
-        /// <summary>
-        /// Clean-up after leaving HDR, run in the background:
-        /// 1. waits until Windows really reports SDR (up to 6 s), then lets the display settle (1.5 s);
-        /// 2. re-applies the colour profile (ICC calibration / gamma ramp), if enabled;
-        /// 3. tells open windows that the display changed and nudges browser windows to repaint, if enabled
-        ///    (fixes Chrome & co. staying dimmed with their cached HDR brightness);
-        /// 4. repeats steps 2-3 once a few seconds later, in case the driver reset things again.
-        /// Cancels itself if HDR is switched back on in the meantime.
-        /// </summary>
-        private void SchedulePostSdrFixes(MonitorFilter monitors, bool reloadProfile, bool refreshApps,
-                                          List<DisplayColorState>? baseline)
-        {
-            int generation = Interlocked.Increment(ref _profileReloadGeneration);
-            bool Cancelled() => Volatile.Read(ref _profileReloadGeneration) != generation || _stop;
-
-            Task.Run(() =>
-            {
-                try
-                {
-                    for (int i = 0; i < 24; i++)
-                    {
-                        if (Cancelled()) return;
-                        if (HdrController.QueryHdrState(monitors, out bool any, out _) && !any) break;
-                        Thread.Sleep(250);
-                    }
-
-                    Thread.Sleep(1500);
-                    if (Cancelled()) return;
-
-                    if (baseline != null) CheckColorsAfterSdr(baseline, monitors, report: true);
-
-                    bool profileOk = reloadProfile && !_calibrationLoaderDenied;
-                    if (profileOk)
-                    {
-                        profileOk = RunCalibrationLoader(out string error);
-                        if (!profileOk)
-                        {
-                            if (error.Contains("denied", StringComparison.OrdinalIgnoreCase))
-                            {
-                                _calibrationLoaderDenied = true;   // don't try again until the app restarts
-                                Log("INFO", "重新加载颜色配置文件在本机上需要管理员权限，已跳过。 " +
-                                            "除非您使用校准配置文件并以管理员身份运行本程序，否则请关闭“重新加载颜色配置文件”。");
-                            }
-                            else
-                            {
-                                Log("ERROR", $"颜色配置文件重新加载失败：{error}");
-                            }
-                        }
-                    }
-
-                    int nudged = 0;
-                    if (refreshApps)
-                    {
-                        WindowDetector.BroadcastDisplayChange();
-                        nudged = WindowDetector.NudgeWindows(Array.Empty<string>());
-                    }
-
-                    Thread.Sleep(4000);
-                    if (Cancelled()) return;
-
-                    // Some drivers reset the gamma curve a second time a few seconds after the switch
-                    if (baseline != null) CheckColorsAfterSdr(baseline, monitors, report: false);
-
-                    if (reloadProfile && profileOk) RunCalibrationLoader(out _);
-                    if (refreshApps)
-                    {
-                        WindowDetector.BroadcastDisplayChange();
-                        WindowDetector.NudgeWindows(Array.Empty<string>());
-                    }
-
-                    if (reloadProfile && profileOk) Log("SDR", "颜色配置文件已重新应用。");
-                    if (refreshApps) Log("SDR", $"已通知打开的应用程序显示已变化（{nudged} 个浏览器窗口已刷新）。");
-                }
-                catch (Exception ex)
-                {
-                    Log("ERROR", $"SDR 后清理失败：{ex.Message}");
-                }
-            });
-        }
-
-        /// <summary>
-        /// Compares every display with its state right before HDR was switched on and logs what changed.
-        /// A gamma curve that was reset to neutral (lost calibration, night light, NVIDIA desktop colour settings)
-        /// is put back. Colour format / bit depth / colour mode changes are logged only (they belong to the driver).
-        /// </summary>
-        private void CheckColorsAfterSdr(List<DisplayColorState> before, MonitorFilter monitors, bool report)
-        {
-            List<DisplayColorState> after;
-            try { after = HdrController.CaptureColorState(monitors); }
-            catch (Exception ex)
-            {
-                if (report) Log("COLOR", $"SDR 后颜色检查失败：{ex.Message}");
-                return;
-            }
-
-            foreach (var b in before)
-            {
-                var a = after.FirstOrDefault(x => string.Equals(x.Key, b.Key, StringComparison.OrdinalIgnoreCase));
-                if (a == null || a.HdrOn || b.HdrOn) continue;   // unplugged, back in HDR, or was not in SDR before
-
-                var changes = new List<string>();
-                if (a.Encoding >= 0 && b.Encoding >= 0 && a.Encoding != b.Encoding)
-                    changes.Add($"颜色格式 {DisplayColorState.EncodingName(a.Encoding)}（原为 {DisplayColorState.EncodingName(b.Encoding)}）– " +
-                                "请在 NVIDIA 控制面板 › 更改分辨率 › 输出颜色格式中改回");
-                if (a.Bits > 0 && b.Bits > 0 && a.Bits != b.Bits)
-                    changes.Add($"{a.Bits}-bit（原为 {b.Bits}-bit）");
-                if (a.Mode >= 0 && b.Mode >= 0 && a.Mode != b.Mode)
-                    changes.Add($"{DisplayColorState.ModeName(a.Mode)}（原为 {DisplayColorState.ModeName(b.Mode)}）");
-
-                bool rampReset = b.Ramp != null && !b.RampIsIdentity && a.RampIsIdentity;
-                if (rampReset)
-                {
-                    bool restored = HdrController.RestoreGammaRamp(b);
-                    changes.Add(restored ? "伽马曲线被重置为标准值 – 已恢复" : "伽马曲线被重置为标准值 – 无法恢复");
-                }
-                else if (report && b.Ramp != null && a.Ramp != null && DisplayColorState.RampDistance(a.Ramp, b.Ramp) > 300)
-                {
-                    changes.Add("伽马曲线发生变化（夜灯或颜色设置？）");
-                }
-
-                if (report)
-                    Log("COLOR", changes.Count == 0
-                        ? $"{b.Name}：颜色与 HDR 前相同（{a.Describe()}）。"
-                        : $"{b.Name} 切回 SDR 后：{string.Join("；", changes)}。HDR 前：{b.Describe()}。");
-                else if (rampReset)
-                    Log("COLOR", $"{b.Name}：伽马曲线几秒后再次被重置 – {changes[^1].Split('–')[^1].Trim()}。");
-            }
-        }
-
-        /// <summary>Cancels a pending colour profile reload (e.g. when HDR is switched on again).</summary>
-        private void CancelColorProfileReload() => Interlocked.Increment(ref _profileReloadGeneration);
-
-        private static bool RunCalibrationLoader(out string error)
-        {
-            error = string.Empty;
-            var psi = new ProcessStartInfo("schtasks.exe",
-                "/run /tn \"\\Microsoft\\Windows\\WindowsColorSystem\\Calibration Loader\"")
-            {
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-
-            using var p = Process.Start(psi);
-            if (p == null)
-            {
-                error = "schtasks.exe could not be started";
-                return false;
-            }
-
-            string stderr = p.StandardError.ReadToEnd();
-            p.StandardOutput.ReadToEnd();
-            if (!p.WaitForExit(5000))
-            {
-                error = "schtasks.exe did not finish";
-                return false;
-            }
-            if (p.ExitCode != 0)
-            {
-                error = string.IsNullOrWhiteSpace(stderr) ? $"schtasks.exe exit code {p.ExitCode}" : stderr.Trim();
-                return false;
-            }
-            return true;
         }
 
         // ------------------------------------------------------------------

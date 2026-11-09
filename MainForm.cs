@@ -46,9 +46,7 @@ namespace SmartHdrManager
         private Label _activityLabel = null!;
         private Panel _activityPanel = null!;
 
-        private readonly ToggleSwitch _swColorProfile = new();
         private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
-        private readonly ToggleSwitch _swRefreshApps = new();
 
 
         // Log page
@@ -280,11 +278,6 @@ namespace SmartHdrManager
                 _monitorSwitches.Add((monitor, sw));
                 page.AddRow(SettingRow(title, desc, sw), 68);
             }
-
-            // ---- Display fixes ----
-            Section("显示修复", "修复退出 HDR 后的副作用。");
-            page.AddRow(SettingRow("重新加载颜色配置文件", "HDR 后重新应用您的校准（可能需要管理员权限）。", _swColorProfile), 68);
-            page.AddRow(SettingRow("刷新应用", "修复 Chrome 等程序在 HDR 后变暗的问题。", _swRefreshApps), 68);
 
             // ---- Advanced ----
             Section("高级", "设置文件、日志和重置。");
@@ -568,9 +561,6 @@ namespace SmartHdrManager
                 if (_loadingSettings) return;
                 _setPaused(_swPauseAutomation.Checked);
             };
-
-            _swColorProfile.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.ReloadColorProfileAfterSdr = _swColorProfile.Checked); };
-            _swRefreshApps.CheckedChanged += (_, _) => { if (!_loadingSettings) _engine.Update(c => c.RefreshAppsAfterSdr = _swRefreshApps.Checked); };
 
             Resize += (_, _) =>
             {

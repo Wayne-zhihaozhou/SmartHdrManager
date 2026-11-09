@@ -145,7 +145,7 @@ namespace SmartHdrManager
                 string wanted = $"\"{exePath}\" --tray";
                 if (string.Equals(current, wanted, StringComparison.OrdinalIgnoreCase)) return false;
 
-                // Only repair a broken entry: if the registered exe still exists (another copy of the app, e.g. a test
+                // Only fix a broken entry: if the registered exe still exists (another copy of the app, e.g. a test
                 // build started from a different folder), leave it alone.
                 string registered = current.TrimStart();
                 registered = registered.StartsWith("\"")

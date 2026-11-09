@@ -33,9 +33,7 @@ namespace SmartHdrManager
         // Active HDR list: Only games in this list will automatically trigger HDR (empty: the user picks the games)
         public List<string> HdrGamesAndApps { get; set; } = new();
 
-        // After leaving HDR, tell open windows that the display changed so apps like Chrome stop rendering
-        // with their cached HDR brightness (which makes them look dimmed until minimized/restored).
-        public bool RefreshAppsAfterSdr { get; set; } = true;
+
 
         // Monitors to switch, by Windows device path. Empty = use OnlyPrimaryMonitor (primary only / all monitors).
         public List<string> SelectedMonitors { get; set; } = new();
@@ -63,8 +61,6 @@ namespace SmartHdrManager
 
         public bool EnableHdrOnProcessStart { get; set; } = true;
         public int ProcessScanIntervalMs { get; set; } = 100;
-        // Off by default: the Windows task it uses needs administrator rights on most PCs
-        public bool ReloadColorProfileAfterSdr { get; set; } = false;
         public int SdrFallbackDelaySeconds { get; set; } = 3;
 
         // ---- v2.6 ----
@@ -370,47 +366,6 @@ namespace SmartHdrManager
             DevicePaths != null
                 ? (DevicePaths.Count == 1 ? "1 个选定显示器" : $"{DevicePaths.Count} 个选定显示器")
                 : OnlyPrimary ? "主显示器" : "所有显示器";
-    }
-
-    /// <summary>A display's colour output at one moment (for the "after SDR" check).</summary>
-    public sealed class DisplayColorState
-    {
-        public string Key { get; init; } = string.Empty;
-        public string Name { get; init; } = string.Empty;
-        public string GdiName { get; init; } = string.Empty;
-        public bool HdrOn { get; init; }
-        public int Encoding { get; init; } = -1;   // 0 RGB, 1 YCbCr 4:4:4, 2 YCbCr 4:2:2, 3 YCbCr 4:2:0
-        public uint Bits { get; init; }
-        public int Mode { get; init; } = -1;       // 24H2+: 0 SDR, 1 WCG (Auto Color Management), 2 HDR; -1 unknown
-        public ushort[]? Ramp { get; init; }        // gamma curve: 256 red, 256 green, 256 blue
-
-        public bool RampIsIdentity => Ramp != null && RampDistance(Ramp, null) <= 300;
-
-        public static string EncodingName(int e) => e switch
-        {
-            0 => "RGB", 1 => "YCbCr 4:4:4", 2 => "YCbCr 4:2:2", 3 => "YCbCr 4:2:0", 4 => "Intensity", _ => "未知格式"
-        };
-
-        public static string ModeName(int m) => m switch
-        {
-            0 => "SDR", 1 => "WCG / 自动颜色管理", 2 => "HDR", _ => "未知模式"
-        };
-
-        public string Describe() =>
-            $"{EncodingName(Encoding)}, {(Bits > 0 ? $"{Bits}-bit" : "? bit")}" + (Mode >= 0 ? $", {ModeName(Mode)}" : "") +
-            (Ramp == null ? ", 伽马曲线不可读" : RampIsIdentity ? ", 标准伽马曲线" : ", 自定义伽马曲线");
-
-        /// <summary>Largest difference between two curves (null = the neutral curve).</summary>
-        public static int RampDistance(ushort[] a, ushort[]? b)
-        {
-            int max = 0;
-            for (int i = 0; i < a.Length; i++)
-            {
-                int other = b != null ? b[i] : (i % 256) * 257;
-                max = Math.Max(max, Math.Abs(a[i] - other));
-            }
-            return max;
-        }
     }
 
     public sealed class MonitorInfo
@@ -778,99 +733,6 @@ namespace SmartHdrManager
             supported = (info.value & 0x1) != 0;
             enabled = supported && (info.value & 0x2) != 0;
             return true;
-        }
-
-        // ------------------------------------------------------------------
-        // Colour state diagnostics (what changed between "before HDR" and "after SDR")
-        // ------------------------------------------------------------------
-        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CreateDC(string driver, string device, string? output, IntPtr initData);
-        [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
-        [DllImport("gdi32.dll")] private static extern bool GetDeviceGammaRamp(IntPtr hdc, [Out] ushort[] ramp);
-        [DllImport("gdi32.dll")] private static extern bool SetDeviceGammaRamp(IntPtr hdc, ushort[] ramp);
-
-        /// <summary>Colour format, colour mode and gamma curve of every display a filter switches.</summary>
-        public static List<DisplayColorState> CaptureColorState(MonitorFilter filter)
-        {
-            var result = new List<DisplayColorState>();
-            if (QueryActivePaths(out var paths, out var modes) != ERROR_SUCCESS) return result;
-            var matches = BuildMatcher(paths, modes, filter);
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var path in paths)
-            {
-                if (!matches(path)) continue;
-                string key = MonitorKey(path);
-                if (!seen.Add(key)) continue;
-                if (!TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool supported, out bool hdrOn) || !supported) continue;
-
-                ReadColorInfo(path.targetInfo.adapterId, path.targetInfo.id, out int encoding, out uint bits, out int mode);
-                string gdi = GetSourceGdiName(path);
-                var (name, _) = GetTargetName(path.targetInfo.adapterId, path.targetInfo.id);
-                result.Add(new DisplayColorState
-                {
-                    Key = key,
-                    Name = string.IsNullOrWhiteSpace(name) ? gdi : name.Trim(),
-                    GdiName = gdi,
-                    HdrOn = hdrOn,
-                    Encoding = encoding,
-                    Bits = bits,
-                    Mode = mode,
-                    Ramp = ReadGammaRamp(gdi)
-                });
-            }
-            return result;
-        }
-
-        private static void ReadColorInfo(LUID adapterId, uint targetId, out int encoding, out uint bits, out int mode)
-        {
-            encoding = -1; bits = 0; mode = -1;
-            if (_hdrApi == 1)
-            {
-                var info2 = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2();
-                info2.header.type = DISPLAYCONFIG_DEVICE_INFO_TYPE.GET_ADVANCED_COLOR_INFO_2;
-                info2.header.size = (uint)Marshal.SizeOf<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2>();
-                info2.header.adapterId = adapterId;
-                info2.header.id = targetId;
-                if (DisplayConfigGetDeviceInfo(ref info2) == ERROR_SUCCESS)
-                {
-                    encoding = info2.colorEncoding; bits = info2.bitsPerColorChannel; mode = info2.activeColorMode;
-                    return;
-                }
-            }
-            var info = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO();
-            info.header.type = DISPLAYCONFIG_DEVICE_INFO_TYPE.GET_ADVANCED_COLOR_INFO;
-            info.header.size = (uint)Marshal.SizeOf<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>();
-            info.header.adapterId = adapterId;
-            info.header.id = targetId;
-            if (DisplayConfigGetDeviceInfo(ref info) == ERROR_SUCCESS)
-            {
-                encoding = info.colorEncoding; bits = info.bitsPerColorChannel;
-            }
-        }
-
-        private static ushort[]? ReadGammaRamp(string gdiName)
-        {
-            if (string.IsNullOrEmpty(gdiName)) return null;
-            IntPtr hdc = CreateDC("DISPLAY", gdiName, null, IntPtr.Zero);
-            if (hdc == IntPtr.Zero) return null;
-            try
-            {
-                var ramp = new ushort[3 * 256];
-                return GetDeviceGammaRamp(hdc, ramp) ? ramp : null;
-            }
-            finally
-            {
-                DeleteDC(hdc);
-            }
-        }
-
-        /// <summary>Puts a display's gamma curve (calibration, night light, NVIDIA colour settings) back. No admin rights needed.</summary>
-        public static bool RestoreGammaRamp(DisplayColorState state)
-        {
-            if (state.Ramp == null || string.IsNullOrEmpty(state.GdiName)) return false;
-            IntPtr hdc = CreateDC("DISPLAY", state.GdiName, null, IntPtr.Zero);
-            if (hdc == IntPtr.Zero) return false;
-            try { return SetDeviceGammaRamp(hdc, state.Ramp); }
-            finally { DeleteDC(hdc); }
         }
 
         /// <summary>Windows 11 24H2 is build 26100; the new HDR requests exist from there on.</summary>
