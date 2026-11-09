@@ -10,7 +10,7 @@ using System.Windows.Forms;
 namespace SmartHdrManager
 {
     /// <summary>
-    /// The settings window: a segmented tab bar, and four pages (Games, TV, Settings, Log).
+    /// The settings window: a segmented tab bar, and four pages (Games, Test, Settings, Log).
     /// Layout values are in 96-DPI pixels; WinForms scales them for the actual display DPI.
     /// Closing or minimizing hides it to the tray; the tray context disposes it a few seconds later to free memory.
     /// </summary>
@@ -244,19 +244,6 @@ namespace SmartHdrManager
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
             
-            // Activity display panel (no card)
-            _activityPanel = new Panel { Height = 52, Margin = new Padding(0, 0, 0, 6) };
-            var actTable = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-            actTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            actTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-            actTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            _hdrStatusLabel = new Label { AutoSize = true, Font = Theme.Semibold, ForeColor = Theme.Text };
-            _activityLabel = new Label { AutoSize = false, AutoEllipsis = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill };
-            actTable.Controls.Add(_hdrStatusLabel, 0, 0);
-            actTable.Controls.Add(_activityLabel, 0, 1);
-            _activityPanel.Controls.Add(actTable);
-            page.AddRow(_activityPanel, 52);
-            
             _swPauseAutomation = new ToggleSwitch();
             var pauseRow = SettingRow("启用 HDR 控制", "关闭后不会自动切换 HDR。", _swPauseAutomation);
             page.AddRow(pauseRow, 68);
@@ -395,6 +382,21 @@ namespace SmartHdrManager
 
             // ---- Test ----
             Section("测试", "测试电视连接和设置亮度。");
+
+            // ---- Activity ----
+            Section("活动窗口", "当前 HDR 状态和活动窗口信息。");
+            
+            _activityPanel = new Panel { Height = 52, Margin = new Padding(0, 0, 0, 6) };
+            var actTable = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            actTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            actTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            actTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _hdrStatusLabel = new Label { AutoSize = true, Font = Theme.Semibold, ForeColor = Theme.Text };
+            _activityLabel = new Label { AutoSize = false, AutoEllipsis = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill };
+            actTable.Controls.Add(_hdrStatusLabel, 0, 0);
+            actTable.Controls.Add(_activityLabel, 0, 1);
+            _activityPanel.Controls.Add(actTable);
+            page.AddRow(_activityPanel, 52);
 
             var testBtn = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "测试连接", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
             var pairBtn = new ModernButton { Glyph = Theme.GlyphLink, Text = "重新配对", AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
