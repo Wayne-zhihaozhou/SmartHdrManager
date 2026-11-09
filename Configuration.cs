@@ -56,6 +56,9 @@ namespace SmartHdrManager
         public const string DefaultTvIp = "192.168.1.4";
 
         public string TvIp { get; set; } = DefaultTvIp;
+
+        /// <summary>The app may control the TV brightness at all (automatic and manual).</summary>
+        public bool Enabled { get; set; } = true;
     }
 
     public sealed class LibraryGame

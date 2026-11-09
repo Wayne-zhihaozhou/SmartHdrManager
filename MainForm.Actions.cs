@@ -39,10 +39,22 @@ namespace SmartHdrManager
             row.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
             row.Subtitle.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
+        private bool IsBrightnessControlEnabled() => _engine.Read(config => config.Brightness?.Enabled ?? true);
+
+        private void OnBrightnessControlChanged(bool enabled)
+        {
+            _engine.Update(config =>
+            {
+                config.Brightness ??= new BrightnessConfig();
+                config.Brightness.Enabled = enabled;
+            });
+            _engine.ApplyBrightnessControlSettings();
+        }
+
         private void OnGameBrightnessChanged(GameItem item, bool sdr)
         {
             _engine.SetGameBrightness(item.Key, item.Processes, item.Brightness, item.Name);
-            if (item.Tracked) ApplyGameBrightness(item.Brightness);
+            if (item.Tracked && IsBrightnessControlEnabled()) ApplyGameBrightness(item.Brightness);
             BeginInvoke(new Action(() => RebuildGames(sdr)));
         }
 
@@ -76,14 +88,16 @@ namespace SmartHdrManager
             }
         }
 
-        private static async Task<(bool Success, string Message)> DescribePairAsync()
+        private async Task<(bool Success, string Message)> DescribePairAsync()
         {
             bool paired = await TvCli.PairAsync();
             return (paired, paired ? "配对成功" : "配对失败");
         }
 
-        private static async Task<(bool Success, string Message)> DescribeBrightnessAsync(int brightness)
+        private async Task<(bool Success, string Message)> DescribeBrightnessAsync(int brightness)
         {
+            if (!IsBrightnessControlEnabled()) return (false, "亮度控制已关闭");
+
             bool applied = await TvCli.SetBrightnessAsync(brightness);
             return (applied, applied ? "设置成功" : "设置失败");
         }
@@ -92,6 +106,8 @@ namespace SmartHdrManager
         {
             int value = _desktopBrightness.Value;
             _engine.Update(config => config.DesktopBrightness = value);
+
+            if (!IsBrightnessControlEnabled()) return;
 
             // Nothing from either list owns the screen right now: show the new value at once
             var status = _engine.Status;

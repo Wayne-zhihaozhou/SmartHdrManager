@@ -90,6 +90,7 @@ namespace SmartHdrManager
             public readonly HashSet<string> SdrGames;
             public readonly HashSet<string> AllGames;
             public readonly bool EnableOnProcessStart;
+            public readonly bool BrightnessEnabled;
             public readonly int FallbackSeconds;
             public readonly int TickMs;
             public readonly int DesktopBrightness;
@@ -108,6 +109,7 @@ namespace SmartHdrManager
                 AllGames.UnionWith(SdrGames);
 
                 EnableOnProcessStart = c.EnableHdrOnProcessStart;
+                BrightnessEnabled = c.Brightness?.Enabled ?? true;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
                 TickMs = Math.Clamp(c.ProcessScanIntervalMs, 50, 1000);
                 DesktopBrightness = Math.Clamp(c.DesktopBrightness, BrightnessMin, BrightnessMax);
@@ -262,10 +264,23 @@ namespace SmartHdrManager
         public void Start()
         {
             Log("INFO", "Smart HDR Manager 已启动 – 监控中。");
-            TvCli.Configure(Config.Brightness?.TvIp ?? BrightnessConfig.DefaultTvIp);
+            ApplyBrightnessControlSettings();
 
             _thread = new Thread(Run) { IsBackground = true, Name = "HdrEngine" };
             _thread.Start();
+        }
+
+        /// <summary>Connects or disconnects the TV after the brightness control switch was changed.</summary>
+        public void ApplyBrightnessControlSettings()
+        {
+            var brightness = Read(config => config.Brightness);
+            if (brightness == null || !brightness.Enabled)
+            {
+                TvCli.Shutdown();
+                return;
+            }
+
+            TvCli.Configure(brightness.TvIp);
         }
 
         public void Stop()
@@ -701,6 +716,13 @@ namespace SmartHdrManager
         /// </summary>
         private void UpdateAppBrightness(Snapshot snapshot, string procName)
         {
+            if (!snapshot.BrightnessEnabled)
+            {
+                _brightnessApplied = false;
+                _brightnessApp = null;
+                return;
+            }
+
             string? active = _runningGame ?? _runningSdrApp;
             if (active == null && snapshot.HdrGames.Contains(procName) && !_foregroundElsewhere) active = procName;
             if (active == null && snapshot.SdrGames.Contains(procName) && !_foregroundElsewhere) active = procName;
