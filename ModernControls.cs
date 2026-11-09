@@ -1572,15 +1572,17 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// Adds an empty row that takes the height the content leaves over, so a short page keeps its rows at their
-        /// own height instead of stretching the last one. The row must be counted in <see cref="TableLayoutPanel.RowCount"/>:
-        /// a table whose row count is still unset lays out only the rows that hold controls and gives all the remaining
-        /// height to the last of them.
+        /// Ends the table with a row that takes the height the content leaves over, so a short page keeps its rows at
+        /// their own height instead of stretching the last one. It has to be a real row with a control, because
+        /// TableLayoutPanel hands the remaining height to the last row of the table and lays out no row without a
+        /// control at all. A percentage row cannot be used here: it would make the table always as tall as the visible
+        /// area, so the page would no longer scroll.
         /// </summary>
         public void AddFillerRow()
         {
-            RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
             RowCount = RowStyles.Count;
+            Controls.Add(new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty }, 0, RowCount - 1);
         }
 
         private float MaxScroll => Math.Max(0, DisplayRectangle.Height - ClientSize.Height);
