@@ -17,23 +17,11 @@ namespace SmartHdrManager
         /// <summary>本机源地址（固定配置）。</summary>
         public const string LocalAddr = "192.168.1.5";
 
-        public static bool Enabled
-        {
-            get => _cfg.Enabled;
-            set => _cfg.Enabled = value;
-        }
+        public static bool Enabled => _cfg.Enabled;
 
-        public static bool AutoSwitchEnabled
-        {
-            get => _cfg.AutoSwitchEnabled;
-            set => _cfg.AutoSwitchEnabled = value;
-        }
+        public static bool AutoSwitchEnabled => _cfg.AutoSwitchEnabled;
 
-        public static List<BrightnessRule> Rules
-        {
-            get => _cfg.Rules;
-            set => _cfg.Rules = value;
-        }
+        public static List<BrightnessRule> Rules => _cfg.Rules;
 
         public static void LoadFrom(AppConfig config)
         {

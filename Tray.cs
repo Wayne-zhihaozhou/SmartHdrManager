@@ -57,10 +57,6 @@ namespace SmartHdrManager
             };
         }
 
-        public void SetPaused(bool paused)
-        {
-        }
-
         public void UpdateState(bool hdrOn, bool paused)
         {
             int state = paused ? 2 : hdrOn ? 1 : 0;
@@ -209,20 +205,6 @@ namespace SmartHdrManager
             SetWindowLongPtr(hWnd, GWL_EXSTYLE, new IntPtr(ex));
             SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,                  // 3. make the shell re-read the style
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-        }
-
-        /// <summary>Bring the console back (debugging). Restores the normal taskbar/Alt-Tab behaviour.</summary>
-        public static void ShowAgain()
-        {
-            IntPtr hWnd = GetConsoleWindow();
-            if (hWnd == IntPtr.Zero) return;
-
-            long ex = GetWindowLongPtr(hWnd, GWL_EXSTYLE).ToInt64();
-            ex = (ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW;
-            SetWindowLongPtr(hWnd, GWL_EXSTYLE, new IntPtr(ex));
-            SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-            ShowWindow(hWnd, SW_RESTORE);
         }
 
         /// <summary>

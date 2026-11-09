@@ -86,7 +86,6 @@ namespace SmartHdrManager
         private void SetPaused(bool paused)
         {
             _engine.Paused = paused;
-            _tray.SetPaused(paused);
             _engine.Log("PAUSE", paused ? "自动化已暂停 – 不再自动切换 HDR。" : "自动化已重新启用。");
             if (_form != null && !_form.IsDisposed && _form.Visible) _form.RefreshView();
         }
