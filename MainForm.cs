@@ -582,8 +582,7 @@ namespace SmartHdrManager
             var autoSwitchRow = SettingRow("启用自动切换", "监控前台进程，匹配规则自动设置亮度", _autoSwitchEnabled);
             Add(autoSwitchRow, 68);
 
-            // Fill remaining space
-            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // filler
 
             // ---- Wire events ----
             _tvEnabledSwitch.CheckedChanged += (_, _) => SaveTvPageSettings();
