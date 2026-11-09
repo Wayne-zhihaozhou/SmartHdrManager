@@ -47,8 +47,6 @@ namespace SmartHdrManager
         private Panel _activityPanel = null!;
         private ToggleSwitch _swTvEnabled = null!;
 
-        private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
-
         // Log page
         private readonly TextBox _log = new()
         {
@@ -255,23 +253,6 @@ namespace SmartHdrManager
                 if (_loadingSettings) return;
                 SaveTvPageSettings();
             };
-
-            // ---- Monitors ----
-            var monitors = _engine.GetMonitors();
-            int hdrMonitors = monitors.Count(m => m.HdrSupported);
-            Section("显示器", hdrMonitors > 1
-                ? "只有选中的显示器会切换。在另一块屏幕上玩？也把它打开。"
-                : "哪些显示器会切换到 HDR。");
-            foreach (var monitor in monitors)
-            {
-                var sw = new ToggleSwitch { Enabled = monitor.HdrSupported };
-                string title = monitor.IsPrimary ? $"{monitor.Name}  （主显示器）" : monitor.Name;
-                string desc = !monitor.HdrSupported
-                    ? "此显示器不支持 HDR。"
-                    : $"HDR 当前{(monitor.HdrEnabled ? "开启" : "关闭")}";
-                _monitorSwitches.Add((monitor, sw));
-                page.AddRow(SettingRow(title, desc, sw), 68);
-            }
 
             // ---- Advanced ----
             Section("高级", "设置文件、日志和重置。");
@@ -523,10 +504,6 @@ namespace SmartHdrManager
                 }
                 BeginInvoke(new Action(RebuildGames));
             };
-
-            // _games.AnimationStats reports the scroll frame rate (diagnostics) – not logged in releases: it filled the log
-            foreach (var (_, sw) in _monitorSwitches)
-                sw.CheckedChanged += (_, _) => OnMonitorToggled(sw);
 
             _swAutostart.CheckedChanged += (_, _) =>
             {
@@ -835,31 +812,6 @@ namespace SmartHdrManager
         }
 
         // ------------------------------------------------------------------
-        // ---- monitors ----
-        private void OnMonitorToggled(ToggleSwitch changed)
-        {
-            if (_loadingSettings) return;
-
-            var selected = _monitorSwitches.Where(m => m.Switch.Checked && m.Monitor.HdrSupported).Select(m => m.Monitor.DevicePath).ToList();
-            if (selected.Count == 0)
-            {
-                MessageBox.Show(this, "至少要保留一个支持 HDR 的显示器被选中。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                _loadingSettings = true;
-                changed.Checked = true;
-                _loadingSettings = false;
-                return;
-            }
-
-            var connected = new HashSet<string>(_monitorSwitches.Select(m => m.Monitor.DevicePath), StringComparer.OrdinalIgnoreCase);
-            _engine.Update(c =>
-            {
-                // keep selections of monitors that are not connected right now
-                var keepDisconnected = (c.SelectedMonitors ?? new List<string>()).Where(p => !connected.Contains(p));
-                c.SelectedMonitors = keepDisconnected.Concat(selected).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            });
-        }
-
-        // ------------------------------------------------------------------
         // Settings page
         // ------------------------------------------------------------------
         private void LoadSettings()
@@ -870,16 +822,6 @@ namespace SmartHdrManager
                 _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
                 _swTvEnabled.Checked = TvConfig.Enabled;
-
-                // Monitors: explicit selection if set, otherwise "primary only" / "all HDR monitors"
-                var selection = _engine.Read(c => (c.SelectedMonitors ?? new List<string>()).ToList());
-                bool onlyPrimary = _engine.Read(c => c.OnlyPrimaryMonitor);
-                foreach (var (monitor, sw) in _monitorSwitches)
-                {
-                    sw.Checked = monitor.HdrSupported && (selection.Count > 0
-                        ? selection.Contains(monitor.DevicePath, StringComparer.OrdinalIgnoreCase)
-                        : !onlyPrimary || monitor.IsPrimary);
-                }
             }
             finally { _loadingSettings = false; }
         }

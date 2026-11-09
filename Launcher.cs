@@ -61,7 +61,8 @@ namespace SmartHdrManager
             bool turnedOnHere = false;
             Log($"以 HDR 启动：{Path.GetFileName(file)}（托盘应用 {(appRunning ? "正在运行" : "未运行")}）");
 
-            HdrController.QueryHdrState(filter, out _, out bool alreadyOn);
+            HdrController.QueryHdrState(out bool any, out _);
+            bool alreadyOn = any;
             if (!alreadyOn)
             {
                 if (appRunning)
@@ -296,7 +297,7 @@ namespace SmartHdrManager
                     Log("以 HDR 启动：托盘应用当前保持 SDR（已暂停、已强制 SDR，或有设置为「从不 HDR」的录屏应用正在运行）– 将不以 HDR 启动。");
                     return false;
                 }
-                if (HdrController.QueryHdrState(filter, out _, out bool allOn) && allOn) return true;
+                if (HdrController.QueryHdrState(out bool allOn, out _) && allOn) return true;
                 if (appRunning && sw.ElapsedMilliseconds >= nextSignal)
                 {
                     hold.Set();
@@ -339,20 +340,8 @@ namespace SmartHdrManager
             return true;
         }
 
-        /// <summary>The monitors chosen in Settings › Monitors (all HDR monitors if config.json cannot be read).</summary>
-        private static MonitorFilter LoadMonitorFilter()
-        {
-            try
-            {
-                if (File.Exists(HdrEngine.ConfigPath))
-                {
-                    var c = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(HdrEngine.ConfigPath));
-                    if (c != null) return new MonitorFilter(c.OnlyPrimaryMonitor, c.SelectedMonitors);
-                }
-            }
-            catch { }
-            return new MonitorFilter(true, null);   // same as the default setting: primary monitor
-        }
+        /// <summary>Returns a monitor filter for single-display mode.</summary>
+        private static MonitorFilter LoadMonitorFilter() => new();
 
         private static void Log(string message) =>
             HdrEngine.WriteFileLog($"[{DateTime.Now:HH:mm:ss}] LAUNCH {message}");

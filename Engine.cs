@@ -98,14 +98,12 @@ namespace SmartHdrManager
             public readonly HashSet<string> HdrGames;
             public readonly bool EnableOnProcessStart;
             public readonly int FallbackSeconds, TickMs;
-            public readonly MonitorFilter Monitors;
             public readonly Dictionary<string, (string[] Folders, string[] Exes)> GameFolders;
 
             public Snapshot(AppConfig c)
             {
                 HdrGames = new HashSet<string>(c.HdrGamesAndApps ?? new List<string>(), Cmp);
                 HdrGames.RemoveWhere(process => !IsHdrEnabledFor(c.GameHdrModes, process));
-                Monitors = new MonitorFilter(c.OnlyPrimaryMonitor, c.SelectedMonitors);
                 EnableOnProcessStart = c.EnableHdrOnProcessStart;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
                 TickMs = Math.Clamp(c.ProcessScanIntervalMs, 50, 1000);
@@ -175,7 +173,6 @@ namespace SmartHdrManager
         private bool _verifyAllOn;   // after a "successful" ON: confirm on the next re-read that every display really is on
         private long _nextHdrQueryMs;
         private int _forceHdrQuery = 1;
-        private MonitorFilter? _queriedMonitors;
         private long _hdrOnSinceMs;            // when HDR was last switched/seen on (0 = off)
         private bool _firstHdrQueryDone;
         private bool _apiLogged;
@@ -196,7 +193,6 @@ namespace SmartHdrManager
         private bool _launchHoldLogged;
         private int _launchReleased;     // set by ReleaseLaunchHold (any thread)
         private bool _launchEnded;       // switch back to SDR right away, no "return to SDR after" wait
-        private string? _monitorCheckedGame;   // multi-monitor hint: game already checked
 
         // Launchers (2.5.2): a watched game that closes within seconds may only have started the real game
         private string? _seenGame;             // HDR game found by the last process scan
@@ -221,8 +217,6 @@ namespace SmartHdrManager
         private bool? _expectAny;                   // HDR state after the app's own last switch (or the last state seen)
         private bool _switchConfirmed = true;       // Windows has reported that state since the switch
         private long _displayEventMs = long.MinValue / 2;   // last display change / wake-up (any thread, Interlocked)
-        private string? _monitorSignature;          // connected monitors (device paths) at the last display event
-        private readonly object _monitorSignatureLock = new();
         private const int RestoreAfterMs = 3000;            // no flip-flop while e.g. a splash screen hands over to the app
         private long _restoreAtMs;                         // when to turn HDR back on after SDR app closes
         private bool _restoreHdr;                   // HDR that was not ours was switched off for an SDR / recording app
@@ -381,35 +375,10 @@ namespace SmartHdrManager
                 }
             }
 
-            MonitorsChanged();                             // remember the connected monitors (for display events)
-
             _thread = new Thread(Run) { IsBackground = true, Name = "HdrEngine" };
             _thread.Start();
         }
 
-
-        /// <summary>True when the set of connected monitors changed since the last call (first call: false).</summary>
-        private bool MonitorsChanged()
-        {
-            string signature;
-            try
-            {
-                signature = string.Join("|", HdrController.ListMonitors().Select(m => m.DevicePath)
-                                                        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
-            }
-            catch
-            {
-                return true;   // unknown: treat it like a monitor change (as before 2.6)
-            }
-            lock (_monitorSignatureLock)
-            {
-                bool changed = _monitorSignature != null && !string.Equals(signature, _monitorSignature, StringComparison.OrdinalIgnoreCase);
-                _monitorSignature = signature;
-                return changed;
-            }
-        }
-
-        public List<MonitorInfo> GetMonitors() => HdrController.ListMonitors();
 
         public void Stop()
         {
@@ -446,9 +415,8 @@ namespace SmartHdrManager
                     return;
                 }
 
-                var target = GetSnapshot().Monitors;
-                Log("SDR", $"程序已关闭 – 切回 SDR（{target.Describe()}），HDR 是本程序开启的。");
-                if (!HdrController.SetHdrState(false, target)) Log("ERROR", HdrController.LastError);
+                Log("SDR", $"程序已关闭 – 切回 SDR，HDR 是本程序开启的。");
+                if (!HdrController.SetHdrState(false, new MonitorFilter())) Log("ERROR", HdrController.LastError);
             }
             catch (Exception ex)
             {
@@ -485,10 +453,7 @@ namespace SmartHdrManager
         /// <summary>Forces the HDR state to be re-read on the next tick (display change, resume from sleep).</summary>
         public void InvalidateHdrState(bool resumed = false)
         {
-            // HDR lost right after a monitor was plugged in / switched on, or after waking up, was not turned off by you:
-            // switch it on again if needed. Windows also reports "display settings changed" when HDR itself is
-            // toggled (e.g. Win+Alt+B in a game), so only a changed monitor list counts – not every event.
-            if (resumed || MonitorsChanged()) Interlocked.Exchange(ref _displayEventMs, Now);
+            if (resumed) Interlocked.Exchange(ref _displayEventMs, Now);
             Interlocked.Exchange(ref _forceHdrQuery, 1);
             _wake.Set();
         }
@@ -592,22 +557,20 @@ namespace SmartHdrManager
         private void RefreshHdrState(Snapshot s, long now)
         {
             bool forced = Interlocked.Exchange(ref _forceHdrQuery, 0) == 1;
-            var target = s.Monitors;
-            if (!forced && now < _nextHdrQueryMs && ReferenceEquals(_queriedMonitors, target))
+            if (!forced && now < _nextHdrQueryMs)
                 return;
 
             // Keep the last known state if Windows could not be queried
-            if (HdrController.QueryHdrState(target, out bool any, out bool all))
+            if (HdrController.QueryHdrState(out bool any, out bool all))
             {
                 if (!_apiLogged && HdrController.HdrApiName != "not determined yet")
                 {
                     _apiLogged = true;
                     Log("INFO", $"显示控制：{HdrController.HdrApiName} – {WindowsVersion.Describe()}。");
                 }
-                bool sameTarget = ReferenceEquals(_queriedMonitors, target);
-                if (!_firstHdrQueryDone || !sameTarget)
+                if (!_firstHdrQueryDone)
                 {
-                    // First look (or other monitors): this is the starting point, nothing was switched by anyone yet
+                    // First look: this is the starting point, nothing was switched by anyone yet
                     _expectAny = any;
                     _switchConfirmed = true;
                     if (!_firstHdrQueryDone && any)
@@ -620,12 +583,11 @@ namespace SmartHdrManager
                 // (until the new state has been seen once, or 8 s have passed).
                 bool towardOwn = _expectAny.HasValue && any == _expectAny.Value;
                 if (towardOwn) _switchConfirmed = true;
-                if (_firstHdrQueryDone && any != _hdrAny && sameTarget && !towardOwn &&
+                if (_firstHdrQueryDone && any != _hdrAny && !towardOwn &&
                     (_switchConfirmed || now - _lastAttemptMs > ExternalChangeGraceMs))
                 {
                     string front = string.IsNullOrEmpty(_foregroundProcess) ? "unknown" : _foregroundProcess;
-                    Log("INFO", $"Windows HDR 在未经本程序的情况下变为 {(any ? "开启" : "关闭")} – 由游戏、Win+Alt+B、Windows " +
-                                $"设置或显示器重新连接触发（前台窗口：{front}）。");
+                    Log("INFO", $"Windows HDR 在未经本程序的情况下变为 {(any ? "开启" : "关闭")} – 由游戏、Win+Alt+B 或 Windows 设置触发（前台窗口：{front}）。");
                     _hdrOnByApp = false;   // not ours any more: never switched back by this app, left as it is on exit
                     _restoreHdr = false;   // you decided: nothing to put back later
                     _hdrOnForGame = null;  // crash hint: closing the game now is not a crash after the HDR switch
@@ -668,14 +630,14 @@ namespace SmartHdrManager
                 _hdrAny = any;
                 _hdrAll = all;
 
-                // Windows reported success, but a display did not actually switch on: count it as a failure,
+                // Windows reported success, but the display did not actually switch on: count it as a failure,
                 // so a monitor that refuses HDR cannot cause an endless retry loop (cooldown after 3 tries).
                 if (_verifyAllOn && !forced)
                 {
                     _verifyAllOn = false;
                     if (!all)
                     {
-                        Log("ERROR", "HDR 已切换开启，但并非所有支持 HDR 的显示器都报告 HDR 处于活动状态。");
+                        Log("ERROR", "HDR 已切换开启，但显示器未报告 HDR 处于活动状态。");
                         RegisterFailure(now);
                     }
                     else
@@ -684,7 +646,6 @@ namespace SmartHdrManager
                     }
                 }
             }
-            _queriedMonitors = target;
             _nextHdrQueryMs = now + HdrRequeryIntervalMs;
         }
 
@@ -764,24 +725,6 @@ namespace SmartHdrManager
             if (_runningGame != null)
                 _activeHdrGameProcess = _runningGame;
 
-            // Multi-monitor hint (once per game start): the game window is on a monitor that is not selected under
-            // Settings › Monitors, so HDR gets switched on the other screen and the game does not see it.
-            if (hdrGame == null)
-            {
-                _monitorCheckedGame = null;
-            }
-            else if (shouldEnableHdr && s.HdrGames.Contains(procName) && !_foregroundElsewhere &&
-                     !string.Equals(_monitorCheckedGame, procName, StringComparison.OrdinalIgnoreCase))
-            {
-                _monitorCheckedGame = procName;
-                if (HdrController.ResolveVideoMonitor(WindowDetector.ForegroundMonitor(), s.Monitors, out string problem) == null &&
-                    problem.Contains("未在 设置 › 显示器 中开启切换", StringComparison.OrdinalIgnoreCase))
-                {
-                    Log("HINT", $"'{procName}' 运行在未被选中用于 HDR 切换的显示器上，因此 HDR 被切换到了 " +
-                                "另一台显示器。请在 设置 › 显示器 中选中游戏的显示器。");
-                }
-            }
-
             bool canAttempt = now - _lastAttemptMs >= SwitchSpacingMs && now >= _cooldownUntilMs;
 
 
@@ -819,7 +762,7 @@ namespace SmartHdrManager
                 if (!_hdrAll && canAttempt)
                 {
                     string? game = _runningGame ?? (s.HdrGames.Contains(procName) && !_foregroundElsewhere ? procName : null);
-                    TurnHdrOn(reason, s.Monitors);
+                    TurnHdrOn(reason);
                     if (_hdrAll && game != null && !launchHold)
                     {
                         // Crash hint: remember when HDR came on for this game
@@ -860,7 +803,7 @@ namespace SmartHdrManager
                     {
                         _externalEnded = false;
                         _sdrFallbackAtMs = -1;
-                        TurnHdrOff($"'{_externalEndedWhat}' 已关闭（它曾自行开启 HDR）", s.Monitors);
+                        TurnHdrOff($"'{_externalEndedWhat}' 已关闭（它曾自行开启 HDR）");
                     }
                 }
                 else if (_launchEnded)
@@ -899,7 +842,7 @@ namespace SmartHdrManager
                 {
                     string what = _restoreFor;
                     _restoreHdr = false;
-                    TurnHdrOn($"恢复 HDR – '{what}' 之前 HDR 是开启的", s.Monitors);
+                    TurnHdrOn($"恢复 HDR – '{what}' 之前 HDR 是开启的");
                     if (_hdrAny) _hdrOnByApp = false;   // yours again: never switched back by this app
                 }
             }
@@ -961,7 +904,7 @@ namespace SmartHdrManager
                 Log("HDR", $"{reason} – HDR 保持开启：'{_restoreFor}' 之前 HDR 就是开启的（由您或其他程序开启）。");
                 return;
             }
-            TurnHdrOff(reason, s.Monitors);
+            TurnHdrOff(reason);
         }
 
         // ------------------------------------------------------------------
@@ -1425,13 +1368,13 @@ namespace SmartHdrManager
         // ------------------------------------------------------------------
         // Switching HDR / SDR (engine thread only)
         // ------------------------------------------------------------------
-        private void TurnHdrOn(string reason, MonitorFilter monitors)
+        private void TurnHdrOn(string reason)
         {
             long now = Now;
             _lastAttemptMs = now;
-            Log("HDR", $"开启 HDR（{monitors.Describe()}）– {reason}");
+            Log("HDR", $"开启 HDR – {reason}");
 
-            bool ok = HdrController.SetHdrState(true, monitors);
+            bool ok = HdrController.SetHdrState(true, new MonitorFilter());
             if (ok)
             {
                 if (!_hdrAny || _hdrOnSinceMs == 0) _hdrOnSinceMs = now;
@@ -1449,14 +1392,13 @@ namespace SmartHdrManager
             AfterSwitch(ok, now);
         }
 
-        /// <param name="partial">Only some monitors (HDR moves to another monitor): HDR stays on elsewhere and stays ours.</param>
-        private void TurnHdrOff(string reason, MonitorFilter monitors, bool partial = false)
+        private void TurnHdrOff(string reason, bool partial = false)
         {
             long now = Now;
             _lastAttemptMs = now;
-            Log("SDR", $"切换到 SDR（{monitors.Describe()}）– {reason}");
+            Log("SDR", $"切换到 SDR – {reason}");
 
-            bool ok = HdrController.SetHdrState(false, monitors);
+            bool ok = HdrController.SetHdrState(false, new MonitorFilter());
             if (ok)
             {
                 _hdrOnSinceMs = 0;
@@ -1897,7 +1839,6 @@ namespace SmartHdrManager
         {
             c.CustomGameFolders ??= new List<string>();
             c.HdrGamesAndApps ??= new List<string>();
-            c.SelectedMonitors ??= new List<string>();
             c.LibraryGames ??= new List<LibraryGame>();
 
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

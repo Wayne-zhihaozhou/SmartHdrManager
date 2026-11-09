@@ -22,9 +22,6 @@ namespace SmartHdrManager
         // (missing in files from 2.5.0 and older = 0).
         public int ConfigVersion { get; set; } = 0;
 
-        // Only toggle HDR on the primary monitor (main display at desktop coordinates 0,0)
-        public bool OnlyPrimaryMonitor { get; set; } = true;
-
         // Extra folders to search for games (the common Steam / Epic / GOG / Xbox / "Games" folders are found automatically)
         public List<string> CustomGameFolders { get; set; } = new();
 
@@ -34,9 +31,6 @@ namespace SmartHdrManager
         public List<string> HdrGamesAndApps { get; set; } = new();
 
 
-
-        // Monitors to switch, by Windows device path. Empty = use OnlyPrimaryMonitor (primary only / all monitors).
-        public List<string> SelectedMonitors { get; set; } = new();
 
         // Games found in the Steam / Epic / GOG / Xbox libraries
         public List<LibraryGame> LibraryGames { get; set; } = new();
@@ -349,30 +343,15 @@ namespace SmartHdrManager
         }
     }
 
-    /// <summary>Which monitors to switch: a set of device paths, or "primary only" / "all".</summary>
+    /// <summary>Monitor filter for single-display mode.</summary>
     public sealed class MonitorFilter
     {
-        public MonitorFilter(bool onlyPrimary, IEnumerable<string>? devicePaths)
-        {
-            OnlyPrimary = onlyPrimary;
-            var paths = devicePaths?.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
-            DevicePaths = paths != null && paths.Count > 0 ? new HashSet<string>(paths, StringComparer.OrdinalIgnoreCase) : null;
-        }
-
-        public bool OnlyPrimary { get; }
-        public HashSet<string>? DevicePaths { get; }   // null = not customised
-
-        public string Describe() =>
-            DevicePaths != null
-                ? (DevicePaths.Count == 1 ? "1 个选定显示器" : $"{DevicePaths.Count} 个选定显示器")
-                : OnlyPrimary ? "主显示器" : "所有显示器";
     }
 
     public sealed class MonitorInfo
     {
         public string DevicePath { get; init; } = string.Empty;
         public string Name { get; init; } = string.Empty;
-        public bool IsPrimary { get; init; }
         public bool HdrSupported { get; init; }
         public bool HdrEnabled { get; init; }
     }
@@ -518,135 +497,57 @@ namespace SmartHdrManager
             return DisplayConfigGetDeviceInfo(ref request) == ERROR_SUCCESS ? request.viewGdiDeviceName ?? string.Empty : string.Empty;
         }
 
-        /// <summary>Keys of the displays a filter switches right now (same rules as switching).</summary>
-        public static HashSet<string> ResolveTargetKeys(MonitorFilter filter)
-        {
-            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (QueryActivePaths(out var paths, out var modes) != ERROR_SUCCESS) return keys;
-            var matches = BuildMatcher(paths, modes, filter);
-            foreach (var path in paths)
-                if (matches(path)) keys.Add(MonitorKey(path));
-            return keys;
-        }
-
         /// <summary>
-        /// For HDR: the display a window is on (by its HMONITOR). Returns its key if that display is
-        /// HDR-capable and one of the monitors allowed in Settings; otherwise null with the reason.
+        /// For HDR: the display a window is on (by its HMONITOR). Returns its device path if that display is
+        /// HDR-capable; otherwise null with the reason.
         /// </summary>
-        public static string? ResolveVideoMonitor(IntPtr hMonitor, MonitorFilter allowed, out string problem)
+        public static string? ResolveVideoMonitor(IntPtr hMonitor, out string problem)
         {
             problem = string.Empty;
             var info = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>(), szDevice = string.Empty };
             if (hMonitor == IntPtr.Zero || !GetMonitorInfo(hMonitor, ref info) || string.IsNullOrEmpty(info.szDevice))
             {
-                problem = "the monitor of the video window could not be determined";
+                problem = "无法确定视频窗口的显示器";
                 return null;
             }
             if (QueryActivePaths(out var paths, out var modes) != ERROR_SUCCESS)
             {
-                problem = "the display configuration could not be read";
+                problem = "无法读取显示配置";
                 return null;
             }
 
-            var matches = BuildMatcher(paths, modes, allowed);
             foreach (var path in paths)
             {
                 if (!string.Equals(GetSourceGdiName(path), info.szDevice, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool supported, out _) || !supported)
-                    continue;   // cloned displays share a source: keep looking for an HDR-capable one
-                if (!matches(path))
-                {
-                    problem = "该显示器未在 设置 › 显示器 中开启切换";
-                    return null;
-                }
-                return MonitorKey(path);
+                    continue;
+                string devicePath = GetTargetName(path.targetInfo.adapterId, path.targetInfo.id).DevicePath;
+                return !string.IsNullOrEmpty(devicePath) ? devicePath : $"{path.targetInfo.adapterId.LowPart}:{path.targetInfo.id}";
             }
-            if (problem.Length == 0) problem = "the video is on a monitor without HDR";
+            if (problem.Length == 0) problem = "视频所在的显示器不支持 HDR";
             return null;
         }
 
-        /// <summary>Stable key of a display: its device path, or adapter+target id when Windows reports none.</summary>
-        private static string MonitorKey(DISPLAYCONFIG_PATH_INFO path)
-        {
-            string devicePath = GetTargetName(path.targetInfo.adapterId, path.targetInfo.id).DevicePath;
-            return devicePath.Length > 0 ? devicePath : $"{path.targetInfo.adapterId.LowPart}:{path.targetInfo.id}";
-        }
-
-        /// <summary>
-        /// Decides which active display paths are switched. With a monitor selection: the selected ones; if none of the
-        /// selected monitors is connected right now, it falls back to "primary only" / "all" instead of switching nothing.
-        /// </summary>
-        private static Func<DISPLAYCONFIG_PATH_INFO, bool> BuildMatcher(DISPLAYCONFIG_PATH_INFO[] paths, DISPLAYCONFIG_MODE_INFO[] modes, MonitorFilter filter)
-        {
-            if (filter.DevicePaths != null)
-            {
-                var keys = paths.Select(MonitorKey).ToArray();
-                if (keys.Any(filter.DevicePaths.Contains))
-                {
-                    var selected = new HashSet<string>(keys.Where(filter.DevicePaths.Contains), StringComparer.OrdinalIgnoreCase);
-                    return p => selected.Contains(MonitorKey(p));
-                }
-            }
-            return p => !filter.OnlyPrimary || IsPrimaryDisplayPath(p, modes);
-        }
-
-        /// <summary>All active displays (one entry per monitor), for the monitor list in Settings.</summary>
+        /// <summary>Current active display.</summary>
         public static List<MonitorInfo> ListMonitors()
         {
             var result = new List<MonitorInfo>();
             if (QueryActivePaths(out var paths, out var modes) != ERROR_SUCCESS) return result;
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var found = new List<(string Key, string Name, bool Primary, bool Supported, bool Enabled, int X, int Y)>();
-            int number = 0;
+
             foreach (var path in paths)
             {
-                number++;
-                var (name, _) = GetTargetName(path.targetInfo.adapterId, path.targetInfo.id);
-                string key = MonitorKey(path);
-                if (!seen.Add(key)) continue;   // cloned displays appear once
+                var (name, devicePath) = GetTargetName(path.targetInfo.adapterId, path.targetInfo.id);
                 bool ok = TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool supported, out bool enabled);
-                TryGetSourcePosition(path, modes, out int x, out int y);
-                found.Add((key, string.IsNullOrWhiteSpace(name) ? $"Display {number}" : name.Trim(),
-                           IsPrimaryDisplayPath(path, modes), ok && supported, ok && enabled, x, y));
-            }
+                string displayName = string.IsNullOrWhiteSpace(name) ? "显示器" : name.Trim();
 
-            // Two identical monitors have the same friendly name: tell them apart by where they sit on the desktop.
-            // Only the label changes – the HDR switches are keyed by the device path.
-            var labels = found.Select(f => f.Name).ToArray();
-            foreach (var group in found.Select((f, i) => (f, i)).GroupBy(t => t.f.Name, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
-            {
-                var members = group.OrderBy(t => t.f.X).ThenBy(t => t.f.Y).ToList();
-                bool distinctX = members.Select(t => t.f.X).Distinct().Count() == members.Count;
-                bool distinctY = members.Select(t => t.f.Y).Distinct().Count() == members.Count;
-                if (members.Count == 2 && distinctX)
-                {
-                    labels[members[0].i] += " (left)";
-                    labels[members[1].i] += " (right)";
-                }
-                else if (members.Count == 2 && distinctY)
-                {
-                    members = members.OrderBy(t => t.f.Y).ToList();
-                    labels[members[0].i] += " (top)";
-                    labels[members[1].i] += " (bottom)";
-                }
-                else
-                {
-                    for (int n = 0; n < members.Count; n++)
-                        labels[members[n].i] += $" #{n + 1}";   // numbered left to right
-                }
-            }
-
-            for (int i = 0; i < found.Count; i++)
-            {
-                var f = found[i];
                 result.Add(new MonitorInfo
                 {
-                    DevicePath = f.Key,
-                    Name = labels[i],
-                    IsPrimary = f.Primary,
-                    HdrSupported = f.Supported,
-                    HdrEnabled = f.Enabled
+                    DevicePath = !string.IsNullOrEmpty(devicePath) ? devicePath : $"{path.targetInfo.adapterId.LowPart}:{path.targetInfo.id}",
+                    Name = displayName,
+                    HdrSupported = supported,
+                    HdrEnabled = enabled
                 });
+                break; // Only return the current display
             }
             return result;
         }
@@ -738,6 +639,28 @@ namespace SmartHdrManager
         /// <summary>Windows 11 24H2 is build 26100; the new HDR requests exist from there on.</summary>
         private static readonly bool IsWindows24H2OrNewer = Environment.OSVersion.Version.Build >= 26100;
 
+        /// <summary>Queries the active display paths.</summary>
+        private static int QueryActivePaths(out DISPLAYCONFIG_PATH_INFO[] paths, out DISPLAYCONFIG_MODE_INFO[] modes)
+        {
+            int rc = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out uint pathCount, out uint modeCount);
+            if (rc != ERROR_SUCCESS)
+            {
+                paths = Array.Empty<DISPLAYCONFIG_PATH_INFO>();
+                modes = Array.Empty<DISPLAYCONFIG_MODE_INFO>();
+                return rc;
+            }
+
+            paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
+            modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
+
+            for (int i = 0; i < pathCount; i++)
+            {
+                paths[i].flags = 0;
+            }
+
+            return QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero);
+        }
+
         /// <summary>Switches HDR on one display with the same API that reported its state.</summary>
         private static int SetHdrOnDisplay(LUID adapterId, uint targetId, bool enable, bool useNewApi)
         {
@@ -763,68 +686,7 @@ namespace SmartHdrManager
 
         public static string LastError { get; private set; } = string.Empty;
 
-        /// <summary>
-        /// Checks whether the display path belongs to the Windows primary monitor (position 0,0).
-        /// </summary>
-        private static bool IsPrimaryDisplayPath(DISPLAYCONFIG_PATH_INFO path, DISPLAYCONFIG_MODE_INFO[] modes)
-            => TryGetSourcePosition(path, modes, out int posX, out int posY) && posX == 0 && posY == 0;
-
-        /// <summary>Desktop position (top-left corner) of the display's source mode.</summary>
-        private static bool TryGetSourcePosition(DISPLAYCONFIG_PATH_INFO path, DISPLAYCONFIG_MODE_INFO[] modes, out int posX, out int posY)
-        {
-            posX = posY = 0;
-            uint idx = path.sourceInfo.modeInfoIdx;
-            if (idx == DISPLAYCONFIG_PATH_MODE_IDX_INVALID || idx >= modes.Length)
-                return false;
-
-            var mode = modes[idx];
-            if (mode.infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE)
-                return false;
-
-            // DISPLAYCONFIG_SOURCE_MODE layout inside union (u0, u1, u2):
-            // u0: width (32 bit), height (32 bit)
-            // u1: pixelFormat (32 bit), position.x (32 bit signed)
-            // u2: position.y (32 bit signed)
-            posX = (int)(mode.u1 >> 32);
-            posY = (int)(mode.u2 & 0xFFFFFFFF);
-            return true;
-        }
-
-        private const int ERROR_INSUFFICIENT_BUFFER = 122;
-
-        /// <summary>
-        /// Reads the active display paths. Retries when the configuration changes between the two calls
-        /// (monitor hot-plug, mode change), which Windows reports as ERROR_INSUFFICIENT_BUFFER.
-        /// </summary>
-        private static int QueryActivePaths(out DISPLAYCONFIG_PATH_INFO[] paths, out DISPLAYCONFIG_MODE_INFO[] modes)
-        {
-            paths = Array.Empty<DISPLAYCONFIG_PATH_INFO>();
-            modes = Array.Empty<DISPLAYCONFIG_MODE_INFO>();
-            int rc = ERROR_SUCCESS;
-
-            for (int attempt = 0; attempt < 3; attempt++)
-            {
-                rc = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out uint pathCount, out uint modeCount);
-                if (rc != ERROR_SUCCESS) return rc;
-
-                paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
-                modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
-
-                rc = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero);
-                if (rc == ERROR_SUCCESS)
-                {
-                    if (pathCount < paths.Length) Array.Resize(ref paths, (int)pathCount);
-                    if (modeCount < modes.Length) Array.Resize(ref modes, (int)modeCount);
-                    return rc;
-                }
-                if (rc != ERROR_INSUFFICIENT_BUFFER) return rc;
-            }
-            return rc;
-        }
-
-        public static bool SetHdrState(bool enableHdr, bool onlyPrimaryMonitor) =>
-            SetHdrState(enableHdr, new MonitorFilter(onlyPrimaryMonitor, null));
-
+        /// <summary>Switches HDR on the current display.</summary>
         public static bool SetHdrState(bool enableHdr, MonitorFilter filter)
         {
             LastError = string.Empty;
@@ -832,67 +694,47 @@ namespace SmartHdrManager
             int rc = QueryActivePaths(out var paths, out var modes);
             if (rc != ERROR_SUCCESS)
             {
-                LastError = $"Reading the display configuration failed (code {rc})";
+                LastError = $"读取显示配置失败 (code {rc})";
                 return false;
             }
 
-            bool success = false;
-            bool anyFailed = false;   // one display refusing counts as failure, so the engine's retry cooldown applies
-            int supportedDisplays = 0;
-
-            var matches = BuildMatcher(paths, modes, filter);
             foreach (var path in paths)
             {
-                if (!matches(path))
-                    continue;
-
                 if (TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool isHdrSupported, out bool isHdrEnabled, out bool newApi))
                 {
-                    if (isHdrSupported)
+                    if (isHdrSupported && isHdrEnabled != enableHdr)
                     {
-                        supportedDisplays++;
-
-                        if (isHdrEnabled == enableHdr)
-                        {
-                            success = true;
-                            continue;
-                        }
-
                         int res = SetHdrOnDisplay(path.targetInfo.adapterId, path.targetInfo.id, enableHdr, newApi);
                         if (res == ERROR_SUCCESS)
                         {
-                            success = true;
+                            return true;
                         }
                         else
                         {
-                            anyFailed = true;
-                            LastError = $"DisplayConfigSetDeviceInfo failed (code {res})";
+                            LastError = $"DisplayConfigSetDeviceInfo 失败 (code {res})";
+                            return false;
                         }
                     }
+                    return isHdrEnabled == enableHdr;
                 }
             }
 
-            if (!success && string.IsNullOrEmpty(LastError))
-            {
-                LastError = supportedDisplays == 0
-                    ? "No active HDR-capable display found among the monitors selected for switching"
-                    : "HDR could not be switched";
-            }
-            return success && !anyFailed;
+            LastError = "未找到支持 HDR 的显示器";
+            return false;
         }
 
-        public static bool IsHdrCurrentlyEnabled(bool onlyPrimaryMonitor)
+        public static bool IsHdrCurrentlyEnabled()
         {
-            QueryHdrState(new MonitorFilter(onlyPrimaryMonitor, null), out bool anyEnabled, out _);
+            QueryHdrState(out bool anyEnabled, out _);
             return anyEnabled;
         }
 
         /// <summary>
-        /// anyEnabled: at least one HDR-capable (primary) display has HDR on.
-        /// allEnabled: every HDR-capable (primary) display has HDR on. Used so that in all-monitors mode a second
-        /// monitor that is still in SDR also gets switched on. Returns false if the configuration could not be read.
+        /// anyEnabled: the display has HDR on.
+        /// allEnabled: same as anyEnabled for single display.
+        /// Returns false if the configuration could not be read.
         /// </summary>
-        public static bool QueryHdrState(MonitorFilter filter, out bool anyEnabled, out bool allEnabled)
+        public static bool QueryHdrState(out bool anyEnabled, out bool allEnabled)
         {
             anyEnabled = false;
             allEnabled = false;
@@ -900,25 +742,17 @@ namespace SmartHdrManager
             if (QueryActivePaths(out var paths, out var modes) != ERROR_SUCCESS)
                 return false;
 
-            int supported = 0;
-            int enabled = 0;
-
-            var matches = BuildMatcher(paths, modes, filter);
             foreach (var path in paths)
             {
-                if (!matches(path))
-                    continue;
-
                 if (TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool isHdrSupported, out bool isHdrEnabled) &&
                     isHdrSupported)
                 {
-                    supported++;
-                    if (isHdrEnabled) enabled++;
+                    anyEnabled = isHdrEnabled;
+                    allEnabled = isHdrEnabled;
+                    return true;
                 }
             }
 
-            anyEnabled = enabled > 0;
-            allEnabled = supported > 0 && enabled == supported;
             return true;
         }
     }
