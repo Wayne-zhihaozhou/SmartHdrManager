@@ -54,8 +54,19 @@ namespace SmartHdrManager
         private void OnGameBrightnessChanged(GameItem item, bool sdr)
         {
             _engine.SetGameBrightness(item.Key, item.Processes, item.Brightness, item.Name);
-            if (item.Tracked && IsBrightnessControlEnabled()) ApplyGameBrightness(item.Brightness);
+
+            // Only the application that owns the screen changes the TV right now; the others keep their value for later
+            if (item.Tracked && IsBrightnessControlEnabled() && OwnsScreen(item)) ApplyGameBrightness(item.Brightness);
+
             BeginInvoke(new Action(() => RebuildGames(sdr)));
+        }
+
+        private bool OwnsScreen(GameItem item)
+        {
+            var status = _engine.Status;
+            return item.Processes.Contains(status.ActiveProcess, StringComparer.OrdinalIgnoreCase) ||
+                   (status.RunningGame != null &&
+                    item.Processes.Contains(status.RunningGame, StringComparer.OrdinalIgnoreCase));
         }
 
         private async void ApplyGameBrightness(int brightness)

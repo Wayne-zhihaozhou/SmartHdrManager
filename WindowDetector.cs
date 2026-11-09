@@ -9,6 +9,7 @@ namespace SmartHdrManager
     public static class WindowDetector
     {
         private const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+        private const string UwpFrameHost = "applicationframehost";
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT
@@ -42,6 +43,11 @@ namespace SmartHdrManager
 
         [DllImport("user32.dll")]
         private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+        private delegate bool EnumChildProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr hWnd, EnumChildProc callback, IntPtr lParam);
 
         [ThreadStatic]
         private static StringBuilder? _titleBuffer;
@@ -91,6 +97,7 @@ namespace SmartHdrManager
             }
 
             string name = ResolveProcessName(pid);
+            if (name == UwpFrameHost) name = ResolveStoreAppName(hWnd, name);
 
             if (name.Length > 0)
             {
@@ -102,6 +109,31 @@ namespace SmartHdrManager
                 }
             }
             return name;
+        }
+
+        /// <summary>
+        /// A store (UWP) app runs inside ApplicationFrameHost.exe: the foreground window belongs to the host and the
+        /// real application owns one of its child windows.
+        /// </summary>
+        private static string ResolveStoreAppName(IntPtr hostWindow, string fallback)
+        {
+            string? found = null;
+
+            try
+            {
+                EnumChildWindows(hostWindow, (child, _) =>
+                {
+                    GetWindowThreadProcessId(child, out uint pid);
+                    string name = ResolveProcessName(pid);
+                    if (name.Length == 0 || name == UwpFrameHost) return true;
+
+                    found = name;
+                    return false;
+                }, IntPtr.Zero);
+            }
+            catch { }
+
+            return found ?? fallback;
         }
 
         private static string ResolveProcessName(uint pid)

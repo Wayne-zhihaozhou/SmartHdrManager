@@ -421,10 +421,10 @@ namespace SmartHdrManager
             }
 
             if (!Paused)
-            {
                 Decide(snapshot, now, procName);
-                UpdateAppBrightness(snapshot, procName);
-            }
+
+            // Brightness follows its own switch, not the HDR control: pausing HDR must not freeze the TV brightness
+            UpdateAppBrightness(snapshot, procName);
 
             Status = new EngineStatus
             {
@@ -710,9 +710,9 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// Applies the brightness of the application that owns the screen right now: the running HDR or SDR application,
-        /// otherwise the listed program in front, otherwise the desktop brightness. Runs only when that application
-        /// changes, so the TV is not written on every tick.
+        /// Applies the brightness of the application that owns the screen right now. A running HDR game keeps its
+        /// brightness even when the user switches away; otherwise the program in front decides, and the desktop
+        /// brightness applies while a program that is on neither list is in front. Only a change is written to the TV.
         /// </summary>
         private void UpdateAppBrightness(Snapshot snapshot, string procName)
         {
@@ -723,9 +723,7 @@ namespace SmartHdrManager
                 return;
             }
 
-            string? active = _runningGame ?? _runningSdrApp;
-            if (active == null && snapshot.HdrGames.Contains(procName) && !_foregroundElsewhere) active = procName;
-            if (active == null && snapshot.SdrGames.Contains(procName) && !_foregroundElsewhere) active = procName;
+            string? active = ResolveBrightnessApp(snapshot, procName);
 
             if (_brightnessApplied && string.Equals(active, _brightnessApp, StringComparison.OrdinalIgnoreCase)) return;
 
@@ -737,6 +735,19 @@ namespace SmartHdrManager
             if (firstCheck && active == null) return;
 
             ApplyBrightness(snapshot.BrightnessFor(active), active);
+        }
+
+        /// <summary>
+        /// The application whose brightness belongs on screen: the running HDR game, otherwise the listed program in
+        /// front (HDR or SDR list), otherwise null for the desktop brightness. A program from either list that keeps
+        /// running in the background does not hold the brightness – switching to it is what applies it.
+        /// </summary>
+        private string? ResolveBrightnessApp(Snapshot snapshot, string procName)
+        {
+            if (_runningGame != null) return _runningGame;
+            if (string.IsNullOrEmpty(procName) || _foregroundElsewhere) return null;
+            if (snapshot.HdrGames.Contains(procName) || snapshot.SdrGames.Contains(procName)) return procName;
+            return null;
         }
 
         private void ApplyBrightness(int brightness, string? app)
