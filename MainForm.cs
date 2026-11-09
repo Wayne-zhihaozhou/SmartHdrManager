@@ -21,10 +21,7 @@ namespace SmartHdrManager
         private readonly HdrEngine _engine;
         private readonly Action<bool> _setPaused;
         private readonly Action<HdrOverride, TimeSpan?> _setOverride;
-        private readonly Action _applyHotkeys;
         private readonly Action _exitApp;
-        private readonly SegmentedTabs _hotkeyChoice = new() { Size = new Size(240, 34) };
-        private static readonly string[] HotkeyModes = { HotkeySettings.WinAlt, HotkeySettings.CtrlAlt, HotkeySettings.Off };
         private readonly Icon _windowIcon = AppIcons.Create(IconStyle.Vivid, 48);
         private readonly ToolTip _toolTip = new();
 
@@ -77,21 +74,16 @@ namespace SmartHdrManager
 
         public event EventHandler? HiddenToTray;
 
-        public MainForm(HdrEngine engine, Action<bool> setPaused, Action<HdrOverride, TimeSpan?> setOverride, Action applyHotkeys, Action exitApp)
+        public MainForm(HdrEngine engine, Action<bool> setPaused, Action<HdrOverride, TimeSpan?> setOverride, Action exitApp)
         {
             _engine = engine;
             _setPaused = setPaused;
             _setOverride = setOverride;
-            _applyHotkeys = applyHotkeys;
             _exitApp = exitApp;
             
             // 从引擎配置加载 TvConfig，确保快捷键回调读取正确的启用状态
             TvConfig.LoadFrom(engine.Read(c => c));
             
-            _hotkeyChoice.AddTab("Win+Alt");
-            _hotkeyChoice.AddTab("Ctrl+Alt");
-            _hotkeyChoice.AddTab("关闭");
-
             SuspendLayout();
 
             Text = "Smart HDR Manager";
@@ -295,7 +287,6 @@ namespace SmartHdrManager
             var pauseRow = SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", _swPauseAutomation);
             page.AddRow(pauseRow, 68);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
-            page.AddRow(SettingRow("键盘快捷键", "+ H：此游戏使用 HDR  ·  + I：从不使用 HDR  ·  + O：强制 HDR / SDR", _hotkeyChoice), 68);
             var neverButton = new ModernButton { Text = "显示列表", AutoSize = true };
             neverButton.Click += (_, _) => OnManageNeverHdr();
             var neverRow = SettingRow("从不 HDR 的游戏", "您排除的游戏 – 可在此撤销。", neverButton);
@@ -367,7 +358,6 @@ namespace SmartHdrManager
                 "恢复默认设置", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
             if (answer != DialogResult.Yes) return;
             _engine.ResetSettings();
-            _applyHotkeys();
             LoadSettings();
             RebuildGames();
         }
@@ -594,13 +584,6 @@ namespace SmartHdrManager
                 _engine.Update(c => c.ShowOtherPrograms = _swShowOthers.Checked);
                 RebuildGames();
             };
-            _hotkeyChoice.SelectedIndexChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                string mode = HotkeyModes[Math.Clamp(_hotkeyChoice.SelectedIndex, 0, HotkeyModes.Length - 1)];
-                _engine.Update(c => c.HotkeyModifier = mode);
-                _applyHotkeys();
-            };
             foreach (var (_, sw) in _monitorSwitches)
                 sw.CheckedChanged += (_, _) => OnMonitorToggled(sw);
 
@@ -730,8 +713,7 @@ namespace SmartHdrManager
                     string length = s.OverrideRemainingMs >= 0
                         ? $"{Math.Max(1, (int)Math.Ceiling(s.OverrideRemainingMs / 60000.0))} 分钟剩余"
                         : "直到您手动恢复";
-                    string shortcut = HotkeySettings.Describe(_engine.Read(c => c.HotkeyModifier), 'O');
-                    activity = shortcut.Length > 0 ? $"手动覆盖 · {length}  ({shortcut})" : $"手动覆盖 · {length}";
+                    activity = $"手动覆盖 · {length}";
                 }
                 else if (s.Paused)
                 {
@@ -844,7 +826,7 @@ namespace SmartHdrManager
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
             foreach (var file in dlg.FileNames)
-                _engine.AddGame(HdrEngine.CleanExeInput(file), fromHotkey: false, exePath: file);
+                _engine.AddGame(HdrEngine.CleanExeInput(file), exePath: file);
             RebuildGames();
         }
 
@@ -852,7 +834,7 @@ namespace SmartHdrManager
         {
             var picked = PickRunningProcess();
             if (picked == null) return;
-            _engine.AddGame(picked.Value.Name, fromHotkey: false, exePath: picked.Value.Path);
+            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path);
             RebuildGames();
         }
 
@@ -1106,7 +1088,6 @@ namespace SmartHdrManager
                 _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
                 _swShowOthers.Checked = _engine.Read(c => c.ShowOtherPrograms);
-                _hotkeyChoice.SelectedIndex = Math.Max(0, Array.IndexOf(HotkeyModes, _engine.Read(c => HotkeySettings.Normalize(c.HotkeyModifier))));
 
                 // Monitors: explicit selection if set, otherwise "primary only" / "all HDR monitors"
                 var selection = _engine.Read(c => (c.SelectedMonitors ?? new List<string>()).ToList());

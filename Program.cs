@@ -8,7 +8,7 @@ using Microsoft.Win32;
 namespace SmartHdrManager
 {
     /// <summary>
-    /// Owns the tray icon, the global hotkeys, the background engine and (only while it is open) the settings window.
+    /// Owns the tray icon, the background engine and (only while it is open) the settings window.
     /// There is no ApplicationContext.MainForm, so closing the window never ends the process; only "Exit" does.
     /// </summary>
     internal sealed class TrayAppContext : ApplicationContext
@@ -19,7 +19,6 @@ namespace SmartHdrManager
         private readonly EventWaitHandle _showEvent;
         private readonly CommandEvents _commands;
         private readonly TrayAndStartupManager _tray;
-        private GlobalHotkeys? _hotkeys;
         private readonly System.Windows.Forms.Timer _timer;
 
         private MainForm? _form;
@@ -35,9 +34,7 @@ namespace SmartHdrManager
             _showEvent = showEvent;
             _commands = commands;
 
-            _tray = new TrayAndStartupManager(ShowMain, SetPaused, Exit, SetOverride, GetOverride, () => Shortcut('O'));
-
-            ApplyHotkeys();
+            _tray = new TrayAndStartupManager(ShowMain, SetPaused, Exit, SetOverride, GetOverride);
 
             // Re-read the HDR state right away when monitors change or the PC wakes up
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -86,54 +83,13 @@ namespace SmartHdrManager
             if (_exiting) return;
             if (_form == null || _form.IsDisposed)
             {
-                _form = new MainForm(_engine, SetPaused, SetOverride, ApplyHotkeys, Exit);
+                _form = new MainForm(_engine, SetPaused, SetOverride, Exit);
                 _form.HiddenToTray += OnFormHidden;
             }
             _form.ShowFromTray();
         }
 
-        // ---- keyboard shortcuts (Win+Alt or Ctrl+Alt + H / I / O; can be changed or switched off in Settings) ----
-        private string HotkeyMode => _engine.Read(c => HotkeySettings.Normalize(c.HotkeyModifier));
-
-        private string Shortcut(char key) => HotkeySettings.Describe(HotkeyMode, key);
-
-        /// <summary>(Re-)registers the shortcuts with the current setting. Falls back to polling for any that are taken.</summary>
-        private void ApplyHotkeys()
-        {
-            _hotkeys?.Dispose();
-            _hotkeys = null;
-
-            string mode = HotkeyMode;
-            if (mode == HotkeySettings.Off)
-            {
-                _engine.PollHotkeys = false;
-                _engine.PollOverrideHotkey = false;
-                _engine.Log("INFO", "键盘快捷键已关闭。");
-                return;
-            }
-
-            try
-            {
-                _hotkeys = new GlobalHotkeys(HotkeySettings.ModifierFlags(mode), _engine.HotkeyAddCurrent, _engine.HotkeyIgnoreCurrent, OnOverrideHotkey);
-                _engine.PollHotkeys = !_hotkeys.Registered;
-                _engine.PollOverrideHotkey = !_hotkeys.OverrideRegistered;
-                _engine.Log("INFO", $"快捷键：{Shortcut('H')} 对当前前台游戏使用 HDR，{Shortcut('I')} 从不使用 HDR " +
-                                    $"（前台为浏览器 / 视频播放器时：此视频使用 SDR），{Shortcut('O')} HDR 覆盖。");
-                if (!_hotkeys.Registered)
-                    _engine.Log("INFO", $"{Shortcut('H')} / {Shortcut('I')} 正被其他程序占用 – 改用键盘轮询。");
-                if (!_hotkeys.OverrideRegistered)
-                    _engine.Log("INFO", $"{Shortcut('O')} 正被其他程序占用 – 改用键盘轮询。");
-
-            }
-            catch (Exception ex)
-            {
-                _engine.PollHotkeys = true;
-                _engine.PollOverrideHotkey = true;
-                _engine.Log("ERROR", $"无法注册快捷键（{ex.Message}）– 改用键盘轮询。");
-            }
-        }
-
-        // ---- manual override (tray menu + shortcut) ----
+        // ---- manual override (tray menu) ----
         private void SetOverride(HdrOverride mode, TimeSpan? duration)
         {
             _engine.SetOverride(mode, duration);
@@ -144,19 +100,6 @@ namespace SmartHdrManager
         {
             var s = _engine.Status;
             return (_engine.OverrideMode, s.OverrideRemainingMs >= 0);
-        }
-
-        private void OnOverrideHotkey()
-        {
-            var mode = _engine.CycleOverride();
-            System.Media.SystemSounds.Asterisk.Play();
-            _tray.ShowBalloon("HDR 覆盖", mode switch
-            {
-                HdrOverride.ForceHdr => $"已强制开启 HDR，直到您手动关闭（再次按 {Shortcut('O')}：SDR）。",
-                HdrOverride.ForceSdr => $"已强制使用 SDR，直到您手动关闭（再次按 {Shortcut('O')}：自动）。",
-                _ => "已恢复自动 HDR 切换。"
-            });
-            if (_form != null && !_form.IsDisposed && _form.Visible) _form.RefreshView();
         }
 
         // No notification when the window goes to the tray (2.6): the tray icon itself shows that the app still runs
@@ -248,7 +191,6 @@ namespace SmartHdrManager
             _timer.Stop();
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-            _hotkeys?.Dispose();
             _engine.Stop();
 
             if (_form != null && !_form.IsDisposed)

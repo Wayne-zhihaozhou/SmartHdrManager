@@ -50,10 +50,6 @@ namespace SmartHdrManager
         // Games tab: also list programs from the drive scan that are not in a game library
         public bool ShowOtherPrograms { get; set; } = false;
 
-        // Keyboard shortcuts: "WinAlt" (default, never collides with AltGr typing), "CtrlAlt" or "Off"
-        public string HotkeyModifier { get; set; } = HotkeySettings.WinAlt;
-
-
         // ---- v2.5.2 ----
         // Learned launchers: launcher process -> the game process(es) it started (e.g. "redprelauncher" -> "witcher3").
         // Filled automatically when a watched game closes within seconds and a program from the same folder takes over.
@@ -62,7 +58,7 @@ namespace SmartHdrManager
         // Games that closed within seconds after HDR was switched on for them (possible crash, e.g. with NVIDIA RTX HDR)
         public Dictionary<string, int> QuickExitCounts { get; set; } = new();
 
-        // Full exe paths of programs added by hand or by hotkey (for their icons in the Games tab)
+        // Full exe paths of programs added by hand (for their icons in the Games tab)
         public Dictionary<string, string> ProgramPaths { get; set; } = new();
 
         public bool EnableHdrOnProcessStart { get; set; } = true;
@@ -287,35 +283,6 @@ namespace SmartHdrManager
         public List<string> Processes { get; set; } = new();    // process names (exe without .exe, lower case)
         public string? ExePath { get; set; }                    // main exe, used for the icon
         public int ScanVersion { get; set; }                    // GameLibraryScanner.CurrentScanVersion when it was detected
-    }
-
-    /// <summary>
-    /// Keyboard shortcut settings. Ctrl+Alt is the same as AltGr on many keyboard layouts (e.g. AltGr+O types "ó" on a
-    /// Polish keyboard), so global Ctrl+Alt shortcuts can block typing; Win+Alt never does and is the default.
-    /// </summary>
-    public static class HotkeySettings
-    {
-        public const string WinAlt = "WinAlt";
-        public const string CtrlAlt = "CtrlAlt";
-        public const string Off = "Off";
-
-        public const uint MOD_ALT = 0x0001, MOD_CONTROL = 0x0002, MOD_WIN = 0x0008;
-
-        public static string Normalize(string? mode) =>
-            string.Equals(mode, CtrlAlt, StringComparison.OrdinalIgnoreCase) ? CtrlAlt
-            : string.Equals(mode, Off, StringComparison.OrdinalIgnoreCase) ? Off
-            : WinAlt;
-
-        public static uint ModifierFlags(string mode) =>
-            Normalize(mode) == CtrlAlt ? MOD_CONTROL | MOD_ALT : MOD_WIN | MOD_ALT;
-
-        /// <summary>"Win+Alt+O", "Ctrl+Alt+O", or "" when shortcuts are off.</summary>
-        public static string Describe(string mode, char key) => Normalize(mode) switch
-        {
-            CtrlAlt => $"Ctrl+Alt+{key}",
-            Off => string.Empty,
-            _ => $"Win+Alt+{key}"
-        };
     }
 
     /// <summary>
@@ -1289,33 +1256,8 @@ namespace SmartHdrManager
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder strText, int maxCount);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+        private const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
         [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
-        [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
-
-        private const uint MONITOR_DEFAULTTONEAREST = 2;
-        private const int VK_CONTROL = 0x11;
-        private const int VK_MENU = 0x12; // ALT key
-        private const int VK_H = 0x48;
-        private const int VK_I = 0x49;
-
-        private const int VK_LWIN = 0x5B, VK_RWIN = 0x5C;
-
-        private static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
-
-        /// <summary>Polling fallback (only used if RegisterHotKey failed): modifier combination + key held down.</summary>
-        public static bool IsHotkeyPressed(string mode, int vk)
-        {
-            switch (HotkeySettings.Normalize(mode))
-            {
-                case HotkeySettings.Off:
-                    return false;
-                case HotkeySettings.CtrlAlt:
-                    return Down(VK_CONTROL) && Down(VK_MENU) && Down(vk);
-                default:
-                    return (Down(VK_LWIN) || Down(VK_RWIN)) && Down(VK_MENU) && Down(vk);
-            }
-        }
-
         [ThreadStatic] private static StringBuilder? _titleBuffer;
         private static readonly object _pidLock = new();
         private static IntPtr _cachedHwnd;

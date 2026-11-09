@@ -91,10 +91,6 @@ namespace SmartHdrManager
         public volatile bool Paused;
         public EngineStatus Status { get; private set; } = new();
 
-        /// <summary>True while hotkeys must be polled (only if RegisterHotKey failed).</summary>
-        public volatile bool PollHotkeys = true;          // the H / I shortcuts
-        public volatile bool PollOverrideHotkey = true;   // the override shortcut
-
         private Thread? _thread;
         private volatile bool _stop;
         private readonly AutoResetEvent _wake = new(false);
@@ -109,7 +105,6 @@ namespace SmartHdrManager
             public readonly bool EnableOnProcessStart, ReloadProfile, RefreshApps;
             public readonly int FallbackSeconds, TickMs;
             public readonly MonitorFilter Monitors;
-            public readonly string HotkeyMode;
             public readonly Dictionary<string, (string[] Folders, string[] Exes)> GameFolders;
 
             public Snapshot(AppConfig c)
@@ -119,7 +114,6 @@ namespace SmartHdrManager
                 ReloadProfile = c.ReloadColorProfileAfterSdr;
                 RefreshApps = c.RefreshAppsAfterSdr;
                 Monitors = new MonitorFilter(c.OnlyPrimaryMonitor, c.SelectedMonitors);
-                HotkeyMode = HotkeySettings.Normalize(c.HotkeyModifier);
                 EnableOnProcessStart = c.EnableHdrOnProcessStart;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
                 TickMs = Math.Clamp(c.ProcessScanIntervalMs, 50, 1000);
@@ -272,7 +266,6 @@ namespace SmartHdrManager
         private long _lastAttemptMs = long.MinValue / 2;
         private long _cooldownUntilMs;
         private int _consecutiveFailures;
-        private long _lastPolledHotkeyMs = long.MinValue / 2;
 
         // ---- in-memory log ring buffer (Log tab) + file log ----
         private readonly object _logLock = new();
@@ -675,7 +668,7 @@ namespace SmartHdrManager
             }
         }
 
-        /// <summary>Runs an action on the engine thread (used for hotkeys, so all display switching stays on one thread).</summary>
+        /// <summary>Runs an action on the engine thread (all display switching stays on one thread).</summary>
         public void Post(Action action)
         {
             _posted.Enqueue(action);
@@ -711,18 +704,6 @@ namespace SmartHdrManager
             Interlocked.Exchange(ref _forceHdrQuery, 1);
             _wake.Set();
         }
-
-        public void HotkeyAddCurrent() => Post(() =>
-        {
-            var (p, _, _) = WindowDetector.GetActiveWindowState();
-            AddGame(p, fromHotkey: true, WindowDetector.GetForegroundExePath());
-        });
-
-        public void HotkeyIgnoreCurrent() => Post(() =>
-        {
-            var (p, _, _) = WindowDetector.GetActiveWindowState();
-            IgnoreGame(p, fromHotkey: true);
-        });
 
         private void Run()
         {
@@ -782,8 +763,6 @@ namespace SmartHdrManager
                 _lastSnapshot = s;
                 _nextProcessScanMs = 0;
             }
-
-            if ((PollHotkeys || PollOverrideHotkey) && s.HotkeyMode != HotkeySettings.Off) PollHotkeysFallback(now, s.HotkeyMode);
 
             var (procName, title, isFullscreen, procId) = WindowDetector.GetActiveWindowInfo();
             _foregroundProcess = procName;
@@ -970,29 +949,6 @@ namespace SmartHdrManager
             }
             _queriedMonitors = target;
             _nextHdrQueryMs = now + HdrRequeryIntervalMs;
-        }
-
-        private void PollHotkeysFallback(long now, string mode)
-        {
-            if (now - _lastPolledHotkeyMs < 2000) return;
-
-            if (PollHotkeys && WindowDetector.IsHotkeyPressed(mode, 0x48))          // H
-            {
-                _lastPolledHotkeyMs = now;
-                var (p, _, _) = WindowDetector.GetActiveWindowState();
-                AddGame(p, fromHotkey: true, WindowDetector.GetForegroundExePath());
-            }
-            else if (PollHotkeys && WindowDetector.IsHotkeyPressed(mode, 0x49))     // I
-            {
-                _lastPolledHotkeyMs = now;
-                var (p, _, _) = WindowDetector.GetActiveWindowState();
-                IgnoreGame(p, fromHotkey: true);
-            }
-            else if (PollOverrideHotkey && WindowDetector.IsHotkeyPressed(mode, 0x4F))   // O
-            {
-                _lastPolledHotkeyMs = now;
-                CycleOverride();
-            }
         }
 
         private void Decide(Snapshot s, long now, string procName, string title, bool isFullscreen)
@@ -2259,8 +2215,7 @@ namespace SmartHdrManager
             _ => "视频按 设置 › 视频 的配置"
         };
 
-        /// <summary>fromHotkey = true must only be used on the engine thread (it switches HDR immediately).</summary>
-        public bool AddGame(string procName, bool fromHotkey, string? exePath = null)
+        public bool AddGame(string procName, string? exePath = null)
         {
             if (string.IsNullOrWhiteSpace(procName) || procName == "explorer" || procName == "smarthdrmanager")
             {
@@ -2295,16 +2250,12 @@ namespace SmartHdrManager
                 Save();
             }
 
-            if (fromHotkey)
-            {
-                System.Media.SystemSounds.Asterisk.Play();
-                TurnHdrOn($"'{procName}' 通过快捷键添加", GetSnapshot().Monitors);
-            }
+            TurnHdrOn($"'{procName}' 被添加", GetSnapshot().Monitors);
             return true;
         }
 
-        /// <summary>fromHotkey = true must only be used on the engine thread (it switches HDR immediately).</summary>
-        public void IgnoreGame(string procName, bool fromHotkey)
+        /// <summary>Adds a program to the ignore list.</summary>
+        public void IgnoreGame(string procName)
         {
             if (string.IsNullOrWhiteSpace(procName) || procName == "explorer") return;
             procName = procName.ToLowerInvariant();
@@ -2321,11 +2272,7 @@ namespace SmartHdrManager
             }
             Log("LIST", $"- '{procName}' 将从不使用 HDR（撤销：设置 › 从不 HDR 的游戏，或在游戏中搜索）");
 
-            if (fromHotkey)
-            {
-                System.Media.SystemSounds.Hand.Play();
-                TurnHdrOff($"'{procName}' 通过快捷键排除", GetSnapshot().Monitors, reload);
-            }
+            TurnHdrOff($"'{procName}' 被排除", GetSnapshot().Monitors, reload);
         }
 
         /// <summary>True while a known HDR game runs (or HDR is still held for one) or any app is full-screen in front.</summary>
@@ -2417,8 +2364,6 @@ namespace SmartHdrManager
             foreach (var kv in c.ProgramPaths ?? new Dictionary<string, string>())
                 if (!string.IsNullOrEmpty(kv.Value)) paths[kv.Key] = kv.Value;
             c.ProgramPaths = paths;
-
-            c.HotkeyModifier = HotkeySettings.Normalize(c.HotkeyModifier);
 
             c.SdrFallbackDelaySeconds = Math.Clamp(c.SdrFallbackDelaySeconds, 0, 30);
             foreach (var g in c.LibraryGames) g.Processes ??= new List<string>();

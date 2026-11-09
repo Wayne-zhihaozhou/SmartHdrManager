@@ -26,8 +26,7 @@ namespace SmartHdrManager
         private bool _syncing;
 
         public TrayAndStartupManager(Action openMainWindow, Action<bool> setPaused, Action exit,
-                                     Action<HdrOverride, TimeSpan?> setOverride, Func<(HdrOverride Mode, bool Timed)> getOverride,
-                                     Func<string> overrideShortcut)
+                                     Action<HdrOverride, TimeSpan?> setOverride, Func<(HdrOverride Mode, bool Timed)> getOverride)
         {
             var openItem = new ToolStripMenuItem("打开 Smart HDR Manager") { Font = new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) };
             openItem.Click += (_, _) => openMainWindow();
@@ -50,14 +49,13 @@ namespace SmartHdrManager
 
             var renderer = new DarkMenuRenderer();
 
-            // Manual override submenu (also: the override shortcut, Win+Alt+O by default, cycles automatic -> HDR on -> SDR -> automatic)
+            // Manual override submenu (cycles automatic -> HDR on -> SDR -> automatic)
             var overrideMenu = new ToolStripMenuItem("HDR 覆盖");
             var autoItem = new ToolStripMenuItem("自动（无覆盖）");
             var hdrHour = new ToolStripMenuItem("HDR 开启 1 小时");
             var hdrUntil = new ToolStripMenuItem("HDR 开启直至恢复");
             var sdrHour = new ToolStripMenuItem("SDR 1 小时");
             var sdrUntil = new ToolStripMenuItem("SDR 直至恢复");
-            var hotkeyHint = new ToolStripMenuItem("快捷键") { Enabled = false };
             autoItem.Click += (_, _) => setOverride(HdrOverride.None, null);
             hdrHour.Click += (_, _) => setOverride(HdrOverride.ForceHdr, TimeSpan.FromHours(1));
             hdrUntil.Click += (_, _) => setOverride(HdrOverride.ForceHdr, null);
@@ -65,7 +63,7 @@ namespace SmartHdrManager
             sdrUntil.Click += (_, _) => setOverride(HdrOverride.ForceSdr, null);
             overrideMenu.DropDownItems.AddRange(new ToolStripItem[]
             {
-                autoItem, new ToolStripSeparator(), hdrHour, hdrUntil, sdrHour, sdrUntil, new ToolStripSeparator(), hotkeyHint
+                autoItem, new ToolStripSeparator(), hdrHour, hdrUntil, sdrHour, sdrUntil
             });
             overrideMenu.DropDown.Renderer = renderer;
             overrideMenu.DropDown.BackColor = Theme.Surface;
@@ -73,8 +71,6 @@ namespace SmartHdrManager
             overrideMenu.DropDownOpening += (_, _) =>
             {
                 var (mode, timed) = getOverride();
-                string shortcut = overrideShortcut();
-                hotkeyHint.Text = shortcut.Length > 0 ? $"快捷键: {shortcut}" : "未设置快捷键";
                 autoItem.Checked = mode == HdrOverride.None;
                 hdrHour.Checked = mode == HdrOverride.ForceHdr && timed;
                 hdrUntil.Checked = mode == HdrOverride.ForceHdr && !timed;
@@ -230,112 +226,7 @@ namespace SmartHdrManager
         }
     }
 
-    // =========================================================================
-    // GLOBAL HOTKEYS (Win+Alt or Ctrl+Alt + H / I / O) via RegisterHotKey
-    // Event-driven instead of polling the keyboard 10x per second, and never misses a short key press.
-    // Lives on the UI thread (a hidden message-only window); the actions are posted to the engine thread.
-    // If another program already owns one of the shortcuts, registration fails and the engine falls back to polling.
-    // =========================================================================
-    public sealed class GlobalHotkeys : NativeWindow, IDisposable
-    {
-        private const int WM_HOTKEY = 0x0312;
-        private const uint MOD_NOREPEAT = 0x4000;
-        private const uint VK_H = 0x48, VK_I = 0x49, VK_O = 0x4F;
-        private const int ID_ADD = 1, ID_IGNORE = 2, ID_OVERRIDE = 3;
-        private static readonly IntPtr HWND_MESSAGE = new IntPtr(-3);
 
-        [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-        [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-        private readonly Action _onAdd;
-        private readonly Action _onIgnore;
-        private readonly Action _onOverride;
-
-        public bool Registered { get; }           // H and I shortcuts
-        public bool OverrideRegistered { get; }   // O shortcut (registered on its own, so a conflict only affects it)
-
-        /// <param name="modifiers">HotkeySettings.ModifierFlags(...): Win+Alt (default) or Ctrl+Alt</param>
-        public GlobalHotkeys(uint modifiers, Action onAdd, Action onIgnore, Action onOverride)
-        {
-            _onAdd = onAdd;
-            _onIgnore = onIgnore;
-            _onOverride = onOverride;
-
-            CreateHandle(new CreateParams { Parent = HWND_MESSAGE });
-
-            bool add = RegisterHotKey(Handle, ID_ADD, modifiers | MOD_NOREPEAT, VK_H);
-            bool ignore = RegisterHotKey(Handle, ID_IGNORE, modifiers | MOD_NOREPEAT, VK_I);
-            OverrideRegistered = RegisterHotKey(Handle, ID_OVERRIDE, modifiers | MOD_NOREPEAT, VK_O);
-
-            Registered = add && ignore;
-            if (!Registered)
-            {
-                // H and I together, so the polling fallback handles both consistently
-                if (add) UnregisterHotKey(Handle, ID_ADD);
-                if (ignore) UnregisterHotKey(Handle, ID_IGNORE);
-            }
-        }
-
-        private bool RegisterTvHotkeys(uint modifiers)
-        {
-            string combo = ModifierText(modifiers);
-            HdrEngine.WriteFileLog($"[TV-HOTKEY] register begin mods=0x{modifiers:X} combo={combo} handle={Handle}");
-            bool allOk = true;
-            allOk &= RegisterTvKey(2001, modifiers, 0x26, combo, "step_up");
-            allOk &= RegisterTvKey(2002, modifiers, 0x28, combo, "step_down");
-            for (int i = 0; i <= 9; i++)
-            {
-                RegisterTvKey(2010 + i, modifiers, (uint)(0x30 + i), combo, $"set_{i * 10}");
-            }
-            HdrEngine.WriteFileLog($"[TV-HOTKEY] register end allOk={allOk} combo={combo}");
-            return allOk;
-        }
-
-        private bool RegisterTvKey(int id, uint modifiers, uint vk, string combo, string name)
-        {
-            bool ok = RegisterHotKey(Handle, id, modifiers | MOD_NOREPEAT, vk);
-            if (ok)
-                HdrEngine.WriteFileLog($"[TV-HOTKEY] ok id={id} key={combo}vk=0x{vk:X2} name={name}");
-            else
-                HdrEngine.WriteFileLog($"[TV-HOTKEY] FAIL id={id} key={combo}vk=0x{vk:X2} name={name} err={Marshal.GetLastWin32Error()}");
-            return ok;
-        }
-
-        private static string ModifierText(uint modifiers)
-        {
-            string s = string.Empty;
-            if ((modifiers & HotkeySettings.MOD_WIN) != 0) s += "Win+";
-            if ((modifiers & HotkeySettings.MOD_CONTROL) != 0) s += "Ctrl+";
-            if ((modifiers & HotkeySettings.MOD_ALT) != 0) s += "Alt+";
-            return s.Length == 0 ? "None+" : s;
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == WM_HOTKEY)
-            {
-                int id = m.WParam.ToInt32();
-                if (id == ID_ADD) _onAdd();
-                else if (id == ID_IGNORE) _onIgnore();
-                else if (id == ID_OVERRIDE) _onOverride();
-                else HdrEngine.WriteFileLog($"[HOTKEY] unmapped wm_hotkey id={id}");
-                return;
-            }
-            base.WndProc(ref m);
-        }
-
-        public void Dispose()
-        {
-            if (Handle == IntPtr.Zero) return;
-            if (Registered)
-            {
-                UnregisterHotKey(Handle, ID_ADD);
-                UnregisterHotKey(Handle, ID_IGNORE);
-            }
-            if (OverrideRegistered) UnregisterHotKey(Handle, ID_OVERRIDE);
-            DestroyHandle();
-        }
-    }
 
     // =========================================================================
     // OPTIONAL: hide a *console* window from the taskbar and Alt-Tab.
