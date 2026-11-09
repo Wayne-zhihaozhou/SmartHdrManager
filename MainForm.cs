@@ -40,8 +40,6 @@ namespace SmartHdrManager
         // Games page
         private readonly TextBox _search = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
         private readonly GameList _games = new() { Dock = DockStyle.Fill };
-        private readonly Label _gamesCount = new() { AutoSize = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(12, 0, 2, 0) };
-
         // Settings page
         private readonly ToggleSwitch _swAutostart = new();
         private ToggleSwitch _swPauseAutomation = null!;
@@ -49,11 +47,8 @@ namespace SmartHdrManager
         private Label _activityLabel = null!;
         private Panel _activityPanel = null!;
 
-        private readonly ToggleSwitch _swShowOthers = new();
-
-        private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
-
         private readonly ToggleSwitch _swColorProfile = new();
+        private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
         private readonly ToggleSwitch _swRefreshApps = new();
 
         // Log page
@@ -135,7 +130,6 @@ namespace SmartHdrManager
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) _engine.LibraryChanged -= OnLibraryChanged;
             base.Dispose(disposing);
             if (disposing)
             {
@@ -165,36 +159,21 @@ namespace SmartHdrManager
         {
             var page = new TableLayoutPanel { ColumnCount = 1, RowCount = 4, Margin = new Padding(0) };
             page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            page.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // hint + count
+            page.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));    // hint
             page.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));    // search
             page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));    // list
             page.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));    // buttons
 
-            // Hint + count
-            var hintRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Margin = new Padding(0) };
+            // Hint
+            var hintRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = new Padding(0) };
             hintRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            hintRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            hintRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            hintRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             var hint = new Label
             {
                 Text = "开启某游戏后，其运行期间将使用 HDR",
                 Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = false, AutoEllipsis = true, Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(2, 0, 0, 0)
             };
-            var othersLabel = new Label
-            {
-                Text = "其他程序", Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = true, Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(16, 0, 6, 0)
-            };
-            _swShowOthers.Anchor = AnchorStyles.Right;
-            _swShowOthers.Margin = new Padding(0);
-            _toolTip.SetToolTip(_swShowOthers, "同时列出磁盘扫描发现但不在游戏库中的程序");
-            _toolTip.SetToolTip(othersLabel, "同时列出磁盘扫描发现但不在游戏库中的程序");
             hintRow.Controls.Add(hint, 0, 0);
-            hintRow.Controls.Add(_gamesCount, 1, 0);
-            hintRow.Controls.Add(othersLabel, 2, 0);
-            hintRow.Controls.Add(_swShowOthers, 3, 0);
             page.Controls.Add(hintRow, 0, 0);
 
             // Search box: rounded field with a search icon
@@ -235,11 +214,14 @@ namespace SmartHdrManager
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 12, 0, 0), Padding = new Padding(0) };
             var addExe = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加程序", AutoSize = true };
             var addRunning = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加正在运行", AutoSize = true };
+            var removeBtn = new ModernButton { Glyph = Theme.GlyphDelete, Text = "移除", AutoSize = true };
             _toolTip.SetToolTip(addExe, "选择游戏的 .exe 文件");
             _toolTip.SetToolTip(addRunning, "从正在运行的程序中选择");
+            _toolTip.SetToolTip(removeBtn, "移除选中的游戏或程序");
             addExe.Click += (_, _) => OnAddExe();
             addRunning.Click += (_, _) => OnAddRunning();
-            foreach (var b in new Control[] { addExe, addRunning })
+            removeBtn.Click += (_, _) => OnRemoveGame();
+            foreach (var b in new Control[] { addExe, addRunning, removeBtn })
             {
                 b.Margin = new Padding(0, 0, 8, 0);
                 buttons.Controls.Add(b);
@@ -560,16 +542,8 @@ namespace SmartHdrManager
             {
                 _engine.SetGameHdr(item.Processes, item.Hdr, item.Name);
                 BeginInvoke(new Action(RebuildGames));
-                UpdateGamesCount();
             };
-            _engine.LibraryChanged += OnLibraryChanged;
             // _games.AnimationStats reports the scroll frame rate (diagnostics) – not logged in releases: it filled the log
-            _swShowOthers.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                _engine.Update(c => c.ShowOtherPrograms = _swShowOthers.Checked);
-                RebuildGames();
-            };
             foreach (var (_, sw) in _monitorSwitches)
                 sw.CheckedChanged += (_, _) => OnMonitorToggled(sw);
 
@@ -779,8 +753,7 @@ namespace SmartHdrManager
         private void RebuildGames()
         {
             string filter = _search.Text.Trim();
-            bool showOthers = _engine.Read(c => c.ShowOtherPrograms);
-            var items = _engine.GetGameRows(showOthers)
+            var items = _engine.GetGameRows()
                 .Where(r => filter.Length == 0 ||
                             r.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
                             r.Subtitle.Contains(filter, StringComparison.OrdinalIgnoreCase))
@@ -789,14 +762,6 @@ namespace SmartHdrManager
 
             // Keeps the selection and scroll position
             _games.SetItems(items, _games.SelectedItem?.Key);
-            UpdateGamesCount();
-        }
-
-        private void UpdateGamesCount()
-        {
-            if (IsDisposed) return;
-            int enabled = _games.Items.Count(i => i.Hdr);
-            _gamesCount.Text = $"{enabled} 个开启 HDR · 显示 {_games.Items.Count} 个";
         }
 
         private void OnAddExe()
@@ -823,38 +788,6 @@ namespace SmartHdrManager
             RebuildGames();
         }
 
-        private void OnLibraryChanged(object? sender, EventArgs e)
-        {
-            // Raised on a background thread
-            if (IsDisposed || !IsHandleCreated) return;
-            try { BeginInvoke(new Action(() => { if (!IsDisposed) RebuildGames(); })); } catch { }
-        }
-
-        // ------------------------------------------------------------------
-        // ---- monitors ----
-        private void OnMonitorToggled(ToggleSwitch changed)
-        {
-            if (_loadingSettings) return;
-
-            var selected = _monitorSwitches.Where(m => m.Switch.Checked && m.Monitor.HdrSupported).Select(m => m.Monitor.DevicePath).ToList();
-            if (selected.Count == 0)
-            {
-                MessageBox.Show(this, "至少要保留一个支持 HDR 的显示器被选中。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                _loadingSettings = true;
-                changed.Checked = true;
-                _loadingSettings = false;
-                return;
-            }
-
-            var connected = new HashSet<string>(_monitorSwitches.Select(m => m.Monitor.DevicePath), StringComparer.OrdinalIgnoreCase);
-            _engine.Update(c =>
-            {
-                // keep selections of monitors that are not connected right now
-                var keepDisconnected = (c.SelectedMonitors ?? new List<string>()).Where(p => !connected.Contains(p));
-                c.SelectedMonitors = keepDisconnected.Concat(selected).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            });
-        }
-
         private (string Name, string? Path)? PickRunningProcess()
         {
             var rows = new List<(string Name, string Title, string? Path)>();
@@ -864,7 +797,7 @@ namespace SmartHdrManager
                 {
                     if (p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrWhiteSpace(p.MainWindowTitle))
                     {
-                        string? path = ProcessPaths.TryGetExePath(p.Id);   // limited access only, never reads process memory
+                        string? path = ProcessPaths.TryGetExePath(p.Id);
                         rows.Add((p.ProcessName.ToLowerInvariant(), p.MainWindowTitle, path));
                     }
                 }
@@ -907,6 +840,49 @@ namespace SmartHdrManager
             return (rows[list.SelectedIndex].Name, rows[list.SelectedIndex].Path);
         }
 
+        private void OnRemoveGame()
+        {
+            var selectedItem = _games.SelectedItem;
+            if (selectedItem == null)
+            {
+                MessageBox.Show(this, "请先选择一个游戏或程序。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var answer = MessageBox.Show(this,
+                $"是否移除 '{selectedItem.Name}'？\n\n移除后，该游戏将不再自动触发 HDR。",
+                "移除游戏", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes) return;
+
+            _engine.RemoveGame(selectedItem.Key, selectedItem.Processes);
+            RebuildGames();
+        }
+
+        // ------------------------------------------------------------------
+        // ---- monitors ----
+        private void OnMonitorToggled(ToggleSwitch changed)
+        {
+            if (_loadingSettings) return;
+
+            var selected = _monitorSwitches.Where(m => m.Switch.Checked && m.Monitor.HdrSupported).Select(m => m.Monitor.DevicePath).ToList();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show(this, "至少要保留一个支持 HDR 的显示器被选中。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _loadingSettings = true;
+                changed.Checked = true;
+                _loadingSettings = false;
+                return;
+            }
+
+            var connected = new HashSet<string>(_monitorSwitches.Select(m => m.Monitor.DevicePath), StringComparer.OrdinalIgnoreCase);
+            _engine.Update(c =>
+            {
+                // keep selections of monitors that are not connected right now
+                var keepDisconnected = (c.SelectedMonitors ?? new List<string>()).Where(p => !connected.Contains(p));
+                c.SelectedMonitors = keepDisconnected.Concat(selected).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            });
+        }
+
         // ------------------------------------------------------------------
         // Settings page
         // ------------------------------------------------------------------
@@ -917,7 +893,6 @@ namespace SmartHdrManager
             {
                 _swPauseAutomation!.Checked = _engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
-                _swShowOthers.Checked = _engine.Read(c => c.ShowOtherPrograms);
 
                 // Monitors: explicit selection if set, otherwise "primary only" / "all HDR monitors"
                 var selection = _engine.Read(c => (c.SelectedMonitors ?? new List<string>()).ToList());

@@ -33,9 +33,6 @@ namespace SmartHdrManager
         // Active HDR list: Only games in this list will automatically trigger HDR (empty: the user picks the games)
         public List<string> HdrGamesAndApps { get; set; } = new();
 
-        // Catalog of all games found on drives (selectable via menu [G] before starting a game)
-        public List<string> DiscoveredGames { get; set; } = new();
-
         // After leaving HDR, tell open windows that the display changed so apps like Chrome stop rendering
         // with their cached HDR brightness (which makes them look dimmed until minimized/restored).
         public bool RefreshAppsAfterSdr { get; set; } = true;
@@ -43,11 +40,8 @@ namespace SmartHdrManager
         // Monitors to switch, by Windows device path. Empty = use OnlyPrimaryMonitor (primary only / all monitors).
         public List<string> SelectedMonitors { get; set; } = new();
 
-        // Games found in the Steam / Epic / GOG / Xbox libraries (refreshed at startup and with "Scan drives")
+        // Games found in the Steam / Epic / GOG / Xbox libraries
         public List<LibraryGame> LibraryGames { get; set; } = new();
-
-        // Games tab: also list programs from the drive scan that are not in a game library
-        public bool ShowOtherPrograms { get; set; } = false;
 
         // ---- v2.5.2 ----
         // Learned launchers: launcher process -> the game process(es) it started (e.g. "redprelauncher" -> "witcher3").
@@ -277,7 +271,7 @@ namespace SmartHdrManager
         public string Source { get; set; } = string.Empty;      // Steam / Epic / GOG / Xbox / Ubisoft / EA app / Rockstar / Battle.net / Amazon Games / itch.io / Riot Games / Heroic (…) / Game Bar
         public List<string> Processes { get; set; } = new();    // process names (exe without .exe, lower case)
         public string? ExePath { get; set; }                    // main exe, used for the icon
-        public int ScanVersion { get; set; }                    // GameLibraryScanner.CurrentScanVersion when it was detected
+        public int ScanVersion { get; set; }                    // version of the scan when this game was detected
     }
 
     /// <summary>
@@ -415,188 +409,7 @@ namespace SmartHdrManager
     }
 
     // =========================================================================
-    // 3. AUTOMATIC GAME SCANNER FOR ALL DRIVES
-    // =========================================================================
-    public static class GameScanner
-    {
-        private static readonly string[] BlacklistSubstrings = new[]
-        {
-            "unins", "setup", "redist", "vcredist", "dxsetup", "directx",
-            "crash", "report", "handler", "launcher", "eac", "easyanticheat",
-            "battleye", "beservice", "beclient", "cefprocess", "webhelper",
-            "benchmark", "config", "updater", "patcher", "cleanup", "touchup",
-            "activation", "installer", "dotnet", "physx", "ue4prereq", "ueprereq",
-            "steamworks", "eosoverlay", "gamingservices", "unitycrashhandler"
-        };
-
-        /// <summary>
-        /// Scans all drives and adds found executables to DiscoveredGames
-        /// so the user can conveniently select which ones should use HDR via menu [G].
-        /// </summary>
-        public static int ScanAndAddGames(AppConfig config, Dictionary<string, string>? foundPaths = null)
-        {
-            var searchRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var folder in config.CustomGameFolders)
-            {
-                if (Directory.Exists(folder)) searchRoots.Add(folder);
-            }
-
-            foreach (var steamLib in GetSteamLibraryDirectories())
-            {
-                searchRoots.Add(steamLib);
-            }
-
-            string[] commonFolderNames = new[]
-            {
-                @"SteamLibrary\steamapps\common",
-                @"Program Files (x86)\Steam\steamapps\common",
-                @"Program Files\Epic Games",
-                @"Epic Games",
-                @"Games",
-                @"Spiele",
-                @"XboxGames",
-                @"GOG Games",
-                @"Program Files (x86)\GOG Galaxy\Games",
-                @"Program Files\EA Games",
-                @"EA Games",
-                @"Ubisoft Game Launcher\games",
-                @"Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games",
-                @"Battle.net"
-            };
-
-            foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady && d.DriveType == DriveType.Fixed))
-            {
-                foreach (var relPath in commonFolderNames)
-                {
-                    string fullPath = Path.Combine(drive.RootDirectory.FullName, relPath);
-                    if (Directory.Exists(fullPath))
-                    {
-                        searchRoots.Add(fullPath);
-                    }
-                }
-            }
-
-            var discoveredSet = new HashSet<string>(config.DiscoveredGames, StringComparer.OrdinalIgnoreCase);
-            int newlyDiscoveredCount = 0;
-
-            foreach (var root in searchRoots)
-            {
-                try
-                {
-                    foreach (var gameDir in Directory.EnumerateDirectories(root))
-                    {
-                        string dirName = Path.GetFileName(gameDir);
-                        if (dirName.Contains("Steamworks", StringComparison.OrdinalIgnoreCase) ||
-                            dirName.Contains("Redist", StringComparison.OrdinalIgnoreCase))
-                            continue;
-
-                        foreach (var exePath in EnumerateExeFilesSafe(gameDir, maxDepth: 4))
-                        {
-                            string exeName = Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant();
-                            if (!IsValidGameExecutable(exePath, exeName)) continue;
-
-                            // Remember where each program lives (for its icon in the Games tab)
-                            if (foundPaths != null && !foundPaths.ContainsKey(exeName))
-                                foundPaths[exeName] = exePath;
-
-                            if (!discoveredSet.Contains(exeName))
-                            {
-                                config.DiscoveredGames.Add(exeName);
-                                discoveredSet.Add(exeName);
-                                newlyDiscoveredCount++;
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            if (newlyDiscoveredCount > 0)
-            {
-                config.DiscoveredGames.Sort();
-            }
-
-            return newlyDiscoveredCount;
-        }
-
-        private static IEnumerable<string> GetSteamLibraryDirectories()
-        {
-            var results = new List<string>();
-            try
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam");
-                string? steamPath = key?.GetValue("SteamPath") as string;
-                if (!string.IsNullOrEmpty(steamPath))
-                {
-                    steamPath = steamPath.Replace('/', '\\');
-                    string vdfPath = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
-                    if (File.Exists(vdfPath))
-                    {
-                        string content = File.ReadAllText(vdfPath);
-                        var matches = Regex.Matches(content, "\"path\"\\s+\"([^\"]+)\"");
-                        foreach (Match match in matches)
-                        {
-                            string libPath = match.Groups[1].Value.Replace("\\\\", "\\");
-                            string commonPath = Path.Combine(libPath, "steamapps", "common");
-                            if (Directory.Exists(commonPath))
-                            {
-                                results.Add(commonPath);
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-            return results;
-        }
-
-        private static IEnumerable<string> EnumerateExeFilesSafe(string rootPath, int maxDepth)
-        {
-            var results = new List<string>();
-            var dirs = new Stack<(string Path, int Depth)>();
-            dirs.Push((rootPath, 0));
-
-            while (dirs.Count > 0)
-            {
-                var (currentDir, depth) = dirs.Pop();
-                try
-                {
-                    results.AddRange(Directory.GetFiles(currentDir, "*.exe"));
-                    if (depth < maxDepth)
-                    {
-                        foreach (var subDir in Directory.GetDirectories(currentDir))
-                        {
-                            dirs.Push((subDir, depth + 1));
-                        }
-                    }
-                }
-                catch { }
-            }
-            return results;
-        }
-
-        private static bool IsValidGameExecutable(string fullPath, string exeName)
-        {
-            if (exeName.Length < 2) return false;
-            foreach (var badWord in BlacklistSubstrings)
-            {
-                if (exeName.Contains(badWord)) return false;
-            }
-
-            try
-            {
-                var info = new FileInfo(fullPath);
-                if (info.Length < 300 * 1024) return false;
-            }
-            catch { return false; }
-
-            return true;
-        }
-    }
-
-    // =========================================================================
-    // 4. WINDOWS DISPLAYCONFIG API (native HDR control + Primary Monitor Filter)
+    // 3. WINDOWS DISPLAYCONFIG API (native HDR control + Primary Monitor Filter)
     // =========================================================================
     public static class HdrController
     {

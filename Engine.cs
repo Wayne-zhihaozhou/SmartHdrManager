@@ -94,7 +94,6 @@ namespace SmartHdrManager
         private volatile bool _stop;
         private readonly AutoResetEvent _wake = new(false);
         private readonly ConcurrentQueue<Action> _posted = new();
-        private int _scanning;
 
         // ---- precomputed lookup sets, rebuilt only when the configuration changes ----
         private sealed class Snapshot
@@ -301,11 +300,9 @@ namespace SmartHdrManager
                 {
                     ConfigVersion = c.ConfigVersion,
                     HdrGamesAndApps = c.HdrGamesAndApps,
-                    DiscoveredGames = c.DiscoveredGames,
                     LibraryGames = c.LibraryGames,
                     ProgramPaths = c.ProgramPaths,
                     CustomGameFolders = c.CustomGameFolders,
-                    ShowOtherPrograms = c.ShowOtherPrograms,
                     LauncherGames = c.LauncherGames,
                     QuickExitCounts = c.QuickExitCounts
                 };
@@ -330,10 +327,9 @@ namespace SmartHdrManager
 
             if (c.ConfigVersion < 2)
             {
-                var installed = new HashSet<string>(c.DiscoveredGames, Cmp);
+                var installed = new HashSet<string>(c.ProgramPaths.Keys, Cmp);
                 foreach (var g in c.LibraryGames)
                     foreach (var p in g.Processes) installed.Add(p);
-                foreach (var p in c.ProgramPaths.Keys) installed.Add(p);
 
                 foreach (string example in new[] { "cyberpunk2077", "eldenring", "alanwake2" })
                 {
@@ -395,16 +391,6 @@ namespace SmartHdrManager
 
             MonitorsChanged();                             // remember the connected monitors (for display events)
 
-            // Game library (Steam / Epic / GOG / Xbox): quick refresh in the background at every start
-            // (known games reuse their cached executables, so this mostly reads small manifest files)
-            var libraryThread = new Thread(() =>
-            {
-                Thread.Sleep(3000);
-                if (!_stop) RefreshLibrary(fullRescan: false);
-            })
-            { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "GameLibrary" };
-            libraryThread.Start();
-
             _thread = new Thread(Run) { IsBackground = true, Name = "HdrEngine" };
             _thread.Start();
         }
@@ -429,134 +415,6 @@ namespace SmartHdrManager
                 _monitorSignature = signature;
                 return changed;
             }
-        }
-
-        /// <summary>Raised (on a background thread) after the game library was refreshed.</summary>
-        public event EventHandler? LibraryChanged;
-
-        private readonly object _libraryLock = new();
-
-        public void RefreshLibrary(bool fullRescan)
-        {
-            lock (_libraryLock)   // startup refresh, startup scan and the Scan button never run at the same time
-            try
-            {
-                Dictionary<string, LibraryGame>? previous = null;
-                HashSet<string> apps;
-                lock (Sync)
-                {
-                    // Copies: the scan runs outside the lock, while the engine thread may add a learned launcher game
-                    if (!fullRescan)
-                        previous = (Config.LibraryGames ?? new List<LibraryGame>())
-                            .GroupBy(g => g.Id, Cmp).ToDictionary(g => g.Key, g => CopyOf(g.First()), Cmp);
-                    apps = new HashSet<string>((Config.AppRules ?? new Dictionary<string, AppRule>()).Keys, Cmp);   // Apps tab: not games
-                }
-
-                var games = GameLibraryScanner.Scan(previous, msg => Log("SCAN", msg), apps);
-                var knownPaths = GameLibraryScanner.FindKnownExePaths();
-                int iconsFound = 0;
-                lock (Sync)
-                {
-                    MergeLearnedLaunchers(games);
-                    // A Game Bar suggestion for a game process learned from its launcher would list the game twice
-                    var covered = new HashSet<string>(games.Where(g => g.Source != "Game Bar").SelectMany(g => g.Processes), Cmp);
-                    games.RemoveAll(g => g.Source == "Game Bar" && g.Processes.Any(covered.Contains));
-                    CarryOverGameSettings(Config.LibraryGames ?? new List<LibraryGame>(), games);
-                    Config.LibraryGames = games;
-                    InvalidateSnapshot();
-
-                    // Icons for programs outside the libraries (and library games without an exe path):
-                    // take exe locations Windows already knows (Game Bar list, program caches, installed apps)
-                    var wanted = Config.HdrGamesAndApps
-                        .Concat(Config.DiscoveredGames)
-                        .Concat(games.Where(g => g.ExePath == null).SelectMany(g => g.Processes))
-                        .Distinct(Cmp);
-                    foreach (string proc in wanted)
-                    {
-                        bool known = Config.ProgramPaths.TryGetValue(proc, out var current) && File.Exists(current);
-                        if (!known && knownPaths.TryGetValue(proc, out var found))
-                        {
-                            Config.ProgramPaths[proc] = found;
-                            iconsFound++;
-                        }
-                    }
-                    Save();
-                }
-                if (iconsFound > 0) Log("SCAN", $"已为 {iconsFound} 个程序找到程序位置（图标）。");
-                Log("SCAN", $"游戏库：找到 {games.Count} 个游戏（Steam、Epic、GOG、Xbox、Ubisoft、EA、Rockstar、Battle.net、Amazon、itch.io、Riot、Heroic、Game Bar）。");
-                LibraryChanged?.Invoke(this, EventArgs.Empty);
-            }
-            catch (Exception ex)
-            {
-                Log("ERROR", $"无法读取游戏库：{ex.Message}");
-            }
-        }
-
-        private static LibraryGame CopyOf(LibraryGame g) => new()
-        {
-            Id = g.Id, Name = g.Name, Source = g.Source, Processes = new List<string>(g.Processes), ExePath = g.ExePath, ScanVersion = g.ScanVersion
-        };
-
-        /// <summary>Adds the game processes learned from launchers (LauncherGames) to their library games. Caller holds Sync.</summary>
-        private void MergeLearnedLaunchers(List<LibraryGame> games)
-        {
-            var learned = Config.LauncherGames;
-            if (learned == null || learned.Count == 0) return;
-            foreach (var g in games)
-            {
-                foreach (string launcher in g.Processes.ToList())
-                {
-                    if (!learned.TryGetValue(launcher, out var children)) continue;
-                    foreach (string child in children)
-                        if (!g.Processes.Contains(child, Cmp)) g.Processes.Add(child);
-                }
-            }
-        }
-
-        /// <summary>
-        /// A rescan can detect other exes for a game than before (2.5.2: launchers are skipped, several exes per game).
-        /// HDR on/off and the game options are stored per process name, so carry them over to the new names – otherwise
-        /// a game that was turned on would suddenly show as off, plus a stray row for the old launcher. Caller holds Sync.
-        /// </summary>
-        private void CarryOverGameSettings(List<LibraryGame> oldGames, List<LibraryGame> newGames)
-        {
-            var oldById = oldGames.GroupBy(g => g.Id, Cmp).ToDictionary(g => g.Key, g => g.First(), Cmp);
-            var hdr = new HashSet<string>(Config.HdrGamesAndApps, Cmp);
-            var stillUsed = new HashSet<string>(newGames.SelectMany(g => g.Processes), Cmp);
-            bool changed = false;
-
-            foreach (var game in newGames)
-            {
-                if (!oldById.TryGetValue(game.Id, out var old)) continue;
-                var added = game.Processes.Where(p => !old.Processes.Contains(p, Cmp)).ToList();
-                var removed = old.Processes.Where(p => !game.Processes.Contains(p, Cmp)).ToList();
-                if (added.Count == 0 && removed.Count == 0) continue;
-
-                bool wasOn = old.Processes.Any(hdr.Contains);
-                if (wasOn)
-                {
-                    foreach (string p in added)
-                        if (hdr.Add(p)) { Config.HdrGamesAndApps.Add(p); changed = true; }
-
-                    // The old exe (e.g. a launcher) was only in the HDR list because of this game. Keep it if another
-                    // game uses it or it is a learned launcher (it then switches HDR on before the game starts).
-                    foreach (string p in removed)
-                    {
-                        if (stillUsed.Contains(p) || Config.LauncherGames.ContainsKey(p)) continue;
-                        if (Config.HdrGamesAndApps.RemoveAll(n => n.Equals(p, StringComparison.OrdinalIgnoreCase)) > 0)
-                        {
-                            hdr.Remove(p);
-                            changed = true;
-                        }
-                    }
-                }
-
-                Log("SCAN", $"'{game.Name}'：现在监视 {string.Join(", ", game.Processes.Select(p => p + ".exe"))} " +
-                            $"（之前：{string.Join(", ", old.Processes.Select(p => p + ".exe"))}）" +
-                            (wasOn ? " – HDR 设置已保留。" : "。"));
-            }
-
-            if (changed) Config.HdrGamesAndApps.Sort(Cmp);
         }
 
         // ------------------------------------------------------------------
@@ -1403,7 +1261,7 @@ namespace SmartHdrManager
                     foreach (string n in HdrLauncher.GameExeNames(folder))
                     {
                         if (n.Equals(closed, StringComparison.OrdinalIgnoreCase) ||
-                            GameLibraryScanner.IsExcludedExeName(n)) continue;
+                            IsExcludedExeName(n)) continue;
                         names.Add(n);
                     }
                 }
@@ -1455,7 +1313,7 @@ namespace SmartHdrManager
         /// <summary>Launchers (by name, or learned from a game they started) close quickly on purpose.</summary>
         private bool IsLauncher(string process)
         {
-            if (GameLibraryScanner.LooksLikeLauncher(process)) return true;
+            if (LooksLikeLauncher(process)) return true;
             lock (Sync) return Config.LauncherGames.ContainsKey(process);
         }
 
@@ -1465,6 +1323,35 @@ namespace SmartHdrManager
             {
                 if (Config.QuickExitCounts.Remove(game)) Save();
             }
+        }
+
+        private static readonly string[] ExcludedExeParts =
+        {
+            "unins", "uninst", "setup", "install", "redist", "vcredist", "vc_redist", "dxsetup", "directx", "dotnet",
+            "crash", "report", "bugsplat", "sentry", "easyanticheat", "eac_", "battleye", "beservice", "anticheat",
+            "prereq", "cleanup", "touchup", "helper", "updater", "update", "cefprocess", "webhelper", "quicksfv",
+            "dxwebsetup", "physx", "ue4prereq", "ueprereq", "unitycrashhandler", "crs-handler", "cmd", "python", "netfx",
+            "companion", "supporttool", "watchdog", "pbsvc", "punkbuster", "javaw"
+        };
+
+        private static readonly HashSet<string> KnownLaunchers = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "redprelauncher", "redlauncher", "gtavlauncher", "playgtav", "playrdr2", "rdr2launcher", "launcher",
+            "startprotectedgame", "launcherpatcher", "gamelauncher", "bootstrapper", "dowser", "playlan", "ffxivboot", "ffxivboot64", "edlaunch", "runme"
+        };
+
+        private static bool IsExcludedExeName(string name)
+        {
+            foreach (var part in ExcludedExeParts)
+            {
+                if (name.Contains(part, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        private static bool LooksLikeLauncher(string process)
+        {
+            return KnownLaunchers.Contains(process);
         }
 
         /// <summary>Tray notifications from the engine (crash hint). Called by the tray timer on the UI thread.</summary>
@@ -1548,7 +1435,6 @@ namespace SmartHdrManager
                 Save();
             }
             Log("HDR", $"正在跟踪 '{game}'（由 '{launcher}' 启动）。已记住：下次 '{game}' 一启动 HDR 就保持开启。");
-            LibraryChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private static bool IsProcessRunning(string processName)
@@ -1907,19 +1793,14 @@ namespace SmartHdrManager
             return trimmed.ToLowerInvariant();
         }
 
-        public bool IsScanning => Volatile.Read(ref _scanning) == 1;
-
         public string? GetInitialDirectory()
         {
             lock (Sync)
                 return Config.CustomGameFolders.FirstOrDefault(Directory.Exists);
         }
 
-        /// <summary>
-        /// Rows for the Games tab: every library game (real name, source, icon), then programs that are not in a
-        /// library: always the HDR-enabled ones, and the drive-scan results when includeOthers is set.
-        /// </summary>
-        public List<GameRow> GetGameRows(bool includeOthers)
+        /// <summary>Rows for the Games tab: every library game (real name, source, icon).</summary>
+        public List<GameRow> GetGameRows()
         {
             lock (Sync)
             {
@@ -1941,25 +1822,22 @@ namespace SmartHdrManager
                         Name = game.Name,
                         Subtitle = procs.Count > 1 ? $"{game.Source}  ·  {procs[0]}.exe +{procs.Count - 1}" : $"{game.Source}  ·  {procs[0]}.exe",
                         Processes = procs,
-                        // library path, or one learned from the drive scan / a running game (e.g. Xbox games)
+                        // library path, or one learned from a running game (e.g. Xbox games)
                         ExePath = game.ExePath ?? procs.Select(p => paths.TryGetValue(p, out var known) ? known : null)
                                                       .FirstOrDefault(p => p != null),
                         Hdr = procs.Any(hdr.Contains)
                     });
                 }
 
-                var others = (Config.HdrGamesAndApps ?? new List<string>())
-                    .Concat(includeOthers ? Config.DiscoveredGames ?? new List<string>() : new List<string>())
-                    .Distinct(Cmp)
-                    .Where(p => !covered.Contains(p));
-
-                foreach (var proc in others)
+                // Programs added by the user that are not in a library game
+                foreach (var proc in Config.HdrGamesAndApps ?? new List<string>())
                 {
+                    if (covered.Contains(proc)) continue;
                     rows.Add(new GameRow
                     {
                         Key = "proc:" + proc,
                         Name = proc,
-                        Subtitle = hdr.Contains(proc) ? $"程序  ·  {proc}.exe" : $"磁盘扫描发现  ·  {proc}.exe",
+                        Subtitle = $"程序  ·  {proc}.exe",
                         Processes = new List<string> { proc },
                         ExePath = paths.TryGetValue(proc, out var path) ? path : null,
                         Hdr = hdr.Contains(proc)
@@ -2113,12 +1991,6 @@ namespace SmartHdrManager
             procName = procName.ToLowerInvariant();
             lock (Sync)
             {
-                if (!Config.DiscoveredGames.Contains(procName, Cmp))
-                {
-                    Config.DiscoveredGames.Add(procName);
-                    Config.DiscoveredGames.Sort(Cmp);
-                }
-
                 if (!Config.HdrGamesAndApps.Contains(procName, Cmp))
                 {
                     Config.HdrGamesAndApps.Add(procName);
@@ -2137,6 +2009,40 @@ namespace SmartHdrManager
 
             TurnHdrOn($"'{procName}' 被添加", GetSnapshot().Monitors);
             return true;
+        }
+
+        public void RemoveGame(string key, IEnumerable<string> processes)
+        {
+            var procList = processes.ToList();
+            lock (Sync)
+            {
+                // Remove from HdrGamesAndApps
+                foreach (string proc in procList)
+                {
+                    Config.HdrGamesAndApps.RemoveAll(g => g.Equals(proc, StringComparison.OrdinalIgnoreCase));
+                }
+
+                // Remove from ProgramPaths
+                foreach (string proc in procList)
+                {
+                    Config.ProgramPaths.Remove(proc);
+                }
+
+                // Remove from LibraryGames if it's a library game
+                var libGames = Config.LibraryGames ?? new List<LibraryGame>();
+                var gameToRemove = libGames.FirstOrDefault(g => g.Id == key);
+                if (gameToRemove != null)
+                {
+                    libGames.Remove(gameToRemove);
+                    Log("LIST", $"'- {gameToRemove.Name}' 已从游戏库移除");
+                }
+
+                Config.HdrGamesAndApps.Sort(Cmp);
+                InvalidateSnapshot();
+                Save();
+            }
+
+            Log("LIST", $"- '{procList[0]}' 已移除");
         }
 
         /// <summary>True while a known HDR game runs (or HDR is still held for one) or any app is full-screen in front.</summary>
@@ -2219,7 +2125,6 @@ namespace SmartHdrManager
         {
             c.CustomGameFolders ??= new List<string>();
             c.HdrGamesAndApps ??= new List<string>();
-            c.DiscoveredGames ??= new List<string>();
             c.SelectedMonitors ??= new List<string>();
             c.LibraryGames ??= new List<LibraryGame>();
 
