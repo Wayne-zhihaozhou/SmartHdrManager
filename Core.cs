@@ -87,6 +87,13 @@ namespace SmartHdrManager
         public bool Enabled { get; set; } = true;
         public bool AutoSwitchEnabled { get; set; } = true;
         public List<BrightnessRule> Rules { get; set; } = new();
+        public SdrConfig? SdrConfig { get; set; }
+    }
+
+    public class SdrConfig
+    {
+        public bool Enabled { get; set; }
+        public int Brightness { get; set; } = 50;
     }
 
     public class BrightnessRule

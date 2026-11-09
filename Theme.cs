@@ -60,6 +60,7 @@ namespace SmartHdrManager
         public const string GlyphPlus = "\uE106";
         public const string GlyphEdit = "\uE70E";
         public const string GlyphDelete = "\uE7F6";
+        public const string GlyphRemove = "\uE765";
         public const string GlyphUp = "\uE710";
         public const string GlyphDown = "\uE711";
 

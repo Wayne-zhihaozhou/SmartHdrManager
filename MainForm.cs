@@ -51,6 +51,10 @@ namespace SmartHdrManager
         private readonly List<(MonitorInfo Monitor, ToggleSwitch Switch)> _monitorSwitches = new();
         private readonly ToggleSwitch _swRefreshApps = new();
 
+        // SDR page
+        private ToggleSwitch _sdrEnabledSwitch = null!;
+        private Stepper _sdrBrightnessStepper = null!;
+
         // Log page
         private readonly TextBox _log = new()
         {
@@ -94,12 +98,14 @@ namespace SmartHdrManager
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             _tabs.AddTab("游戏");
+            _tabs.AddTab("SDR");
             _tabs.AddTab("电视");
             _tabs.AddTab("设置");
             _tabs.AddTab("日志");
             root.Controls.Add(_tabs, 0, 0);
 
             AddPage(BuildGamesPage());
+            AddPage(BuildSdrPage());
             AddPage(BuildTvPage());
             AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
@@ -214,7 +220,7 @@ namespace SmartHdrManager
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 12, 0, 0), Padding = new Padding(0) };
             var addExe = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加程序", AutoSize = true };
             var addRunning = new ModernButton { Glyph = Theme.GlyphAdd, Text = "添加正在运行", AutoSize = true };
-            var removeBtn = new ModernButton { Glyph = Theme.GlyphDelete, Text = "移除", AutoSize = true };
+            var removeBtn = new ModernButton { Glyph = Theme.GlyphRemove, Text = "移除", AutoSize = true };
             _toolTip.SetToolTip(addExe, "选择游戏的 .exe 文件");
             _toolTip.SetToolTip(addRunning, "从正在运行的程序中选择");
             _toolTip.SetToolTip(removeBtn, "移除选中的游戏或程序");
@@ -377,6 +383,77 @@ namespace SmartHdrManager
                 descLabel.SetBounds(S(18), top + titleHeight, textWidth2, descHeight);
             };
             return row;
+        }
+
+        private Control BuildSdrPage()
+        {
+            var page = new SmoothScrollTable { ColumnCount = 1, Margin = new Padding(0), AutoScroll = true, Padding = new Padding(0, 0, SystemInformation.VerticalScrollBarWidth, 0) };
+            page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            Theme.UseDarkScrollbars(page);
+
+            void Section(string title, string description, bool first = false)
+            {
+                page.AddRow(SectionHeader(title), first ? 34 : 46);
+                page.AddRow(SectionDescription(description), 30);
+            }
+
+            // ---- Hint ----
+            Section("说明", "当 SmartHdrManager 窗口在前台时，自动切换到 SDR 模式并设置指定亮度。");
+
+            // ---- Enable switch ----
+            _sdrEnabledSwitch = new ToggleSwitch { Checked = false };
+            var sdrEnabledRow = SettingRow("启用 SDR 模式", "前台为 SmartHdrManager 时切换到 SDR", _sdrEnabledSwitch);
+            page.AddRow(sdrEnabledRow, 68);
+
+            // ---- Brightness slider ----
+            var _sdrBrightnessLabel = new Label { UseMnemonic = false, Text = "亮度", Font = Theme.Semibold, ForeColor = Theme.Text, AutoSize = true };
+            _sdrBrightnessStepper = new Stepper { Minimum = 0, Maximum = 100, Value = 50, Suffix = "" };
+            var _sdrBrightnessSuffix = new Label { UseMnemonic = false, Text = "%", Font = Theme.Small, ForeColor = Theme.Muted, AutoSize = true };
+            var brightnessRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
+            brightnessRow.Controls.Add(_sdrBrightnessLabel);
+            brightnessRow.Controls.Add(_sdrBrightnessStepper);
+            brightnessRow.Controls.Add(_sdrBrightnessSuffix);
+            page.AddRow(brightnessRow, 52);
+
+            // ---- Wire events ----
+            _sdrEnabledSwitch.CheckedChanged += (_, _) => SaveSdrPageSettings();
+            _sdrBrightnessStepper.ValueChanged += (_, _) => SaveSdrPageSettings();
+
+            // ---- Load saved settings ----
+            LoadSdrPageControls();
+
+            page.AddFillerRow();
+            return page;
+        }
+
+        private void LoadSdrPageControls()
+        {
+            _loadingSettings = true;
+            try
+            {
+                var config = _engine.Read(c => c);
+                var sdrConfig = config?.Brightness?.SdrConfig;
+                if (sdrConfig == null)
+                {
+                    sdrConfig = new SdrConfig { Enabled = false, Brightness = 50 };
+                    if (config?.Brightness == null) config.Brightness = new BrightnessConfig();
+                    config.Brightness.SdrConfig = sdrConfig;
+                }
+                _sdrEnabledSwitch.Checked = sdrConfig.Enabled;
+                _sdrBrightnessStepper.Value = Math.Clamp(sdrConfig.Brightness, 0, 100);
+            }
+            finally { _loadingSettings = false; }
+        }
+
+        private void SaveSdrPageSettings()
+        {
+            var config = _engine.Read(c => c);
+            if (config.Brightness == null) config.Brightness = new BrightnessConfig();
+            if (config.Brightness.SdrConfig == null) config.Brightness.SdrConfig = new SdrConfig();
+            var sdrConfig = config.Brightness.SdrConfig;
+            sdrConfig.Enabled = _sdrEnabledSwitch.Checked;
+            sdrConfig.Brightness = Math.Clamp(_sdrBrightnessStepper.Value, 0, 100);
+            _engine.Update(c => c.Brightness = config.Brightness);
         }
 
         private Control BuildTvPage()
