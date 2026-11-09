@@ -1254,7 +1254,7 @@ namespace SmartHdrManager
                 {
                     _pressed = IndexAt(e.Location);
                     _pressedOnSwitch = IsOnSwitch(e.Location, _pressed);
-                    _pressedOnBrightness = IsOnBrightness(e.Location, _pressed);
+                    _pressedOnBrightness = _pressed >= 0 && _items[_pressed].Hdr && IsOnBrightness(e.Location, _pressed);
                     if (_pressed >= 0) _selected = _pressed;
                     Invalidate();
                 }
@@ -1504,7 +1504,7 @@ namespace SmartHdrManager
             TextRenderer.DrawText(g, item.Subtitle, Theme.Small, new Rectangle(textX, top + nameHeight, textWidth, subHeight), Theme.Muted, flags);
 
             // Brightness display
-            string brightText = item.Hdr ? $"亮度: {item.Brightness}" : $"亮度: {item.Brightness}";
+            string brightText = $"亮度: {item.Brightness}";
             Color brightColor = item.Hdr ? Theme.Text : Theme.Muted;
             TextRenderer.DrawText(g, brightText, Theme.Semibold, Rectangle.Round(br), brightColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
