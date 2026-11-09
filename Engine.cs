@@ -219,23 +219,11 @@ namespace SmartHdrManager
         public void Start()
         {
             Log("INFO", "Smart HDR Manager 已启动 – 监控中。");
-            ApplyTvControlSettings();
+            TvCli.Configure(Config.Brightness?.TvIp ?? BrightnessConfig.DefaultTvIp,
+                            Config.Brightness?.LocalAddr ?? BrightnessConfig.DefaultLocalAddr);
 
             _thread = new Thread(Run) { IsBackground = true, Name = "HdrEngine" };
             _thread.Start();
-        }
-
-        /// <summary>Connects or disconnects the TV after the brightness control switch was changed.</summary>
-        public void ApplyTvControlSettings()
-        {
-            var brightness = Config.Brightness;
-            if (brightness == null || !brightness.Enabled)
-            {
-                TvCli.Shutdown();
-                return;
-            }
-
-            TvCli.Init(brightness.TvIp, brightness.LocalAddr);
         }
 
         public void Stop()

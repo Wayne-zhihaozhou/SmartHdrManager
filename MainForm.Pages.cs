@@ -140,7 +140,6 @@ namespace SmartHdrManager
             AddSection(page, "常规", "启动和自动化开关。", first: true);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), SettingRowHeight);
             page.AddRow(SettingRow("启用 HDR 控制", "关闭后不再自动切换 HDR。", _swHdrControl), SettingRowHeight);
-            page.AddRow(SettingRow("启用亮度控制", "自动按亮度规则调整电视亮度。", _swBrightnessControl), SettingRowHeight);
 
             AddSection(page, "高级", "设置文件、日志和重置。");
             page.AddRow(BuildAdvancedActions(), ActionRowHeight);

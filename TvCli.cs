@@ -36,31 +36,19 @@ namespace SmartHdrManager
         private static string? _tvIp;
         private static string? _localAddr;
 
-        /// <summary>Creates the client and connects in the background (the first connection needs one confirmation on the TV).</summary>
-        public static void Init(string tvIp, string localAddr)
+        /// <summary>
+        /// Remembers where the TV is. Nothing is connected here: the connection is made the first time brightness is
+        /// actually used, so the app does not touch the network for users who never adjust the TV.
+        /// </summary>
+        public static void Configure(string tvIp, string localAddr)
         {
-            if (string.IsNullOrWhiteSpace(tvIp)) return;
-
-            string? savedKey;
             lock (Sync)
             {
+                _client?.Dispose();
+                _client = null;
                 _tvIp = tvIp;
                 _localAddr = localAddr;
-                _client?.Dispose();
-                savedKey = TvClientKeyStore.Load(tvIp);
-                _client = new LgeTvClient(tvIp, localAddr) { ClientKey = savedKey };
             }
-
-            HdrEngine.WriteFileLog(savedKey == null
-                ? $"[TV] {tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
-                : $"[TV] {tvIp} 复用已保存的配对凭证，电视不会再询问");
-
-            _ = Task.Run(async () =>
-            {
-                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                if (client != null)
-                    HdrEngine.WriteFileLog($"[TV] 电视已连接: {tvIp} ({client.TvInfo?.ModelName ?? "未知型号"})");
-            });
         }
 
         /// <summary>Sets the brightness (0-100) and reads it back to verify.</summary>
@@ -199,8 +187,17 @@ namespace SmartHdrManager
             LgeTvClient? client;
             lock (Sync)
             {
+                if (_client == null && !string.IsNullOrWhiteSpace(_tvIp))
+                {
+                    string? savedKey = TvClientKeyStore.Load(_tvIp);
+                    _client = new LgeTvClient(_tvIp, _localAddr) { ClientKey = savedKey };
+                    HdrEngine.WriteFileLog(savedKey == null
+                        ? $"[TV] {_tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
+                        : $"[TV] {_tvIp} 复用已保存的配对凭证");
+                }
                 client = _client;
             }
+
             if (client == null) return null;
             if (client.Connected) return client;
 
@@ -208,6 +205,7 @@ namespace SmartHdrManager
             {
                 await client.ConnectAsync(ct).ConfigureAwait(false);
                 PersistClientKey(client);
+                HdrEngine.WriteFileLog($"[TV] 电视已连接: {client.Host} ({client.TvInfo?.ModelName ?? "未知型号"})");
                 return client;
             }
             catch (Exception ex)

@@ -45,7 +45,6 @@ namespace SmartHdrManager
 
         private readonly ToggleSwitch _swAutostart = new();
         private readonly ToggleSwitch _swHdrControl = new();
-        private readonly ToggleSwitch _swBrightnessControl = new();
         private Label _hdrStatusLabel = null!;
         private Label _activityLabel = null!;
 
@@ -172,12 +171,6 @@ namespace SmartHdrManager
             {
                 if (_loadingSettings) return;
                 _setPaused(!_swHdrControl.Checked);
-            };
-
-            _swBrightnessControl.CheckedChanged += (_, _) =>
-            {
-                if (_loadingSettings) return;
-                SetBrightnessControlEnabled(_swBrightnessControl.Checked);
             };
 
             Resize += (_, _) =>
@@ -307,7 +300,6 @@ namespace SmartHdrManager
             {
                 _swHdrControl.Checked = !_engine.Paused;
                 _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
-                _swBrightnessControl.Checked = _engine.Read(config => config.Brightness?.Enabled ?? true);
             }
             finally { _loadingSettings = false; }
         }

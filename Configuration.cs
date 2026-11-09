@@ -44,7 +44,7 @@ namespace SmartHdrManager
         public BrightnessConfig? Brightness { get; set; }
     }
 
-    /// <summary>LG webOS TV brightness control.</summary>
+    /// <summary>LG webOS TV the app sets brightness on.</summary>
     public sealed class BrightnessConfig
     {
         public const string DefaultTvIp = "192.168.1.4";
@@ -52,9 +52,6 @@ namespace SmartHdrManager
 
         public string TvIp { get; set; } = DefaultTvIp;
         public string LocalAddr { get; set; } = DefaultLocalAddr;
-
-        /// <summary>Connects to the TV so brightness can be set from the app.</summary>
-        public bool Enabled { get; set; } = true;
     }
 
     public sealed class LibraryGame

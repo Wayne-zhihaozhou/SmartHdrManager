@@ -79,16 +79,6 @@ namespace SmartHdrManager
             return (applied, applied ? "设置成功" : "设置失败");
         }
 
-        private void SetBrightnessControlEnabled(bool enabled)
-        {
-            _engine.Update(config =>
-            {
-                config.Brightness ??= new BrightnessConfig();
-                config.Brightness.Enabled = enabled;
-            });
-            _engine.ApplyTvControlSettings();
-        }
-
         private void OnResetSettings()
         {
             var answer = MessageBox.Show(this,
