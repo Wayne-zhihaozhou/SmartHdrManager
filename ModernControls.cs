@@ -1290,10 +1290,6 @@ namespace SmartHdrManager
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
-            // Double-click on the name toggles too (the switch itself toggles on every click)
-            int index = IndexAt(e.Location);
-            if (e.Button == MouseButtons.Left && index >= 0 && !IsOnSwitch(e.Location, index) && !IsOnBrightness(e.Location, index) && !OnScrollbar(e.Location))
-                Toggle(index);
             base.OnMouseDoubleClick(e);
         }
 
