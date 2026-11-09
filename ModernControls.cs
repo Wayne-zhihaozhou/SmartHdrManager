@@ -1037,26 +1037,26 @@ namespace SmartHdrManager
 
         private RectangleF BrightnessRect(Rectangle row)
         {
-            float h = row.Height * 0.35f;
-            float w = LogicalToDeviceUnits(30);
+            float h = row.Height * 0.5f;
+            float w = LogicalToDeviceUnits(40);
             float textRight = BrightnessTextRect(row).Left;
-            float left = textRight - w - LogicalToDeviceUnits(10);
+            float left = textRight - w - LogicalToDeviceUnits(12);
             return new RectangleF(Math.Max(Gap * 2, left), row.Y + (row.Height - h) / 2f, w, h);
         }
 
         private RectangleF BrightnessTextRect(Rectangle row)
         {
-            float h = row.Height * 0.35f;
+            float h = row.Height * 0.5f;
             float plusLeft = BrightnessPlusRect(row).Left;
-            float right = plusLeft - LogicalToDeviceUnits(10);
-            float left = right - LogicalToDeviceUnits(75);
+            float right = plusLeft - LogicalToDeviceUnits(12);
+            float left = right - LogicalToDeviceUnits(80);
             return new RectangleF(Math.Max(Gap * 2, left), row.Y + (row.Height - h) / 2f, right - left, h);
         }
 
         private RectangleF BrightnessPlusRect(Rectangle row)
         {
-            float h = row.Height * 0.35f;
-            float w = LogicalToDeviceUnits(30);
+            float h = row.Height * 0.5f;
+            float w = LogicalToDeviceUnits(40);
             float left = row.Right - Gap - w;
             return new RectangleF(Math.Max(Gap * 2, left), row.Y + (row.Height - h) / 2f, w, h);
         }
@@ -1495,7 +1495,12 @@ namespace SmartHdrManager
             g.FillPath(minusBrush, minusPath);
             using var minusPen = new Pen(Theme.Border, 1f);
             g.DrawPath(minusPen, minusPath);
-            TextRenderer.DrawText(g, "-", Theme.Semibold, Rectangle.Round(minusRect), Theme.Text,
+            var minusCenter = new RectangleF(
+                minusRect.X + minusRect.Width / 2f - LogicalToDeviceUnits(4),
+                minusRect.Y + minusRect.Height / 2f - Font.Height / 2f,
+                LogicalToDeviceUnits(8),
+                Font.Height);
+            TextRenderer.DrawText(g, "-", Theme.Semibold, Rectangle.Round(minusCenter), Theme.Text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
             
             // Draw plus button
@@ -1504,7 +1509,12 @@ namespace SmartHdrManager
             g.FillPath(plusBrush, plusPath);
             using var plusPen = new Pen(Theme.Border, 1f);
             g.DrawPath(plusPen, plusPath);
-            TextRenderer.DrawText(g, "+", Theme.Semibold, Rectangle.Round(plusRect), Theme.Text,
+            var plusCenter = new RectangleF(
+                plusRect.X + plusRect.Width / 2f - LogicalToDeviceUnits(4),
+                plusRect.Y + plusRect.Height / 2f - Font.Height / 2f,
+                LogicalToDeviceUnits(8),
+                Font.Height);
+            TextRenderer.DrawText(g, "+", Theme.Semibold, Rectangle.Round(plusCenter), Theme.Text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         }
 
