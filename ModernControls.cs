@@ -945,6 +945,10 @@ namespace SmartHdrManager
         private int _pressed = -1;
         private bool _pressedOnMinus;
         private bool _pressedOnPlus;
+        private bool _minusHover;
+        private bool _minusDown;
+        private bool _plusHover;
+        private bool _plusDown;
 
         private bool _thumbHover;
         private bool _draggingThumb;
@@ -1199,10 +1203,14 @@ namespace SmartHdrManager
             {
                 bool thumbHover = OnScrollbar(e.Location);
                 int h = IndexAt(e.Location);
-                if (h != _hover || thumbHover != _thumbHover)
+                bool minusHover = h >= 0 && IsOnMinusButton(e.Location, h);
+                bool plusHover = h >= 0 && IsOnPlusButton(e.Location, h);
+                if (h != _hover || thumbHover != _thumbHover || minusHover != _minusHover || plusHover != _plusHover)
                 {
                     _hover = h;
                     _thumbHover = thumbHover;
+                    _minusHover = minusHover;
+                    _plusHover = plusHover;
                     Invalidate();
                 }
             }
@@ -1215,6 +1223,10 @@ namespace SmartHdrManager
             {
                 _hover = -1;
                 _thumbHover = false;
+                _minusHover = false;
+                _plusHover = false;
+                _minusDown = false;
+                _plusDown = false;
                 Invalidate();
             }
             base.OnMouseLeave(e);
@@ -1247,6 +1259,8 @@ namespace SmartHdrManager
                     _pressed = IndexAt(e.Location);
                     _pressedOnMinus = _pressed >= 0 && IsOnMinusButton(e.Location, _pressed);
                     _pressedOnPlus = _pressed >= 0 && IsOnPlusButton(e.Location, _pressed);
+                    if (_pressedOnMinus) _minusDown = true;
+                    if (_pressedOnPlus) _plusDown = true;
                     if (_pressed >= 0) _selected = _pressed;
                     Invalidate();
                 }
@@ -1274,6 +1288,8 @@ namespace SmartHdrManager
                 }
             }
             _pressed = -1;
+            _minusDown = false;
+            _plusDown = false;
             base.OnMouseUp(e);
         }
 
@@ -1490,8 +1506,9 @@ namespace SmartHdrManager
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
             
             // Draw minus button
+            Color minusFill = _minusDown ? Theme.ButtonPressed : _minusHover ? Theme.ButtonHover : Theme.ButtonBack;
             using var minusPath = Theme.RoundRect(minusRect, minusRect.Height / 2f);
-            using var minusBrush = new SolidBrush(_pressedOnMinus ? Theme.Muted : Theme.ButtonBack);
+            using var minusBrush = new SolidBrush(minusFill);
             g.FillPath(minusBrush, minusPath);
             using var minusPen = new Pen(Theme.Border, 1f);
             g.DrawPath(minusPen, minusPath);
@@ -1504,8 +1521,9 @@ namespace SmartHdrManager
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
             
             // Draw plus button
+            Color plusFill = _plusDown ? Theme.ButtonPressed : _plusHover ? Theme.ButtonHover : Theme.ButtonBack;
             using var plusPath = Theme.RoundRect(plusRect, plusRect.Height / 2f);
-            using var plusBrush = new SolidBrush(_pressedOnPlus ? Theme.Muted : Theme.ButtonBack);
+            using var plusBrush = new SolidBrush(plusFill);
             g.FillPath(plusBrush, plusPath);
             using var plusPen = new Pen(Theme.Border, 1f);
             g.DrawPath(plusPen, plusPath);
