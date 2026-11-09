@@ -943,6 +943,8 @@ namespace SmartHdrManager
         private int _hover = -1;
         private int _selected = -1;
         private int _pressed = -1;
+        private bool _pressedOnMinus;
+        private bool _pressedOnPlus;
 
         private bool _thumbHover;
         private bool _draggingThumb;
@@ -957,6 +959,8 @@ namespace SmartHdrManager
 
         private readonly Dictionary<string, Bitmap?> _icons = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _iconsLoading = new(StringComparer.OrdinalIgnoreCase);
+
+        public event EventHandler<GameItem>? BrightnessToggled;
 
         /// <summary>Raised after a scroll animation with its measured frame rate (for the Log tab).</summary>
         public event EventHandler<string>? AnimationStats;
@@ -1029,6 +1033,49 @@ namespace SmartHdrManager
             if (y < 0) return -1;
             int index = (int)(y / RowHeight);
             return index >= 0 && index < _items.Count ? index : -1;
+        }
+
+        private RectangleF BrightnessRect(Rectangle row)
+        {
+            float h = row.Height * 0.35f;
+            float w = LogicalToDeviceUnits(30);
+            float left = row.Right - Gap - LogicalToDeviceUnits(100);
+            return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
+        }
+
+        private RectangleF BrightnessPlusRect(Rectangle row)
+        {
+            float h = row.Height * 0.35f;
+            float w = LogicalToDeviceUnits(30);
+            float left = row.Right - Gap - LogicalToDeviceUnits(60);
+            return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
+        }
+
+        private bool IsOnMinusButton(Point p, int index)
+        {
+            if (index < 0) return false;
+            Rectangle row = RowRect(index);
+            RectangleF hit = BrightnessRect(row);
+            hit.Inflate(LogicalToDeviceUnits(4), LogicalToDeviceUnits(4));
+            return hit.Contains(p);
+        }
+
+        private bool IsOnPlusButton(Point p, int index)
+        {
+            if (index < 0) return false;
+            Rectangle row = RowRect(index);
+            RectangleF hit = BrightnessPlusRect(row);
+            hit.Inflate(LogicalToDeviceUnits(4), LogicalToDeviceUnits(4));
+            return hit.Contains(p);
+        }
+
+        private void AdjustBrightness(int index, int delta)
+        {
+            if (index < 0 || index >= _items.Count) return;
+            var item = _items[index];
+            item.Brightness = Math.Clamp(item.Brightness + delta, 0, 100);
+            Invalidate();
+            BrightnessToggled?.Invoke(this, item);
         }
 
         // ------------------------------------------------------------------
@@ -1188,6 +1235,8 @@ namespace SmartHdrManager
                 else
                 {
                     _pressed = IndexAt(e.Location);
+                    _pressedOnMinus = _pressed >= 0 && IsOnMinusButton(e.Location, _pressed);
+                    _pressedOnPlus = _pressed >= 0 && IsOnPlusButton(e.Location, _pressed);
                     if (_pressed >= 0) _selected = _pressed;
                     Invalidate();
                 }
@@ -1205,7 +1254,14 @@ namespace SmartHdrManager
             }
             else if (e.Button == MouseButtons.Left && PressedRowHit(e.Location))
             {
-                // 规则状态已改为固定执行，不再处理亮度切换
+                if (_pressedOnMinus)
+                {
+                    AdjustBrightness(_pressed, -10);
+                }
+                else if (_pressedOnPlus)
+                {
+                    AdjustBrightness(_pressed, 10);
+                }
             }
             _pressed = -1;
             base.OnMouseUp(e);
@@ -1414,11 +1470,32 @@ namespace SmartHdrManager
 
             TextRenderer.DrawText(g, item.Subtitle, Theme.Small, new Rectangle(textX, top + nameHeight, textWidth, subHeight), Theme.Muted, flags);
 
-            // Rule status display
-            string ruleText = $"规则: 执行中";
-            Rectangle ruleRect = new Rectangle(row.Width - Gap - LogicalToDeviceUnits(120), top, LogicalToDeviceUnits(120), nameHeight + subHeight);
-            TextRenderer.DrawText(g, ruleText, Theme.Semibold, ruleRect, Theme.Text,
+            // Brightness buttons: - 亮度值  +
+            Rectangle minusRect = BrightnessRect(row);
+            Rectangle plusRect = BrightnessPlusRect(row);
+            string brightText = $"亮度: {item.Brightness}";
+            Color brightColor = item.Hdr ? Theme.Text : Theme.Muted;
+            TextRenderer.DrawText(g, brightText, Theme.Semibold, Rectangle.Round(minusRect), brightColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+            
+            // Draw minus button
+            using var minusPath = Theme.RoundRect(minusRect, minusRect.Height / 2f);
+            using var minusBrush = new SolidBrush(_pressedOnMinus ? Theme.Muted : Theme.ButtonBack);
+            g.FillPath(minusBrush, minusPath);
+            using var minusPen = new Pen(Theme.Border, 1f);
+            g.DrawPath(minusPen, minusPath);
+            TextRenderer.DrawText(g, "-", Theme.Semibold, Rectangle.Round(minusRect), Theme.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+            
+            // Draw plus button
+            using var plusPath = Theme.RoundRect(plusRect, plusRect.Height / 2f);
+            using var plusBrush = new SolidBrush(_pressedOnPlus ? Theme.Muted : Theme.ButtonBack);
+            g.FillPath(plusBrush, plusPath);
+            using var plusPen = new Pen(Theme.Border, 1f);
+            g.DrawPath(plusPen, plusPath);
+            TextRenderer.DrawText(g, "+", Theme.Semibold, Rectangle.Round(plusRect), Theme.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        }
 
         // ------------------------------------------------------------------
         // Icons

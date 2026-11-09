@@ -539,6 +539,16 @@ namespace SmartHdrManager
             _tabs.SelectedIndexChanged += (_, _) => ShowPage(_tabs.SelectedIndex);
             _search.TextChanged += (_, _) => RebuildGames();
 
+            _games.BrightnessToggled += (_, item) =>
+            {
+                _engine.SetGameBrightness(item.Key, item.Processes, item.Brightness, item.Name);
+                if (item.Hdr)
+                {
+                    ApplyGameBrightness(item.Brightness);
+                }
+                BeginInvoke(new Action(RebuildGames));
+            };
+
             // _games.AnimationStats reports the scroll frame rate (diagnostics) – not logged in releases: it filled the log
             foreach (var (_, sw) in _monitorSwitches)
                 sw.CheckedChanged += (_, _) => OnMonitorToggled(sw);
