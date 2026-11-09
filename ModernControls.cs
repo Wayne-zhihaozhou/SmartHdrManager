@@ -1047,8 +1047,8 @@ namespace SmartHdrManager
         {
             float h = row.Height * 0.4f;
             float w = LogicalToDeviceUnits(90);
-            float switchX = row.Right - row.Height * 0.35f - w - LogicalToDeviceUnits(16) - (row.Height * 0.35f + h * 2f);
-            return new RectangleF(switchX, row.Y + (row.Height - h) / 2f, w, h);
+            float right = SwitchRect(row).Left - LogicalToDeviceUnits(16);
+            return new RectangleF(right - w, row.Y + (row.Height - h) / 2f, w, h);
         }
 
         private bool IsOnBrightness(Point p, int index)
@@ -1271,26 +1271,21 @@ namespace SmartHdrManager
                 Capture = false;
                 Invalidate();
             }
-            else if (e.Button == MouseButtons.Left && _pressed >= 0 && _pressedOnSwitch)
+            else if (e.Button == MouseButtons.Left && PressedRowHit(e.Location))
             {
-                int index = IndexAt(e.Location);
-                if (SameRowBoundary(_pressed, e.Location))
+                if (_pressedOnSwitch) Toggle(_pressed);
+                else if (_pressedOnBrightness && IsOnBrightness(e.Location, _pressed))
                 {
-                    Toggle(_pressed);
-                }
-            }
-            else if (e.Button == MouseButtons.Left && _pressed >= 0 && _pressedOnBrightness)
-            {
-                int index = IndexAt(e.Location);
-                if (index == _pressed && IsOnBrightness(e.Location, index) && SameRowBoundary(_pressed, e.Location))
-                {
-                    int delta = IndexAtBrightPart(e.Location, index);
-                    if (delta != 0) AdjustBrightness(index, delta);
+                    int delta = IndexAtBrightPart(e.Location, _pressed);
+                    if (delta != 0) AdjustBrightness(_pressed, delta);
                 }
             }
             _pressed = -1;
             base.OnMouseUp(e);
         }
+
+        /// <summary>True when a left-button release inside the row pressed earlier should count as a click.</summary>
+        private bool PressedRowHit(Point p) => _pressed >= 0 && SameRowBoundary(_pressed, p);
 
         /// <summary>Ensures the release point falls within the original pressed row's vertical bounds.</summary>
         private bool SameRowBoundary(int index, Point p)
