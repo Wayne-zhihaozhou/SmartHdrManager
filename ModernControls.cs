@@ -1039,24 +1039,26 @@ namespace SmartHdrManager
         {
             float h = row.Height * 0.35f;
             float w = LogicalToDeviceUnits(30);
-            float left = row.Right - Gap - LogicalToDeviceUnits(100);
-            return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
+            float textRight = BrightnessTextRect(row).Left;
+            float left = textRight - w - LogicalToDeviceUnits(10);
+            return new RectangleF(Math.Max(Gap * 2, left), row.Y + (row.Height - h) / 2f, w, h);
         }
 
         private RectangleF BrightnessTextRect(Rectangle row)
         {
             float h = row.Height * 0.35f;
-            float left = row.Right - Gap - LogicalToDeviceUnits(75);
-            float w = LogicalToDeviceUnits(35);
-            return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
+            float plusLeft = BrightnessPlusRect(row).Left;
+            float right = plusLeft - LogicalToDeviceUnits(10);
+            float left = right - LogicalToDeviceUnits(75);
+            return new RectangleF(Math.Max(Gap * 2, left), row.Y + (row.Height - h) / 2f, right - left, h);
         }
 
         private RectangleF BrightnessPlusRect(Rectangle row)
         {
             float h = row.Height * 0.35f;
             float w = LogicalToDeviceUnits(30);
-            float left = row.Right - Gap - LogicalToDeviceUnits(40);
-            return new RectangleF(left, row.Y + (row.Height - h) / 2f, w, h);
+            float left = row.Right - Gap - w;
+            return new RectangleF(Math.Max(Gap * 2, left), row.Y + (row.Height - h) / 2f, w, h);
         }
 
         private bool IsOnMinusButton(Point p, int index)
