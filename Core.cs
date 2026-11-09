@@ -54,6 +54,9 @@ namespace SmartHdrManager
         // Full exe paths of programs added by hand (for their icons in the Games tab)
         public Dictionary<string, string> ProgramPaths { get; set; } = new();
 
+        // Per-game brightness settings (process name -> brightness 0-100)
+        public Dictionary<string, int> PerGameBrightness { get; set; } = new();
+
         public bool EnableHdrOnProcessStart { get; set; } = true;
         public int ProcessScanIntervalMs { get; set; } = 100;
         // Off by default: the Windows task it uses needs administrator rights on most PCs
@@ -272,6 +275,7 @@ namespace SmartHdrManager
         public List<string> Processes { get; set; } = new();    // process names (exe without .exe, lower case)
         public string? ExePath { get; set; }                    // main exe, used for the icon
         public int ScanVersion { get; set; }                    // version of the scan when this game was detected
+        public int Brightness { get; set; } = 50;              // per-game TV brightness (0-100, default 50)
     }
 
     /// <summary>

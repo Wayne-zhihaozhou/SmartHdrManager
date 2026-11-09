@@ -541,6 +541,16 @@ namespace SmartHdrManager
             _games.HdrToggled += (_, item) =>
             {
                 _engine.SetGameHdr(item.Processes, item.Hdr, item.Name);
+                // When turning HDR on, apply the game's brightness setting
+                if (item.Hdr)
+                {
+                    ApplyGameBrightness(item.Brightness);
+                }
+                BeginInvoke(new Action(RebuildGames));
+            };
+            _games.BrightnessToggled += (_, item) =>
+            {
+                _engine.SetGameBrightness(item.Key, item.Processes, item.Brightness, item.Name);
                 BeginInvoke(new Action(RebuildGames));
             };
             // _games.AnimationStats reports the scroll frame rate (diagnostics) – not logged in releases: it filled the log
@@ -762,6 +772,18 @@ namespace SmartHdrManager
 
             // Keeps the selection and scroll position
             _games.SetItems(items, _games.SelectedItem?.Key);
+        }
+
+        private async void ApplyGameBrightness(int brightness)
+        {
+            try
+            {
+                await TvCli.SetBrightnessAsync(brightness);
+            }
+            catch
+            {
+                // Ignore brightness apply errors
+            }
         }
 
         private void OnAddExe()

@@ -849,6 +849,7 @@ namespace SmartHdrManager
             Processes = row.Processes;
             ExePath = row.ExePath;
             Hdr = row.Hdr;
+            Brightness = row.Brightness;
         }
 
         public string Key { get; }
@@ -857,6 +858,7 @@ namespace SmartHdrManager
         public List<string> Processes { get; }
         public string? ExePath { get; }
         public bool Hdr { get; set; }
+        public int Brightness { get; set; }
         public override string ToString() => Name;
     }
 
@@ -942,6 +944,7 @@ namespace SmartHdrManager
         private int _selected = -1;
         private int _pressed = -1;
         private bool _pressedOnSwitch;
+        private bool _pressedOnBrightness;
 
         private bool _thumbHover;
         private bool _draggingThumb;
@@ -958,6 +961,7 @@ namespace SmartHdrManager
         private readonly HashSet<string> _iconsLoading = new(StringComparer.OrdinalIgnoreCase);
 
         public event EventHandler<GameItem>? HdrToggled;
+        public event EventHandler<GameItem>? BrightnessToggled;
 
         /// <summary>Raised after a scroll animation with its measured frame rate (for the Log tab).</summary>
         public event EventHandler<string>? AnimationStats;
@@ -1039,6 +1043,32 @@ namespace SmartHdrManager
             return new RectangleF(row.Right - w - row.Height * 0.35f, row.Y + (row.Height - h) / 2f, w, h);
         }
 
+        private RectangleF BrightnessRect(Rectangle row)
+        {
+            float h = row.Height * 0.4f;
+            float w = LogicalToDeviceUnits(90);
+            float switchX = row.Right - row.Height * 0.35f - w - LogicalToDeviceUnits(16) - (row.Height * 0.35f + h * 2f);
+            return new RectangleF(switchX, row.Y + (row.Height - h) / 2f, w, h);
+        }
+
+        private bool IsOnBrightness(Point p, int index)
+        {
+            if (index < 0) return false;
+            Rectangle row = RowRect(index);
+            RectangleF hit = BrightnessRect(row);
+            hit.Inflate(LogicalToDeviceUnits(4), LogicalToDeviceUnits(4));
+            return hit.Contains(p);
+        }
+
+        private int IndexAtBrightPart(Point p, int index)
+        {
+            if (index < 0 || index >= _items.Count) return 0;
+            Rectangle row = RowRect(index);
+            RectangleF br = BrightnessRect(row);
+            float mid = br.X + br.Width / 2f;
+            return p.X < (int)mid ? -1 : 1;
+        }
+
         private bool IsOnSwitch(Point p, int index)
         {
             if (index < 0) return false;
@@ -1055,6 +1085,15 @@ namespace SmartHdrManager
             item.Hdr = !item.Hdr;
             Invalidate();
             HdrToggled?.Invoke(this, item);
+        }
+
+        private void AdjustBrightness(int index, int delta)
+        {
+            if (index < 0 || index >= _items.Count) return;
+            var item = _items[index];
+            item.Brightness = Math.Clamp(item.Brightness + delta, 0, 100);
+            Invalidate();
+            BrightnessToggled?.Invoke(this, item);
         }
 
         // ------------------------------------------------------------------
@@ -1215,6 +1254,7 @@ namespace SmartHdrManager
                 {
                     _pressed = IndexAt(e.Location);
                     _pressedOnSwitch = IsOnSwitch(e.Location, _pressed);
+                    _pressedOnBrightness = IsOnBrightness(e.Location, _pressed);
                     if (_pressed >= 0) _selected = _pressed;
                     Invalidate();
                 }
@@ -1235,6 +1275,15 @@ namespace SmartHdrManager
                 int index = IndexAt(e.Location);
                 if (index == _pressed && IsOnSwitch(e.Location, index)) Toggle(index);
             }
+            else if (e.Button == MouseButtons.Left && _pressed >= 0 && _pressedOnBrightness)
+            {
+                int index = IndexAt(e.Location);
+                if (index == _pressed && IsOnBrightness(e.Location, index))
+                {
+                    int delta = IndexAtBrightPart(e.Location, index);
+                    if (delta != 0) AdjustBrightness(index, delta);
+                }
+            }
             _pressed = -1;
             base.OnMouseUp(e);
         }
@@ -1243,7 +1292,7 @@ namespace SmartHdrManager
         {
             // Double-click on the name toggles too (the switch itself toggles on every click)
             int index = IndexAt(e.Location);
-            if (e.Button == MouseButtons.Left && index >= 0 && !IsOnSwitch(e.Location, index) && !OnScrollbar(e.Location))
+            if (e.Button == MouseButtons.Left && index >= 0 && !IsOnSwitch(e.Location, index) && !IsOnBrightness(e.Location, index) && !OnScrollbar(e.Location))
                 Toggle(index);
             base.OnMouseDoubleClick(e);
         }
@@ -1441,8 +1490,9 @@ namespace SmartHdrManager
 
             // Name + source line ("Steam · cyberpunk2077.exe")
             RectangleF sw = SwitchRect(row);
+            RectangleF br = BrightnessRect(row);
             int textX = (int)(iconRect.Right + row.Height * 0.25f);
-            int textWidth = Math.Max(0, (int)sw.X - textX - 8);
+            int textWidth = Math.Max(0, (int)br.X - textX - 8);
             int nameHeight = Font.Height;
             int subHeight = Theme.Small.Height;
             int top = row.Y + (row.Height - nameHeight - subHeight) / 2;
@@ -1452,6 +1502,12 @@ namespace SmartHdrManager
                 item.Hdr ? Theme.Text : Theme.Blend(Theme.Text, Theme.Muted, 0.6f), flags);
 
             TextRenderer.DrawText(g, item.Subtitle, Theme.Small, new Rectangle(textX, top + nameHeight, textWidth, subHeight), Theme.Muted, flags);
+
+            // Brightness display
+            string brightText = item.Hdr ? $"亮度: {item.Brightness}" : $"亮度: {item.Brightness}";
+            Color brightColor = item.Hdr ? Theme.Text : Theme.Muted;
+            TextRenderer.DrawText(g, brightText, Theme.Semibold, Rectangle.Round(br), brightColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
 
             ToggleSwitch.DrawSwitch(g, sw, item.Hdr ? 1f : 0f, hover, true);
         }

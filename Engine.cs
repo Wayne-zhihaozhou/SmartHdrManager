@@ -38,6 +38,7 @@ namespace SmartHdrManager
         public List<string> Processes { get; init; } = new();
         public string? ExePath { get; init; }
         public bool Hdr { get; init; }
+        public int Brightness { get; init; } = 50;
     }
 
     /// <summary>
@@ -1806,6 +1807,7 @@ namespace SmartHdrManager
             {
                 var hdr = new HashSet<string>(Config.HdrGamesAndApps ?? new List<string>(), Cmp);
                 var paths = Config.ProgramPaths ?? new Dictionary<string, string>();
+                var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
 
                 var rows = new List<GameRow>();
                 var covered = new HashSet<string>(Cmp);
@@ -1825,7 +1827,8 @@ namespace SmartHdrManager
                         // library path, or one learned from a running game (e.g. Xbox games)
                         ExePath = game.ExePath ?? procs.Select(p => paths.TryGetValue(p, out var known) ? known : null)
                                                       .FirstOrDefault(p => p != null),
-                        Hdr = procs.Any(hdr.Contains)
+                        Hdr = procs.Any(hdr.Contains),
+                        Brightness = game.Brightness
                     });
                 }
 
@@ -1840,7 +1843,8 @@ namespace SmartHdrManager
                         Subtitle = $"程序  ·  {proc}.exe",
                         Processes = new List<string> { proc },
                         ExePath = paths.TryGetValue(proc, out var path) ? path : null,
-                        Hdr = hdr.Contains(proc)
+                        Hdr = hdr.Contains(proc),
+                        Brightness = brightnessMap.TryGetValue(proc, out var b) ? b : 50
                     });
                 }
 
@@ -1870,6 +1874,41 @@ namespace SmartHdrManager
                 Save();
             }
             Log("LIST", enabled ? $"+ '{displayName}' 将使用 HDR" : $"- '{displayName}' 不再使用 HDR");
+        }
+
+        /// <summary>Save per-game brightness setting.</summary>
+        public void SetGameBrightness(string gameKey, IEnumerable<string> processes, int brightness, string displayName)
+        {
+            var list = processes.ToList();
+            lock (Sync)
+            {
+                // Update library game brightness
+                var games = Config.LibraryGames ?? new List<LibraryGame>();
+                bool found = false;
+                foreach (var game in games)
+                {
+                    if (game.Id == gameKey)
+                    {
+                        game.Brightness = Math.Clamp(brightness, 0, 100);
+                        found = true;
+                        break;
+                    }
+                }
+
+                // Update per-game brightness map for user-added programs
+                if (!found)
+                {
+                    var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
+                    foreach (var proc in list)
+                    {
+                        brightnessMap[proc] = Math.Clamp(brightness, 0, 100);
+                    }
+                    Config.PerGameBrightness = brightnessMap;
+                }
+
+                Save();
+            }
+            Log("BRIGHT", $"'{displayName}' 亮度设为 {brightness}");
         }
 
         // ------------------------------------------------------------------
