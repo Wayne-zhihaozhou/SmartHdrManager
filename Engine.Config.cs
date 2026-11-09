@@ -159,7 +159,6 @@ namespace SmartHdrManager
             config.QuickExitCounts = quickExits;
 
             config.Brightness ??= new BrightnessConfig();
-            config.Brightness.Rules ??= new List<BrightnessRule>();
             return config;
         }
 

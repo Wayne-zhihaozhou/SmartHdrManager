@@ -53,29 +53,8 @@ namespace SmartHdrManager
         public string TvIp { get; set; } = DefaultTvIp;
         public string LocalAddr { get; set; } = DefaultLocalAddr;
 
-        /// <summary>Brightness control (hotkeys and the test page) is available.</summary>
+        /// <summary>Connects to the TV so brightness can be set from the app.</summary>
         public bool Enabled { get; set; } = true;
-
-        /// <summary>Brightness follows the program in the foreground.</summary>
-        public bool AutoSwitchEnabled { get; set; } = true;
-
-        public List<BrightnessRule> Rules { get; set; } = new();
-    }
-
-    /// <summary>
-    /// One brightness rule. A rule without processes, title keywords and fullscreen matching is the fallback rule:
-    /// it applies when nothing else matches.
-    /// </summary>
-    public sealed class BrightnessRule
-    {
-        public string Name { get; set; } = "新规则";
-        public int Brightness { get; set; } = 50;
-        public bool MatchFullscreen { get; set; }
-        public List<string> Processes { get; set; } = new();
-        public List<string> TitleKeywords { get; set; } = new();
-        public List<string> IgnoreProcesses { get; set; } = new();
-
-        public bool IsFallback() => Processes.Count == 0 && TitleKeywords.Count == 0 && !MatchFullscreen;
     }
 
     public sealed class LibraryGame
