@@ -1273,12 +1273,15 @@ namespace SmartHdrManager
             else if (e.Button == MouseButtons.Left && _pressed >= 0 && _pressedOnSwitch)
             {
                 int index = IndexAt(e.Location);
-                if (index == _pressed && IsOnSwitch(e.Location, index)) Toggle(index);
+                if (index == _pressed && IsOnSwitch(e.Location, index) && SameRowBoundary(_pressed, e.Location))
+                {
+                    Toggle(index);
+                }
             }
             else if (e.Button == MouseButtons.Left && _pressed >= 0 && _pressedOnBrightness)
             {
                 int index = IndexAt(e.Location);
-                if (index == _pressed && IsOnBrightness(e.Location, index))
+                if (index == _pressed && IsOnBrightness(e.Location, index) && SameRowBoundary(_pressed, e.Location))
                 {
                     int delta = IndexAtBrightPart(e.Location, index);
                     if (delta != 0) AdjustBrightness(index, delta);
@@ -1286,6 +1289,14 @@ namespace SmartHdrManager
             }
             _pressed = -1;
             base.OnMouseUp(e);
+        }
+
+        /// <summary>Ensures the release point falls within the original pressed row's vertical bounds.</summary>
+        private bool SameRowBoundary(int index, Point p)
+        {
+            if (index < 0 || index >= _items.Count) return false;
+            Rectangle row = RowRect(index);
+            return p.Y >= row.Top && p.Y < row.Bottom;
         }
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
