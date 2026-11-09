@@ -2227,8 +2227,6 @@ namespace SmartHdrManager
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-                // The 2.5 lists and switch are no longer read, but kept in step: an older version started later still works
-                AppCatalog.WriteLegacyLists(Config);
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 string tmp = ConfigPath + ".tmp";
                 File.WriteAllText(tmp, JsonSerializer.Serialize(Config, options));

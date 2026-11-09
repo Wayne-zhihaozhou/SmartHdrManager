@@ -249,7 +249,6 @@ namespace SmartHdrManager
             return System.IO.Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant();
         }
 
-        public static void WriteLegacyLists(AppConfig config) { }
     }
 
     public sealed class PlayerInfo
@@ -1113,22 +1112,6 @@ namespace SmartHdrManager
                 }
             }
             return name;
-        }
-
-        /// <summary>Full path of the foreground window's executable, or null (e.g. for elevated processes).</summary>
-        public static string? GetForegroundExePath()
-        {
-            try
-            {
-                IntPtr hWnd = GetForegroundWindow();
-                if (hWnd == IntPtr.Zero) return null;
-                GetWindowThreadProcessId(hWnd, out uint pid);
-                return ProcessPaths.TryGetExePath((int)pid);   // limited access only (anti-cheat safe)
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         private static string ResolveProcessName(uint pid)
