@@ -10,7 +10,7 @@ using System.Windows.Forms;
 namespace SmartHdrManager
 {
     /// <summary>
-    /// The settings window: a status card on top, a segmented tab bar, and four pages (Games, TV, Settings, Log).
+    /// The settings window: a segmented tab bar, and four pages (Games, TV, Settings, Log).
     /// Layout values are in 96-DPI pixels; WinForms scales them for the actual display DPI.
     /// Closing or minimizing hides it to the tray; the tray context disposes it a few seconds later to free memory.
     /// </summary>
@@ -28,11 +28,14 @@ namespace SmartHdrManager
         private readonly Icon _windowIcon = AppIcons.Create(IconStyle.Vivid, 48);
         private readonly ToolTip _toolTip = new();
 
-        // Status card
-        private readonly StatusCard _statusCard = new() { Radius = 12, Dock = DockStyle.Fill, Margin = new Padding(0) };
-        private readonly Label _hdrLabel = new() { AutoSize = true, Font = Theme.Title, ForeColor = Theme.Text };
-        private readonly Label _detailLabel = new() { AutoSize = false, AutoEllipsis = true, Font = Theme.Body, ForeColor = Theme.Muted };
-
+        // Settings page
+        // Settings page status card
+        private readonly StatusCard _settingsStatusCard = new() { Radius = 12, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 12) };
+        private readonly Label _settingsHdrLabel = new() { AutoSize = true, Font = Theme.Title, ForeColor = Theme.Text };
+        private readonly Label _settingsDetailLabel = new() { AutoSize = false, AutoEllipsis = true, Font = Theme.Body, ForeColor = Theme.Muted };
+        private readonly ToggleSwitch _swPauseAutomation = new();
+        private readonly ModernButton _btnResume = new() { Text = "恢复", AutoSize = true, Visible = false };
+        // Automatic drive scan: off / at every start / daily / weekly / monthly (2.6)
         // Tabs
         private readonly SegmentedTabs _tabs = new() { Size = new Size(330, 40), Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = new Padding(0, 16, 0, 0) };
         private readonly Panel _content = new() { Dock = DockStyle.Fill, Margin = new Padding(0, 12, 0, 0) };
@@ -78,8 +81,6 @@ namespace SmartHdrManager
 
         // Settings page parts that change at runtime
         private SmoothScrollTable? _settingsPage;
-        private ToggleSwitch? _swPauseAutomation;
-        private ModernButton? _btnResume;
 
         private bool _reallyExit;
         private int _logCursor;
@@ -112,27 +113,23 @@ namespace SmartHdrManager
             ForeColor = Theme.Text;
             StartPosition = FormStartPosition.CenterScreen;
 
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(20) };
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(20) };
             _root = root;
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 104));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-            BuildStatusCard();
-            root.Controls.Add(_statusCard, 0, 0);
 
             _tabs.AddTab("游戏");
             _tabs.AddTab("电视");
             _tabs.AddTab("设置");
             _tabs.AddTab("日志");
-            root.Controls.Add(_tabs, 0, 1);
+            root.Controls.Add(_tabs, 0, 0);
 
             AddPage(BuildGamesPage());
             AddPage(BuildTvPage());
             AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
-            root.Controls.Add(_content, 0, 2);
+            root.Controls.Add(_content, 0, 1);
 
             // Designer-style auto scaling: everything above is in 96-DPI pixels
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -144,7 +141,7 @@ namespace SmartHdrManager
             ResumeLayout(false);
             PerformLayout();
 
-            LayoutStatusCard();
+            UpdateContentWidth();
             ShowPage(0);
             WireEvents();
             LoadSettings();
@@ -171,42 +168,6 @@ namespace SmartHdrManager
         // ------------------------------------------------------------------
         // Layout
         // ------------------------------------------------------------------
-        // ------------------------------------------------------------------
-        // Layout
-        // ------------------------------------------------------------------
-        private void BuildStatusCard()
-        {
-            const int h = 104;
-            _statusCard.Size = new Size(CardWidth, h);
-            _statusCard.IndicatorX = 28;
-
-            // Initial bounds (96-DPI pixels); the real positions are set in LayoutStatusCard on every resize.
-            _hdrLabel.Location = new Point(52, 18);
-            _detailLabel.SetBounds(54, 60, CardWidth - 54 - 72, 22);
-
-            // Transparent so the animated HDR sweep on the card shows behind the text
-            _hdrLabel.BackColor = Color.Transparent;
-            _detailLabel.BackColor = Color.Transparent;
-
-            _statusCard.Controls.Add(_hdrLabel);
-            _statusCard.Controls.Add(_detailLabel);
-            _statusCard.Layout += (_, _) => LayoutStatusCard();
-        }
-
-        private void LayoutStatusCard()
-        {
-            int S(int v) => _statusCard.LogicalToDeviceUnits(v);
-            int w = _statusCard.ClientSize.Width;
-            int h = _statusCard.ClientSize.Height;
-
-            // Title + detail as one block, vertically centred
-            int detailHeight = _detailLabel.PreferredHeight;
-            int top = Math.Max(0, (h - _hdrLabel.Height - S(2) - detailHeight) / 2);
-            int left = S(52);
-            _hdrLabel.Location = new Point(left, top);
-            _detailLabel.SetBounds(left + S(2), _hdrLabel.Bottom + S(2), w - S(54) - S(72), detailHeight);
-        }
-
         private void AddPage(Control page)
         {
             page.Dock = DockStyle.Fill;
@@ -332,22 +293,12 @@ namespace SmartHdrManager
                 page.AddRow(SectionDescription(description), 30);
             }
 
+            // ---- Status Card ----
+            var statusCard = BuildSettingsStatusCard();
+            page.AddRow(statusCard, 104);
+
             // ---- General ----
             Section("常规", "启动、游戏搜索和键盘快捷键。", first: true);
-            _swPauseAutomation = new ToggleSwitch();
-            _btnResume = new ModernButton { Text = "恢复", AutoSize = true, Visible = false };
-            _btnResume.Click += (_, _) =>
-            {
-                _setOverride(HdrOverride.None, null);
-                _swPauseAutomation.Checked = false;
-                RefreshView();
-            };
-            var pauseRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(0), Height = 34 };
-            _swPauseAutomation.SetBounds(0, 0, 80, 34);
-            _btnResume.SetBounds(90, 0, 60, 34);
-            pauseRow.Controls.Add(_swPauseAutomation);
-            pauseRow.Controls.Add(_btnResume);
-            page.AddRow(SettingRow("暂停自动化", "关闭后不会自动切换 HDR。", pauseRow), 68);
             page.AddRow(SettingRow("开机自启动", "登录时隐藏启动到托盘。", _swAutostart), 68);
             var scanRow = SettingRow("查找新游戏", "在磁盘上搜索新安装的游戏。", _scanInterval);
             _scanIntervalDesc = RowDescription(scanRow);
@@ -409,6 +360,59 @@ namespace SmartHdrManager
 
             page.AddFillerRow();
             return page;
+        }
+
+        private Control BuildSettingsStatusCard()
+        {
+            const int h = 104;
+            _settingsStatusCard.Size = new Size(CardWidth, h);
+            _settingsStatusCard.IndicatorX = 28;
+
+            _settingsHdrLabel.Location = new Point(52, 18);
+            _settingsDetailLabel.SetBounds(54, 60, CardWidth - 54 - 72, 22);
+
+            _settingsHdrLabel.BackColor = Color.Transparent;
+            _settingsDetailLabel.BackColor = Color.Transparent;
+
+            var pauseContainer = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Height = 34,
+                Margin = new Padding(0, (h - 34) / 2, 18, 0)
+            };
+            _swPauseAutomation.Size = new Size(80, 34);
+            _btnResume.Size = new Size(60, 34);
+            pauseContainer.Controls.Add(_btnResume);
+            pauseContainer.Controls.Add(_swPauseAutomation);
+
+            _settingsStatusCard.Controls.Add(_settingsHdrLabel);
+            _settingsStatusCard.Controls.Add(_settingsDetailLabel);
+            _settingsStatusCard.Controls.Add(pauseContainer);
+
+            _settingsStatusCard.Layout += (_, _) =>
+            {
+                int S(int v) => _settingsStatusCard.LogicalToDeviceUnits(v);
+                int w = _settingsStatusCard.ClientSize.Width;
+                int rh = pauseContainer.Height;
+
+                pauseContainer.Location = new Point(w - S(18) - pauseContainer.Width, (h - rh) / 2);
+
+                int detailHeight = _settingsDetailLabel.PreferredHeight;
+                int top = Math.Max(0, (h - _settingsHdrLabel.Height - S(2) - detailHeight) / 2);
+                int left = S(52);
+                _settingsHdrLabel.Location = new Point(left, top);
+                _settingsDetailLabel.SetBounds(left + S(2), _settingsHdrLabel.Bottom + S(2), w - S(54) - S(72), detailHeight);
+            };
+
+            _swPauseAutomation.CheckedChanged += (_, _) =>
+            {
+                if (_loadingSettings) return;
+                _setPaused(_swPauseAutomation.Checked);
+            };
+
+            return _settingsStatusCard;
         }
 
         private static Label SectionDescription(string text) => new()
@@ -792,8 +796,8 @@ namespace SmartHdrManager
             {
                 _lastState = state;
 
-                _statusCard.SetState(state == 2 ? HdrVisualState.Paused : s.HdrOn ? HdrVisualState.On : HdrVisualState.Off);
-                _hdrLabel.Text = s.Override switch
+                _settingsStatusCard.SetState(state == 2 ? HdrVisualState.Paused : s.HdrOn ? HdrVisualState.On : HdrVisualState.Off);
+                _settingsHdrLabel.Text = s.Override switch
                 {
                     HdrOverride.ForceHdr => "HDR 已强制开启",
                     HdrOverride.ForceSdr => "SDR 已强制",
@@ -845,17 +849,14 @@ namespace SmartHdrManager
                     ? "等待中 …"
                     : $"活动窗口：{s.ActiveProcess}{(s.IsFullscreen ? "（全屏）" : "")}";
             }
-            if (_detailLabel.Text != detail) _detailLabel.Text = detail;
+            if (_settingsDetailLabel.Text != detail) _settingsDetailLabel.Text = detail;
 
-            if (_btnResume != null)
+            if (_btnResume != null && _swPauseAutomation != null)
             {
                 bool show = s.Override != HdrOverride.None;
                 if (_btnResume.Visible != show)
                     BeginInvoke(new Action(() => { if (!_btnResume.IsDisposed) _btnResume.Visible = show; }));
-            }
 
-            if (_swPauseAutomation != null)
-            {
                 bool wasPaused = _swPauseAutomation.Checked;
                 bool isPaused = s.Paused && s.Override == HdrOverride.None;
                 if (wasPaused != isPaused)
