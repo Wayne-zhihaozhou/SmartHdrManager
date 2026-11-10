@@ -72,6 +72,24 @@ namespace HdrBrightControl
         private const int BrightnessMin = 0;
         private const int BrightnessMax = 100;
 
+        /// <summary>
+        /// The TV stores the brightness per picture mode (SDR / HDR) and restores its own value when an HDR change
+        /// makes it switch mode. A write issued right at the switch lands in the old mode and is lost, so every write
+        /// waits this long after an HDR change.
+        /// </summary>
+        private const int BrightnessSettleAfterHdrMs = 2500;
+
+        /// <summary>
+        /// The picture mode may come up after the write: one extra read this long after the HDR change confirms that
+        /// the TV kept the value, and rewrites it when the TV fell back to its own value.
+        /// </summary>
+        private const int BrightnessVerifyAfterHdrMs = 6000;
+
+        /// <summary>A write the TV did not take is repeated with this base delay.</summary>
+        private const int BrightnessRetryDelayMs = 2000;
+
+        private const int BrightnessMaxAttempts = 5;
+
         /// <summary>Process name of this app, lower case: its own window is not content that decides anything.</summary>
         public const string SelfProcessName = "smarthdrmanager";
 
@@ -175,9 +193,21 @@ namespace HdrBrightControl
         private string _contentProcess = string.Empty;
         private int _contentProcessId;
         private readonly HashSet<string> _identityLogged = new(Cmp);
+
+        /// <summary>List entry the TV brightness belongs to; null is the desktop brightness.</summary>
         private string? _brightnessOwner;
         private int _brightnessValue;
-        private bool _brightnessApplied;
+        private bool _brightnessStarted;
+        private bool _brightnessPending;
+        private bool _brightnessApplying;
+        private bool _brightnessVerifying;
+        private bool _brightnessHdrKnown;
+        private bool _brightnessAppliedOnHdr;
+        private int _brightnessAttempts;
+        private long _brightnessNextAttemptMs;
+        private long _brightnessVerifyAtMs;
+
+        private long _hdrChangedMs = long.MinValue / 2;
         private long _nextProcessScanMs;
         private string? _activeHdrGameProcess;
 
@@ -447,6 +477,7 @@ namespace HdrBrightControl
                 if (!any) _externalHoldProcess = null;
 
                 _firstHdrQueryDone = true;
+                if (_hdrAny != any) _hdrChangedMs = now;
                 _hdrAny = any;
 
                 if (_verifyOn && !forced)
@@ -655,33 +686,155 @@ namespace HdrBrightControl
         /// brightness even when the user switches away; otherwise the program in front decides, and the desktop
         /// brightness applies while a program that is on neither list is in front. Only a change is written to the TV,
         /// so editing a value in the settings window reaches the TV at once instead of only after an app switch.
+        /// An HDR change makes the TV switch picture mode, and each mode carries its own brightness: the value is then
+        /// written again, once the TV had time for the switch, and a write the TV did not take is retried instead of
+        /// being remembered as done.
         /// </summary>
         private void UpdateAppBrightness(Snapshot snapshot)
         {
             if (!snapshot.BrightnessEnabled)
             {
-                _brightnessApplied = false;
                 _brightnessOwner = null;
+                _brightnessStarted = false;
+                _brightnessPending = false;
+                _brightnessHdrKnown = false;
+                _brightnessVerifyAtMs = 0;
                 return;
             }
 
+            long now = Now;
             var owner = ResolveBrightnessOwner(snapshot);
-            int brightness = snapshot.BrightnessFor(owner);
             string? app = owner?.Entry;
+            int brightness = snapshot.BrightnessFor(owner);
 
-            bool sameOwner = string.Equals(app, _brightnessOwner, StringComparison.OrdinalIgnoreCase);
-            if (_brightnessApplied && sameOwner && brightness == _brightnessValue) return;
+            bool firstCheck = !_brightnessStarted;
+            _brightnessStarted = true;
 
-            bool firstCheck = !_brightnessApplied;
-            _brightnessApplied = true;
-            _brightnessOwner = app;
-            _brightnessValue = brightness;
+            bool targetChanged = firstCheck || brightness != _brightnessValue ||
+                                 !string.Equals(app, _brightnessOwner, StringComparison.OrdinalIgnoreCase);
 
-            // Nothing listed is running at start: leave the TV as the user left it
-            if (firstCheck && app == null) return;
+            if (targetChanged)
+            {
+                _brightnessOwner = app;
+                _brightnessValue = brightness;
 
-            ApplyBrightness(brightness, app);
+                // Nothing listed is running at start: leave the TV as the user left it
+                if (firstCheck && app == null) return;
+
+                ScheduleBrightnessWrite(now);
+            }
+
+            if (_brightnessHdrKnown && _brightnessAppliedOnHdr != _hdrAny)
+            {
+                ScheduleBrightnessWrite(now);
+                ScheduleBrightnessVerify(now);
+            }
+
+            if (_brightnessApplying || _brightnessVerifying) return;
+
+            if (_brightnessPending && now >= _brightnessNextAttemptMs &&
+                now - _hdrChangedMs >= BrightnessSettleAfterHdrMs)
+            {
+                _brightnessPending = false;
+                _brightnessApplying = true;
+                _brightnessAppliedOnHdr = _hdrAny;
+                _brightnessHdrKnown = true;
+                ScheduleBrightnessVerify(now);
+                StartBrightnessWrite(brightness, app);
+                return;
+            }
+
+            if (_brightnessVerifyAtMs > 0 && now >= _brightnessVerifyAtMs && !_brightnessPending &&
+                _brightnessHdrKnown && _brightnessAppliedOnHdr == _hdrAny)
+            {
+                _brightnessVerifyAtMs = 0;
+                _brightnessVerifying = true;
+                _ = Task.Run(() => VerifyBrightnessAsync(brightness, app));
+            }
         }
+
+        /// <summary>
+        /// A write made close to an HDR change needs one more read afterwards: the TV may switch picture mode after
+        /// the write and restore the brightness it has stored for that mode.
+        /// </summary>
+        private void ScheduleBrightnessVerify(long now)
+        {
+            if (now - _hdrChangedMs >= BrightnessVerifyAfterHdrMs) return;
+            _brightnessVerifyAtMs = Math.Max(_brightnessVerifyAtMs, _hdrChangedMs + BrightnessVerifyAfterHdrMs);
+        }
+
+        /// <summary>A write is needed: the retries start over, and an HDR switch may still reset the value.</summary>
+        private void ScheduleBrightnessWrite(long now)
+        {
+            _brightnessPending = true;
+            _brightnessAttempts = 0;
+            _brightnessNextAttemptMs = now;
+            _brightnessHdrKnown = false;
+        }
+
+        private void StartBrightnessWrite(int brightness, string? app)
+        {
+            Log("BRIGHT", $"{(app == null ? "桌面" : $"'{app}'")} – 亮度 {brightness}");
+            _ = Task.Run(() => WriteBrightnessAsync(brightness, app));
+        }
+
+        private async Task WriteBrightnessAsync(int brightness, string? app)
+        {
+            TvResult result = await RunTvCommandAsync(() => TvCli.SetBrightnessAsync(brightness)).ConfigureAwait(false);
+            _brightnessApplying = false;
+            if (!IsSameTarget(brightness, app)) return;
+
+            if (result.Success)
+            {
+                _brightnessAttempts = 0;
+                return;
+            }
+
+            _brightnessAttempts++;
+            if (_brightnessAttempts >= BrightnessMaxAttempts)
+            {
+                Log("ERROR", $"亮度 {brightness} 连续 {BrightnessMaxAttempts} 次未被电视接受（{result.Detail}）– 本轮不再重试，下次切换时再设置。");
+                return;
+            }
+
+            _brightnessPending = true;
+            _brightnessNextAttemptMs = Now + (long)BrightnessRetryDelayMs * _brightnessAttempts;
+            Log("ERROR", $"设置亮度 {brightness} 失败：{result.Detail} – {BrightnessRetryDelayMs * _brightnessAttempts / 1000} 秒后重试" +
+                         $"（{_brightnessAttempts}/{BrightnessMaxAttempts}）。");
+        }
+
+        /// <summary>
+        /// The TV switched picture mode after the write and may have restored its own brightness in the new mode.
+        /// Reading once more after the switch rewrites the wanted value instead of leaving the wrong one on screen.
+        /// </summary>
+        private async Task VerifyBrightnessAsync(int brightness, string? app)
+        {
+            TvResult result = await RunTvCommandAsync(() => TvCli.ReadCurrentBrightnessAsync()).ConfigureAwait(false);
+            _brightnessVerifying = false;
+            if (!result.Success || result.Brightness == brightness) return;
+            if (!IsSameTarget(brightness, app)) return;
+
+            Log("BRIGHT", $"电视在新图像模式下用了自己的亮度 {result.Brightness}（期望 {brightness}）– 重新写入。");
+            ScheduleBrightnessWrite(Now);
+        }
+
+        /// <summary>A TV command never throws at the caller: a failure is reported as a result.</summary>
+        private static async Task<TvResult> RunTvCommandAsync(Func<Task<TvResult>> command)
+        {
+            try
+            {
+                return await command().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return new TvResult(false, ex.Message);
+            }
+        }
+
+        /// <summary>The value was not replaced by another program or slider while the TV command was running.</summary>
+        private bool IsSameTarget(int brightness, string? app) =>
+            brightness == _brightnessValue &&
+            string.Equals(app, _brightnessOwner, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// The program whose brightness belongs on screen: the running HDR game (it keeps its brightness even when the
@@ -695,20 +848,6 @@ namespace HdrBrightControl
 
             // A game the launcher follow just started is only in the config, not yet in this snapshot
             return snapshot.Programs.Match(_runningGame) ?? new ListedProgram { Entry = _runningGame, IsHdr = true };
-        }
-
-        private void ApplyBrightness(int brightness, string? app)
-        {
-            Log("BRIGHT", $"{(app == null ? "桌面" : $"'{app}'")} – 亮度 {brightness}");
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var result = await TvCli.SetBrightnessAsync(brightness).ConfigureAwait(false);
-                    if (!result.Success) Log("ERROR", $"设置亮度失败：{result.Detail}");
-                }
-                catch (Exception ex) { Log("ERROR", $"设置亮度失败：{ex.Message}"); }
-            });
         }
 
         /// <summary>
@@ -756,6 +895,7 @@ namespace HdrBrightControl
             {
                 _hdrOnByApp = true;
                 _hdrAny = true;
+                _hdrChangedMs = now;
                 _verifyOn = true;
                 _expectAny = true;
                 _switchConfirmed = false;
@@ -780,6 +920,7 @@ namespace HdrBrightControl
                 _expectAny = false;
                 _switchConfirmed = false;
                 _hdrAny = false;
+                _hdrChangedMs = now;
                 _verifyOn = false;
             }
             else
