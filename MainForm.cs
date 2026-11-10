@@ -40,8 +40,8 @@ namespace SmartHdrManager
         private readonly List<Control> _pages = new();
         private TableLayoutPanel? _root;
 
-        private readonly TextBox _searchHdr = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
-        private readonly TextBox _searchSdr = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索游戏…" };
+        private readonly TextBox _searchHdr = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索列表…" };
+        private readonly TextBox _searchSdr = new() { BorderStyle = BorderStyle.None, PlaceholderText = "搜索列表…" };
         private readonly GameList _gamesHdr = new() { Dock = DockStyle.Fill };
         private readonly GameList _gamesSdr = new() { Dock = DockStyle.Fill };
 
