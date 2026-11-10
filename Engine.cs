@@ -91,7 +91,6 @@ namespace SmartHdrManager
             public readonly int TickMs;
             public readonly int DesktopBrightness;
             public readonly Dictionary<string, int> Brightness;
-            public readonly Dictionary<string, (string[] Folders, string[] Exes)> GameFolders;
 
             public Snapshot(AppConfig c)
             {
@@ -110,7 +109,6 @@ namespace SmartHdrManager
                 TickMs = Math.Clamp(c.ProcessScanIntervalMs, 50, 1000);
                 DesktopBrightness = Math.Clamp(c.DesktopBrightness, BrightnessMin, BrightnessMax);
                 Brightness = BuildBrightness(c);
-                GameFolders = BuildGameFolders(c, AllGames);
             }
 
             /// <summary>TV brightness per process: per-game config value.</summary>
@@ -128,16 +126,6 @@ namespace SmartHdrManager
             /// <summary>Brightness of one process, or the desktop value.</summary>
             public int BrightnessFor(string? process) =>
                 process != null && Brightness.TryGetValue(process, out int value) ? value : DesktopBrightness;
-
-            /// <summary>
-            /// Game install folders and known exes, by process name. No library games are scanned anymore;
-            /// only explicitly added programs are matched (by name, not by folder).
-            /// </summary>
-            private static Dictionary<string, (string[] Folders, string[] Exes)> BuildGameFolders(AppConfig c, HashSet<string> trackedGames)
-            {
-                return new Dictionary<string, (string[] Folders, string[] Exes)>(Cmp);
-            }
-
         }
 
         /// <summary>The games list switch of one process: on unless the config disables it.</summary>
@@ -188,6 +176,7 @@ namespace SmartHdrManager
         private bool _foregroundFullscreen;
         private string? _externalHoldProcess;
         private long _nextExternalCheckMs;
+        private bool _foregroundInGamesList;
 
         private long _sdrFallbackAtMs = -1;
         private long _lastAttemptMs = long.MinValue / 2;
@@ -331,8 +320,7 @@ namespace SmartHdrManager
             _foregroundProcess = procName;
             _foregroundFullscreen = isFullscreen;
 
-            bool foregroundListed = snapshot.AllGames.Contains(procName) && snapshot.GameFolders.ContainsKey(procName);
-            _foregroundElsewhere = foregroundListed && !IsGameLocation(snapshot, procName, procId);
+            _foregroundInGamesList = snapshot.AllGames.Contains(procName);
 
             RefreshHdrState(now);
 
@@ -446,7 +434,7 @@ namespace SmartHdrManager
 
         private void Decide(Snapshot snapshot, long now, string procName)
         {
-            bool shouldEnableHdr = EvaluateHdrRequirement(snapshot, procName, _foregroundElsewhere, out string reason);
+            bool shouldEnableHdr = EvaluateHdrRequirement(snapshot, procName, out string reason);
             bool canAttempt = now - _lastAttemptMs >= SwitchSpacingMs && now >= _cooldownUntilMs;
 
             if (TryForceSdr(snapshot, procName, shouldEnableHdr, canAttempt)) return;
@@ -489,7 +477,7 @@ namespace SmartHdrManager
             string demand;
             if (!shouldEnableHdr) demand = "none";
             else if (_runningGame != null) demand = "game:" + _runningGame;
-            else if (snapshot.HdrGames.Contains(procName) && !_foregroundElsewhere) demand = "game:" + procName;
+            else if (snapshot.HdrGames.Contains(procName) && _foregroundInGamesList) demand = "game:" + procName;
             else if (_externalHoldProcess != null) demand = "ext:" + _externalHoldProcess;
             else if (_followLauncher != null && _followHoldsHdr) demand = "follow:" + _followLauncher;
             else demand = "focus:" + procName;
@@ -510,7 +498,7 @@ namespace SmartHdrManager
                 _externalEnded = false;
                 if (!_hdrAny && canAttempt)
                 {
-                    string? game = _runningGame ?? (snapshot.HdrGames.Contains(procName) && !_foregroundElsewhere ? procName : null);
+                    string? game = _runningGame ?? (snapshot.HdrGames.Contains(procName) && _foregroundInGamesList ? procName : null);
                     TurnHdrOn(reason);
                     if (_hdrAny && game != null)
                     {
@@ -579,7 +567,7 @@ namespace SmartHdrManager
             if (hdrAppInFront || _runningGame != null) return false;
 
             string? sdrApp = _runningSdrApp;
-            if (sdrApp == null && snapshot.SdrGames.Contains(procName) && !_foregroundElsewhere) sdrApp = procName;
+            if (sdrApp == null && snapshot.SdrGames.Contains(procName) && _foregroundInGamesList) sdrApp = procName;
             if (sdrApp == null) return false;
 
             _activeHdrGameProcess = null;
@@ -628,7 +616,7 @@ namespace SmartHdrManager
         private string? ResolveBrightnessApp(Snapshot snapshot, string procName)
         {
             if (_runningGame != null) return _runningGame;
-            if (string.IsNullOrEmpty(procName) || _foregroundElsewhere) return null;
+            if (string.IsNullOrEmpty(procName) || !_foregroundInGamesList) return null;
             if (snapshot.HdrGames.Contains(procName) || snapshot.SdrGames.Contains(procName)) return procName;
             return null;
         }
@@ -744,11 +732,11 @@ namespace SmartHdrManager
             }
         }
 
-        private static bool EvaluateHdrRequirement(Snapshot snapshot, string procName, bool otherProgram, out string reason)
+        private static bool EvaluateHdrRequirement(Snapshot snapshot, string procName, out string reason)
         {
             reason = string.Empty;
             if (string.IsNullOrEmpty(procName)) return false;
-            if (!snapshot.HdrGames.Contains(procName) || otherProgram) return false;
+            if (!snapshot.HdrGames.Contains(procName)) return false;
 
             reason = $"HDR 游戏 / 应用在前台（{procName}）";
             return true;
