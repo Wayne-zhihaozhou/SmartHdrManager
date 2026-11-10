@@ -72,6 +72,9 @@ namespace HdrBrightControl
 
         public event EventHandler<GameItem>? BrightnessToggled;
 
+        /// <summary>Raised when the left mouse button is double-clicked on a row (the brightness steppers excluded).</summary>
+        public event EventHandler<GameItem>? ItemActivated;
+
         private sealed class RowCache
         {
             public Bitmap Bitmap = null!;
@@ -85,7 +88,7 @@ namespace HdrBrightControl
         public GameList()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                     ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+                     ControlStyles.ResizeRedraw | ControlStyles.Selectable | ControlStyles.StandardDoubleClick, true);
             TabStop = true;
             BackColor = Theme.Surface;
             ForeColor = Theme.Text;
@@ -359,6 +362,21 @@ namespace HdrBrightControl
         }
 
         private bool PressedRowHit(Point location) => _pressed >= 0 && SameRowBoundary(_pressed, location);
+
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                int index = IndexAt(e.Location);
+                if (index >= 0 && !IsOnMinusButton(e.Location, index) && !IsOnPlusButton(e.Location, index))
+                {
+                    _selected = index;
+                    Invalidate();
+                    ItemActivated?.Invoke(this, _items[index]);
+                }
+            }
+            base.OnMouseDoubleClick(e);
+        }
 
         private bool SameRowBoundary(int index, Point location)
         {

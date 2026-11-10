@@ -47,6 +47,7 @@ namespace HdrBrightControl
                 Padding = new Padding(6)
             };
             listCard.Controls.Add(list);
+            _toolTip.SetToolTip(list, "双击条目可启动该程序");
             page.Controls.Add(listCard, 0, 2);
             page.Controls.Add(BuildGamesActions(sdr), 0, 3);
 
@@ -59,7 +60,9 @@ namespace HdrBrightControl
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             row.Controls.Add(new Label
             {
-                Text = sdr ? "开启应用后，其运行期间将强制保持 SDR" : "开启应用后，其运行期间将使用 HDR",
+                Text = sdr
+                    ? "开启应用后，其运行期间将强制保持 SDR　·　双击条目可启动程序"
+                    : "开启应用后，其运行期间将使用 HDR　·　双击条目可启动程序",
                 Font = Theme.Small,
                 ForeColor = Theme.Muted,
                 AutoSize = false,

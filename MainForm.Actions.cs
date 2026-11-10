@@ -290,6 +290,59 @@ namespace HdrBrightControl
             RebuildGames(sdr);
         }
 
+        /// <summary>Launches the program of a row that was double-clicked on the HDR or SDR page.</summary>
+        private void OnGameItemActivated(GameItem item)
+        {
+            string? exePath = item.ExePath;
+
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                MessageBox.Show(this,
+                    $"'{item.Name}' 没有记录可执行文件路径，无法启动。\n\n请移除该条目，再用「添加程序」重新添加它的 .exe。",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!File.Exists(exePath))
+            {
+                MessageBox.Show(this,
+                    $"找不到 '{item.Name}' 的可执行文件：\n{exePath}\n\n请确认文件是否已被移动或删除。",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (IsSameExecutable(exePath, Application.ExecutablePath))
+            {
+                MessageBox.Show(this, "无法从列表中启动 HDR亮控自身。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                var startInfo = new ProcessStartInfo(exePath)
+                {
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(exePath) ?? string.Empty
+                };
+                Process.Start(startInfo)?.Dispose();
+                _engine.Log("LAUNCH", $"已启动 '{item.Name}'：{exePath}");
+            }
+            catch (Exception ex)
+            {
+                _engine.Log("ERROR", $"无法启动 '{item.Name}'：{ex.Message}");
+                MessageBox.Show(this, $"无法启动 '{item.Name}'。\n\n{ex.Message}",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private static bool IsSameExecutable(string first, string second)
+        {
+            string? firstPath = ProgramIdentity.FullPath(first);
+            string? secondPath = ProgramIdentity.FullPath(second);
+            return firstPath != null && secondPath != null &&
+                   string.Equals(firstPath, secondPath, StringComparison.OrdinalIgnoreCase);
+        }
+
         private void OpenInNotepad(string path)
         {
             try

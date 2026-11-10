@@ -186,6 +186,9 @@ namespace HdrBrightControl
             _gamesHdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, sdr: false);
             _gamesSdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, sdr: true);
 
+            _gamesHdr.ItemActivated += (_, item) => OnGameItemActivated(item);
+            _gamesSdr.ItemActivated += (_, item) => OnGameItemActivated(item);
+
             _swAutostart.CheckedChanged += (_, _) =>
             {
                 if (_loadingSettings) return;
