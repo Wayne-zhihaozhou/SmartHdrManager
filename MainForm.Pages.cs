@@ -178,8 +178,6 @@ namespace SmartHdrManager
             var page = CreateScrollPage();
 
             AddSection(page, "测试", "测试电视连接和设置亮度。");
-            AddSection(page, "活动窗口", "当前 HDR 状态和活动窗口信息。");
-            page.AddRow(BuildActivityPanel(), ActionRowHeight);
 
             var statusLabel = new Label
             {
@@ -208,6 +206,9 @@ namespace SmartHdrManager
             pairButton.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "配对中...", DescribePairAsync);
             brightnessLow.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "设置中...", () => DescribeBrightnessAsync(0));
             brightnessHigh.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "设置中...", () => DescribeBrightnessAsync(100));
+
+            AddSection(page, "活动窗口", "当前 HDR 状态和活动窗口信息。");
+            page.AddRow(BuildActivityPanel(), ActionRowHeight);
 
             page.AddFillerRow();
             return page;
