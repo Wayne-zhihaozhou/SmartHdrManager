@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Net.Security;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -58,6 +62,7 @@ namespace SmartHdrManager
         private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new();
 
         private ClientWebSocket? _socket;
+        private HttpMessageInvoker? _invoker;
         private JsonElement? _bufferedHello;
         private TaskCompletionSource<JsonElement>? _helloWaiter;
         private TaskCompletionSource<JsonElement>? _registeredWaiter;
@@ -190,36 +195,77 @@ namespace SmartHdrManager
             var plainUrl = $"ws://{_host}:{PlainPort}";
             var urls = _secureFirst ? new[] { secureUrl, plainUrl } : new[] { plainUrl, secureUrl };
 
+            var source = TvNetworkRoute.FindSourceAddress(_host);
+            HdrEngine.WriteFileLog(source == null
+                ? $"[TV] 未找到与 {_host} 同网段的网卡，使用默认路由连接"
+                : $"[TV] 绑定本机网卡 {source} 直连 {_host}");
+
             Exception? lastError = null;
             foreach (string url in urls)
             {
                 ct.ThrowIfCancellationRequested();
 
+                var invoker = CreateInvoker(source);
                 var socket = new ClientWebSocket();
-                if (url.StartsWith("wss:", StringComparison.Ordinal))
-                    socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
-
                 try
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     timeout.CancelAfter(ConnectTimeoutMs);
-                    await socket.ConnectAsync(new Uri(url), timeout.Token).ConfigureAwait(false);
+                    await socket.ConnectAsync(new Uri(url), invoker, timeout.Token).ConfigureAwait(false);
 
                     lock (_sync)
                     {
                         _socket = socket;
+                        _invoker = invoker;
                     }
                     return socket;
                 }
                 catch (Exception ex)
                 {
                     lastError = ex;
+                    invoker.Dispose();
                     socket.Dispose();
                     ct.ThrowIfCancellationRequested();
                 }
             }
 
             throw new InvalidOperationException($"无法连接电视 {_host}: {lastError?.Message ?? "未知错误"}");
+        }
+
+        /// <summary>
+        /// The connection is made by this handler instead of the shared HTTP stack: it never uses the system proxy and
+        /// binds the outgoing socket to <paramref name="source"/>, which keeps the TV reachable while a VPN owns the
+        /// default route. The TV's certificate is self-signed, so validation is bypassed for this host only.
+        /// </summary>
+        private static HttpMessageInvoker CreateInvoker(IPAddress? source)
+        {
+            var handler = new SocketsHttpHandler
+            {
+                UseProxy = false,
+                ConnectCallback = (context, token) => ConnectBoundAsync(context, source, token),
+                SslOptions = new SslClientAuthenticationOptions
+                {
+                    RemoteCertificateValidationCallback = (_, _, _, _) => true,
+                },
+            };
+            return new HttpMessageInvoker(handler);
+        }
+
+        private static async ValueTask<Stream> ConnectBoundAsync(SocketsHttpConnectionContext context, IPAddress? source,
+                                                                 CancellationToken ct)
+        {
+            var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                if (source != null) socket.Bind(new IPEndPoint(source, 0));
+                await socket.ConnectAsync(context.DnsEndPoint.Host, context.DnsEndPoint.Port, ct).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
         }
 
         private void StartReceiveLoop(ClientWebSocket socket)
@@ -524,11 +570,14 @@ namespace SmartHdrManager
         private async Task CloseSocketAsync()
         {
             ClientWebSocket? socket;
+            HttpMessageInvoker? invoker;
             CancellationTokenSource? cts;
             lock (_sync)
             {
                 socket = _socket;
                 _socket = null;
+                invoker = _invoker;
+                _invoker = null;
                 cts = _receiveCts;
                 _receiveCts = null;
             }
@@ -549,6 +598,8 @@ namespace SmartHdrManager
                 catch { }
                 socket.Dispose();
             }
+
+            invoker?.Dispose();
 
             FailAll(new InvalidOperationException("电视连接已重置"));
         }
@@ -620,11 +671,14 @@ namespace SmartHdrManager
             _disposed = true;
 
             ClientWebSocket? socket;
+            HttpMessageInvoker? invoker;
             CancellationTokenSource? cts;
             lock (_sync)
             {
                 socket = _socket;
                 _socket = null;
+                invoker = _invoker;
+                _invoker = null;
                 cts = _receiveCts;
                 _receiveCts = null;
             }
@@ -632,6 +686,7 @@ namespace SmartHdrManager
             try { cts?.Cancel(); } catch { }
             cts?.Dispose();
             try { socket?.Dispose(); } catch { }
+            try { invoker?.Dispose(); } catch { }
 
             FailAll(new ObjectDisposedException(nameof(LgeTvClient)));
         }
