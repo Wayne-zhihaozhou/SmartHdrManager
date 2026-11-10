@@ -7,7 +7,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     public sealed partial class MainForm
     {

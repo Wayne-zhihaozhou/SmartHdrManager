@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// Finds the local address that reaches the TV directly. A VPN client that takes over the default route would

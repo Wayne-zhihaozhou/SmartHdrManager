@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// HDR control through the Windows display configuration API.

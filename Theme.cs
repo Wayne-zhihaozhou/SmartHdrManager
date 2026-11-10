@@ -8,7 +8,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>Dark, Windows 11 style colours, fonts and helpers shared by all windows and custom controls.</summary>
     public static class Theme

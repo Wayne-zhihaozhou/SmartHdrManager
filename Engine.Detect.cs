@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     public sealed partial class HdrEngine
     {

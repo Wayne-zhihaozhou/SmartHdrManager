@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// Exe path of another process using only PROCESS_QUERY_LIMITED_INFORMATION (the same access Task Manager uses).

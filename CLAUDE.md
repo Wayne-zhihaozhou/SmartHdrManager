@@ -1,6 +1,6 @@
 # 项目信息
 
-- **名称**：Smart HDR Manager
+- **名称**：HDR亮控
 - **版本**：2.6.2
 - **作者**：VantaCode420
 - **类型**：Windows 托盘应用（无控制台窗口）
@@ -23,16 +23,16 @@ C:\Users\admin\.dotnet\sdk\10.0.403
 ## 编译命令
 
 ```powershell
-& "C:\Users\admin\.dotnet\dotnet.exe" build SmartHdrManager.csproj -c Release
+& "C:\Users\admin\.dotnet\dotnet.exe" build HdrBrightControl.csproj -c Release
 ```
 
 ## 编译异常处理
 
-如果编译时提示 `SmartHdrManager.exe` 文件被占用（进程正在运行），需要先结束进程再重新编译：
+如果编译时提示 `HdrBrightControl.exe` 文件被占用（进程正在运行），需要先结束进程再重新编译：
 
 ```powershell
-Stop-Process -Name SmartHdrManager -Force
-& "C:\Users\admin\.dotnet\dotnet.exe" build SmartHdrManager.csproj -c Release
+Stop-Process -Name HdrBrightControl -Force
+& "C:\Users\admin\.dotnet\dotnet.exe" build HdrBrightControl.csproj -c Release
 ```
 
 ## 编译配置
@@ -41,12 +41,12 @@ Stop-Process -Name SmartHdrManager -Force
 - 提交前清理 `obj/` 和 `bin/` 中的 Debug 产物
 
 ```powershell
-dotnet clean SmartHdrManager.csproj
+dotnet clean HdrBrightControl.csproj
 ```
 
 ## 输出位置
 
-- **EXE**：`bin\Release\net10.0-windows\win-x64\publish\SmartHdrManager.exe`
+- **EXE**：`bin\Release\net10.0-windows\win-x64\publish\HdrBrightControl.exe`
 - **发布包**：`bin\Release\net10.0-windows\win-x64\publish\`（自包含部署，含完整 .NET 运行时）
 
 ## 目标框架
@@ -83,7 +83,7 @@ dotnet clean SmartHdrManager.csproj
 
 - **仅允许 Release 配置**，禁止 Debug 配置
 - **每次代码修改后必须重新编译**，确保代码能正确构建
-- **编译前必须关闭 SmartHdrManager.exe**——若进程正在运行，先执行 `Stop-Process -Name SmartHdrManager -Force`
+- **编译前必须关闭 HdrBrightControl.exe**——若进程正在运行，先执行 `Stop-Process -Name HdrBrightControl -Force`
 
 ## 代码规范
 

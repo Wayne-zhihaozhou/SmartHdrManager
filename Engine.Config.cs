@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     public sealed partial class HdrEngine
     {
@@ -73,7 +73,7 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// One-time move of config.json from the exe folder (versions up to 2.3) to %AppData%\SmartHdrManager.
+        /// One-time move of config.json from the exe folder (versions up to 2.3) to %AppData%\HdrBrightControl.
         /// The old file is renamed to config.json.old so it is clear which file is used.
         /// </summary>
         private void MigrateLegacyConfig()

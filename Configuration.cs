@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>Everything that is stored in config.json.</summary>
     public sealed class AppConfig

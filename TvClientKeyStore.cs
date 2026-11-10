@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// Persisted client-key per TV IP: after the first pairing, reconnecting with the saved key no longer asks for

@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>Window, fullscreen and foreground-process detection.</summary>
     public static class WindowDetector

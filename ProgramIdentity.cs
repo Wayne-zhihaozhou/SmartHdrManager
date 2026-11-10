@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>How a running process was recognised as a program of one of the two lists.</summary>
     public enum ProgramMatchKind

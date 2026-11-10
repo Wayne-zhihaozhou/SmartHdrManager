@@ -11,7 +11,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// LG webOS TV SSAP client (pure C#). Handshake: WebSocket (wss:3001 / ws:3000) → hello → getSystemInfo → register.

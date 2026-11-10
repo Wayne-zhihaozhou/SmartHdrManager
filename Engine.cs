@@ -6,7 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     public sealed class EngineStatus
     {
@@ -54,10 +54,10 @@ namespace SmartHdrManager
 
         public static readonly string ConfigPath = IsPortable
             ? LegacyConfigPath
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SmartHdrManager", "config.json");
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HdrBrightControl", "config.json");
 
         public static readonly string LogPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SmartHdrManager", "log.txt");
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HdrBrightControl", "log.txt");
 
         private const int ProcessScanPeriodMs = 1000;
         private const int HdrRequeryIntervalMs = 2000;
@@ -227,7 +227,7 @@ namespace SmartHdrManager
 
         public void Start()
         {
-            Log("INFO", "Smart HDR Manager 已启动 – 监控中。");
+            Log("INFO", "HDR亮控 已启动 – 监控中。");
             ApplyBrightnessControlSettings();
 
             _thread = new Thread(Run) { IsBackground = true, Name = "HdrEngine" };

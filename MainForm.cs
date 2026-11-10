@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// The settings window: a segmented tab bar and four pages (games, test, settings, log).

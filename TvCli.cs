@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// LG webOS TV brightness control (pure C#, no Node.js).

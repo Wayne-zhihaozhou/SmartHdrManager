@@ -5,7 +5,7 @@ using System.IO;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// The tray icon and the "start with Windows" registry entry. The tray icon is the only thing that stays visible
@@ -14,7 +14,7 @@ namespace SmartHdrManager
     public sealed class TrayAndStartupManager : IDisposable
     {
         private const string RunRegistryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string AppRegistryName = "SmartHdrManager";
+        private const string AppRegistryName = "HdrBrightControl";
         private const string AutostartArguments = "--tray";
         private const int TooltipMaxLength = 63;
         private const int MinIconSize = 16;
@@ -47,7 +47,7 @@ namespace SmartHdrManager
             _icon = new NotifyIcon
             {
                 Icon = _iconOff,
-                Text = "Smart HDR Manager",
+                Text = "HDR亮控",
                 ContextMenuStrip = menu,
                 Visible = true
             };

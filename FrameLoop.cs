@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// Animation clock synced to the monitor: a background thread waits for each display frame (DwmFlush returns when

@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     public sealed partial class MainForm
     {

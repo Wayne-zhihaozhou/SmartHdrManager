@@ -5,7 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>Panel with rounded corners. BackColor is the card colour; the corners show the parent colour.</summary>
     public class RoundedPanel : Panel

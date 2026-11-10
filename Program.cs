@@ -4,7 +4,7 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace SmartHdrManager
+namespace HdrBrightControl
 {
     /// <summary>
     /// Owns the tray icon, the background engine and (only while it is open) the settings window.
@@ -123,7 +123,7 @@ namespace SmartHdrManager
         {
             var status = _engine.Status;
             string state = status.Paused ? "已暂停" : status.HdrOn ? "HDR 开" : "HDR 关";
-            string tooltip = $"Smart HDR Manager – {state}";
+            string tooltip = $"HDR亮控 – {state}";
             if (tooltip != _lastTooltip)
             {
                 _lastTooltip = tooltip;
@@ -160,7 +160,7 @@ namespace SmartHdrManager
     /// <summary>Named events through which a second launch passes a command-line action to the running tray instance.</summary>
     internal sealed class CommandEvents : IDisposable
     {
-        private const string TogglePauseEventName = @"Local\SmartHdrManager.TogglePause";
+        private const string TogglePauseEventName = @"Local\HdrBrightControl.TogglePause";
 
         private readonly EventWaitHandle _togglePause = new(false, EventResetMode.AutoReset, TogglePauseEventName);
 
@@ -189,7 +189,7 @@ namespace SmartHdrManager
 
     internal static class Program
     {
-        private const string AppUserModelId = "VantaCode420.SmartHdrManager";
+        private const string AppUserModelId = "VantaCode420.HdrBrightControl";
         private const string NotificationIconFileName = "app.ico";
         private const int NotificationIconSize = 64;
         private const int UpdateMutexWaitSeconds = 30;
@@ -210,9 +210,9 @@ namespace SmartHdrManager
             bool startHidden = command != CliCommand.None ||
                                args.Any(arg => arg.Equals("--tray", StringComparison.OrdinalIgnoreCase));
 
-            using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\SmartHdrManager.ShowWindow");
+            using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\HdrBrightControl.ShowWindow");
             using var commands = new CommandEvents();
-            using var mutex = new Mutex(true, @"Local\SmartHdrManager.SingleInstance", out bool isFirstInstance);
+            using var mutex = new Mutex(true, @"Local\HdrBrightControl.SingleInstance", out bool isFirstInstance);
 
             bool justUpdated = args.Any(arg => arg.Equals("--updated", StringComparison.OrdinalIgnoreCase));
             if (!isFirstInstance && justUpdated)
