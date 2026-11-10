@@ -2,41 +2,65 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 
 namespace SmartHdrManager
 {
     public sealed partial class HdrEngine
     {
-        private readonly HashSet<string> _pathLookupDone = new(StringComparer.OrdinalIgnoreCase);
-
-        private string? FindRunningApp(Snapshot snapshot, HashSet<string> games, out string? exePath)
+        /// <summary>
+        /// One pass over all processes for the HDR game and the SDR program that are running. A program is found by
+        /// its process name or, for programs that start a sibling exe, by its exe; the remembered window in front is
+        /// dropped as soon as its process is gone.
+        /// </summary>
+        private void ScanRunningPrograms(Snapshot snapshot)
         {
-            exePath = null;
-            if (games.Count == 0) return null;
-
             Process[] processes;
             try { processes = Process.GetProcesses(); }
-            catch { return null; }
+            catch { return; }
 
-            string? found = null;
+            string? game = null;
+            string? sdrApp = null;
+            bool contentRunning = _contentProcess.Length == 0 || IsSelf(_contentProcess);
+
             foreach (var process in processes)
             {
                 try
                 {
-                    if (found != null) continue;
+                    if (game != null && sdrApp != null && contentRunning) continue;
 
                     string name = process.ProcessName;
-                    if (!games.Contains(name)) continue;
+                    if (!contentRunning && string.Equals(name, _contentProcess, StringComparison.OrdinalIgnoreCase))
+                        contentRunning = true;
 
-                    found = name.ToLowerInvariant();
-                    if (_pathLookupDone.Add(found))
-                        exePath = ProcessPaths.TryGetExePath(process.Id);
+                    var program = snapshot.Programs.MatchProcess(name, process.Id).Program;
+                    if (program == null) continue;
+
+                    if (program.IsHdr)
+                    {
+                        if (game != null) continue;
+
+                        game = program.Entry;
+                        if (KnownExePath(game) == null && ProcessPaths.TryGetExePath(process.Id) is string exePath)
+                            RememberProgramPath(game, exePath);
+                    }
+                    else if (sdrApp == null)
+                    {
+                        sdrApp = program.Entry;
+                    }
                 }
                 catch { }
                 finally { process.Dispose(); }
             }
-            return found;
+
+            _runningGame = game;
+            _runningSdrApp = sdrApp;
+
+            if (!contentRunning)
+            {
+                _contentProcess = string.Empty;
+                _contentProcessId = 0;
+                _contentProgram = null;
+            }
         }
 
         /// <summary>Exe path of a process name: from the game library, a scan, "Add program" or an earlier run.</summary>

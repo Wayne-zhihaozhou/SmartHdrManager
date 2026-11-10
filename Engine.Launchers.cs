@@ -86,7 +86,7 @@ namespace SmartHdrManager
 
         private void StartFollow(Snapshot snapshot, long now, string closed, long ranMs)
         {
-            if (!snapshot.HdrGames.Contains(closed) || ProcessNames.IsRunning(closed)) return;
+            if (snapshot.Programs.Match(closed) is not { IsHdr: true } || ProcessNames.IsRunning(closed)) return;
 
             string? exe = KnownExePath(closed);
             string? folder = exe == null ? null : GameFolder(exe);

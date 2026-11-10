@@ -49,19 +49,20 @@ namespace SmartHdrManager
             }
         }
 
-        public void SetGameBrightness(string gameKey, IEnumerable<string> processes, int brightness, string displayName)
+        public void SetGameBrightness(IEnumerable<string> processes, int brightness, string displayName)
         {
-            var list = processes.ToList();
-            int value = Math.Clamp(brightness, 0, 100);
+            int value = Math.Clamp(brightness, BrightnessMin, BrightnessMax);
 
             lock (Sync)
             {
-                var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
-                foreach (string process in list) brightnessMap[process] = value;
+                var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>(Cmp);
+                foreach (string process in processes) brightnessMap[process] = value;
                 Config.PerGameBrightness = brightnessMap;
 
+                InvalidateSnapshot();
                 Save();
             }
+
             Log("BRIGHT", $"'{displayName}' 亮度设为 {value}");
         }
 
@@ -69,7 +70,7 @@ namespace SmartHdrManager
         /// <param name="sdr">True for the SDR list, false for the HDR list.</param>
         public bool AddGame(string procName, string? exePath = null, bool sdr = false)
         {
-            if (string.IsNullOrWhiteSpace(procName) || procName is "explorer" or "smarthdrmanager")
+            if (string.IsNullOrWhiteSpace(procName) || procName is ExplorerProcessName or SelfProcessName)
             {
                 Log("ERROR", "无效的程序名。");
                 return false;

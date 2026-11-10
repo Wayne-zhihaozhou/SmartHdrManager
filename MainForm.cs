@@ -299,9 +299,14 @@ namespace SmartHdrManager
 
             if (status.FollowingLauncher != null) return $"{status.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
 
-            return string.IsNullOrEmpty(status.ActiveProcess)
-                ? "等待中 …"
-                : $"活动窗口：{status.ActiveProcess}{(status.IsFullscreen ? "（全屏）" : "")}";
+            if (string.IsNullOrEmpty(status.ActiveProcess)) return "等待中 …";
+
+            string window = $"活动窗口：{status.ActiveProcess}{(status.IsFullscreen ? "（全屏）" : "")}";
+            if (status.ForegroundEntry != null &&
+                !status.ForegroundEntry.Equals(status.ActiveProcess, StringComparison.OrdinalIgnoreCase))
+                window += $" → 列表条目 {status.ForegroundEntry}";
+
+            return window;
         }
 
         private void AppendNewLogLines()

@@ -17,6 +17,12 @@ namespace SmartHdrManager
         public string? RunningGame { get; init; }
         public string? RunningSdrApp { get; init; }
         public string? FollowingLauncher { get; init; }
+
+        /// <summary>List entry the window in front belongs to, or null when it is on neither list.</summary>
+        public string? ForegroundEntry { get; init; }
+
+        /// <summary>List entry whose brightness is on the TV right now, or null for the desktop brightness.</summary>
+        public string? BrightnessOwner { get; init; }
     }
 
     /// <summary>One row of the games list: a library game (several processes possible) or a single program.</summary>
@@ -66,6 +72,12 @@ namespace SmartHdrManager
         private const int BrightnessMin = 0;
         private const int BrightnessMax = 100;
 
+        /// <summary>Process name of this app, lower case: its own window is not content that decides anything.</summary>
+        public const string SelfProcessName = "smarthdrmanager";
+
+        /// <summary>Windows desktop and search UI: no game, no video.</summary>
+        private const string ExplorerProcessName = "explorer";
+
         private static readonly StringComparer Cmp = StringComparer.OrdinalIgnoreCase;
 
         public AppConfig Config { get; private set; }
@@ -82,9 +94,7 @@ namespace SmartHdrManager
 
         private sealed class Snapshot
         {
-            public readonly HashSet<string> HdrGames;
-            public readonly HashSet<string> SdrGames;
-            public readonly HashSet<string> AllGames;
+            public readonly ProgramMatcher Programs;
             public readonly bool EnableOnProcessStart;
             public readonly bool BrightnessEnabled;
             public readonly int FallbackSeconds;
@@ -94,15 +104,7 @@ namespace SmartHdrManager
 
             public Snapshot(AppConfig c)
             {
-                HdrGames = new HashSet<string>(c.HdrGamesAndApps ?? new List<string>(), Cmp);
-                HdrGames.RemoveWhere(process => !IsHdrEnabledFor(c.GameHdrModes, process));
-
-                SdrGames = new HashSet<string>(c.SdrGamesAndApps ?? new List<string>(), Cmp);
-                SdrGames.ExceptWith(HdrGames);   // a process on both lists follows the HDR rule
-
-                AllGames = new HashSet<string>(HdrGames, Cmp);
-                AllGames.UnionWith(SdrGames);
-
+                Programs = new ProgramMatcher(BuildListedPrograms(c));
                 EnableOnProcessStart = c.EnableHdrOnProcessStart;
                 BrightnessEnabled = c.Brightness?.Enabled ?? true;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
@@ -111,7 +113,32 @@ namespace SmartHdrManager
                 Brightness = BuildBrightness(c);
             }
 
-            /// <summary>TV brightness per process: per-game config value.</summary>
+            /// <summary>The programs of both lists; a process on both lists follows the HDR rule.</summary>
+            private static List<ListedProgram> BuildListedPrograms(AppConfig c)
+            {
+                var paths = c.ProgramPaths ?? new Dictionary<string, string>(Cmp);
+                var hdr = new List<string>(c.HdrGamesAndApps ?? new List<string>());
+                hdr.RemoveAll(process => !IsHdrEnabledFor(c.GameHdrModes, process));
+
+                var programs = new List<ListedProgram>(hdr.Count);
+                foreach (string process in hdr)
+                    programs.Add(Listed(process, isHdr: true, paths));
+
+                foreach (string process in c.SdrGamesAndApps ?? new List<string>())
+                    if (!programs.Exists(entry => string.Equals(entry.Entry, process, StringComparison.OrdinalIgnoreCase)))
+                        programs.Add(Listed(process, isHdr: false, paths));
+
+                return programs;
+            }
+
+            private static ListedProgram Listed(string process, bool isHdr, Dictionary<string, string> paths) => new()
+            {
+                Entry = process,
+                IsHdr = isHdr,
+                ExePath = paths.TryGetValue(process, out var path) ? path : null
+            };
+
+            /// <summary>TV brightness per list entry: per-program config value.</summary>
             private static Dictionary<string, int> BuildBrightness(AppConfig c)
             {
                 var brightness = new Dictionary<string, int>(Cmp);
@@ -123,9 +150,9 @@ namespace SmartHdrManager
                 return brightness;
             }
 
-            /// <summary>Brightness of one process, or the desktop value.</summary>
-            public int BrightnessFor(string? process) =>
-                process != null && Brightness.TryGetValue(process, out int value) ? value : DesktopBrightness;
+            /// <summary>Brightness of one list entry, or the desktop value.</summary>
+            public int BrightnessFor(ListedProgram? program) =>
+                program != null && Brightness.TryGetValue(program.Entry, out int value) ? value : DesktopBrightness;
         }
 
         /// <summary>The games list switch of one process: on unless the config disables it.</summary>
@@ -144,7 +171,12 @@ namespace SmartHdrManager
 
         private string? _runningGame;
         private string? _runningSdrApp;
-        private string? _brightnessApp;
+        private ListedProgram? _contentProgram;
+        private string _contentProcess = string.Empty;
+        private int _contentProcessId;
+        private readonly HashSet<string> _identityLogged = new(Cmp);
+        private string? _brightnessOwner;
+        private int _brightnessValue;
         private bool _brightnessApplied;
         private long _nextProcessScanMs;
         private string? _activeHdrGameProcess;
@@ -176,7 +208,6 @@ namespace SmartHdrManager
         private bool _foregroundFullscreen;
         private string? _externalHoldProcess;
         private long _nextExternalCheckMs;
-        private bool _foregroundInGamesList;
 
         private long _sdrFallbackAtMs = -1;
         private long _lastAttemptMs = long.MinValue / 2;
@@ -320,24 +351,22 @@ namespace SmartHdrManager
             _foregroundProcess = procName;
             _foregroundFullscreen = isFullscreen;
 
-            _foregroundInGamesList = snapshot.AllGames.Contains(procName);
+            UpdateForegroundProgram(snapshot, procName, procId);
 
             RefreshHdrState(now);
 
             if (now >= _nextProcessScanMs)
             {
-                _runningGame = FindRunningApp(snapshot, snapshot.HdrGames, out string? runningPath);
-                _runningSdrApp = FindRunningApp(snapshot, snapshot.SdrGames, out _);
+                ScanRunningPrograms(snapshot);
                 _nextProcessScanMs = now + ProcessScanPeriodMs;
-                if (_runningGame != null && runningPath != null) RememberProgramPath(_runningGame, runningPath);
                 TrackLauncherFollow(snapshot, now);
             }
 
             if (!Paused)
-                Decide(snapshot, now, procName);
+                Decide(snapshot, now);
 
             // Brightness follows its own switch, not the HDR control: pausing HDR must not freeze the TV brightness
-            UpdateAppBrightness(snapshot, procName);
+            UpdateAppBrightness(snapshot);
 
             Status = new EngineStatus
             {
@@ -347,8 +376,48 @@ namespace SmartHdrManager
                 IsFullscreen = isFullscreen,
                 RunningGame = _runningGame,
                 RunningSdrApp = _runningSdrApp,
-                FollowingLauncher = _followLauncher
+                FollowingLauncher = _followLauncher,
+                ForegroundEntry = _contentProgram?.Entry,
+                BrightnessOwner = _brightnessOwner
             };
+        }
+
+        /// <summary>
+        /// The program that owns HDR and the TV brightness right now. This app's own window does not count as content:
+        /// opening the settings must not hand the screen to the desktop brightness and back, so the last real
+        /// foreground program keeps deciding until another one takes over.
+        /// </summary>
+        private void UpdateForegroundProgram(Snapshot snapshot, string processName, int processId)
+        {
+            if (!string.IsNullOrEmpty(processName) && !IsSelf(processName))
+            {
+                _contentProcess = processName;
+                _contentProcessId = processId;
+            }
+
+            var match = snapshot.Programs.MatchProcess(_contentProcess, _contentProcessId);
+            _contentProgram = match.Program;
+
+            if (match.Kind is ProgramMatchKind.ExePath or ProgramMatchKind.Product)
+                LogIdentityMatch(_contentProcess, match);
+        }
+
+        private static bool IsSelf(string processName) =>
+            processName.Equals(SelfProcessName, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Logs once per program that a list entry was recognised by its exe, so a report shows why an app that runs a
+        /// sibling exe (PotPlayerMini64.exe for an entry called potplayer64) is treated as that entry.
+        /// </summary>
+        private void LogIdentityMatch(string processName, ProgramMatch match)
+        {
+            string entry = match.Program?.Entry ?? string.Empty;
+            string key = string.Concat(processName, "|", entry);
+            lock (_identityLogged)
+                if (!_identityLogged.Add(key)) return;
+
+            string how = match.Kind == ProgramMatchKind.ExePath ? "同一个 exe" : "同目录、同产品名";
+            Log("LIST", $"'{processName}' 被识别为列表中的 '{entry}'（{how}）– 按该条目处理。");
         }
 
         private void RefreshHdrState(long now)
@@ -412,7 +481,8 @@ namespace SmartHdrManager
             _expectAny = any;
             _switchConfirmed = true;
 
-            if (any && _foregroundFullscreen && front is not ("unknown" or "explorer" or "smarthdrmanager"))
+            if (any && _foregroundFullscreen &&
+                front is not ("unknown" or ExplorerProcessName or SelfProcessName))
             {
                 _externalHoldProcess = front;
                 _externalEnded = false;
@@ -432,12 +502,12 @@ namespace SmartHdrManager
                 Log("HDR", $"HDR 由您或其他程序关闭 – 在 {DescribeDemand(_lastDemand)} 结束前（或下一个游戏 / 视频启动前）不再开启。");
         }
 
-        private void Decide(Snapshot snapshot, long now, string procName)
+        private void Decide(Snapshot snapshot, long now)
         {
-            bool shouldEnableHdr = EvaluateHdrRequirement(snapshot, procName, out string reason);
+            bool shouldEnableHdr = EvaluateHdrRequirement(_contentProgram, out string reason);
             bool canAttempt = now - _lastAttemptMs >= SwitchSpacingMs && now >= _cooldownUntilMs;
 
-            if (TryForceSdr(snapshot, procName, shouldEnableHdr, canAttempt)) return;
+            if (TryForceSdr(shouldEnableHdr, canAttempt)) return;
 
             if (_externalHoldProcess != null)
             {
@@ -477,10 +547,10 @@ namespace SmartHdrManager
             string demand;
             if (!shouldEnableHdr) demand = "none";
             else if (_runningGame != null) demand = "game:" + _runningGame;
-            else if (snapshot.HdrGames.Contains(procName) && _foregroundInGamesList) demand = "game:" + procName;
+            else if (_contentProgram is { IsHdr: true } hdrInFront) demand = "game:" + hdrInFront.Entry;
             else if (_externalHoldProcess != null) demand = "ext:" + _externalHoldProcess;
             else if (_followLauncher != null && _followHoldsHdr) demand = "follow:" + _followLauncher;
-            else demand = "focus:" + procName;
+            else demand = "focus:" + _contentProcess;
 
             if (HandedOff(demand))
             {
@@ -498,7 +568,7 @@ namespace SmartHdrManager
                 _externalEnded = false;
                 if (!_hdrAny && canAttempt)
                 {
-                    string? game = _runningGame ?? (snapshot.HdrGames.Contains(procName) && _foregroundInGamesList ? procName : null);
+                    string? game = _runningGame ?? (_contentProgram is { IsHdr: true } inFront ? inFront.Entry : null);
                     TurnHdrOn(reason);
                     if (_hdrAny && game != null)
                     {
@@ -562,12 +632,12 @@ namespace SmartHdrManager
         /// An application on the SDR list wants HDR off. The HDR list wins whenever one of its applications is active,
         /// so this only steps in while nothing from the HDR list is. Returns true when the tick was handled here.
         /// </summary>
-        private bool TryForceSdr(Snapshot snapshot, string procName, bool hdrAppInFront, bool canAttempt)
+        private bool TryForceSdr(bool hdrAppInFront, bool canAttempt)
         {
             if (hdrAppInFront || _runningGame != null) return false;
 
             string? sdrApp = _runningSdrApp;
-            if (sdrApp == null && snapshot.SdrGames.Contains(procName) && _foregroundInGamesList) sdrApp = procName;
+            if (sdrApp == null && _contentProgram is { IsHdr: false } sdrInFront) sdrApp = sdrInFront.Entry;
             if (sdrApp == null) return false;
 
             _activeHdrGameProcess = null;
@@ -581,44 +651,50 @@ namespace SmartHdrManager
         }
 
         /// <summary>
-        /// Applies the brightness of the application that owns the screen right now. A running HDR game keeps its
+        /// Applies the brightness of the program that owns the screen right now. A running HDR game keeps its
         /// brightness even when the user switches away; otherwise the program in front decides, and the desktop
-        /// brightness applies while a program that is on neither list is in front. Only a change is written to the TV.
+        /// brightness applies while a program that is on neither list is in front. Only a change is written to the TV,
+        /// so editing a value in the settings window reaches the TV at once instead of only after an app switch.
         /// </summary>
-        private void UpdateAppBrightness(Snapshot snapshot, string procName)
+        private void UpdateAppBrightness(Snapshot snapshot)
         {
             if (!snapshot.BrightnessEnabled)
             {
                 _brightnessApplied = false;
-                _brightnessApp = null;
+                _brightnessOwner = null;
                 return;
             }
 
-            string? active = ResolveBrightnessApp(snapshot, procName);
+            var owner = ResolveBrightnessOwner(snapshot);
+            int brightness = snapshot.BrightnessFor(owner);
+            string? app = owner?.Entry;
 
-            if (_brightnessApplied && string.Equals(active, _brightnessApp, StringComparison.OrdinalIgnoreCase)) return;
+            bool sameOwner = string.Equals(app, _brightnessOwner, StringComparison.OrdinalIgnoreCase);
+            if (_brightnessApplied && sameOwner && brightness == _brightnessValue) return;
 
             bool firstCheck = !_brightnessApplied;
             _brightnessApplied = true;
-            _brightnessApp = active;
+            _brightnessOwner = app;
+            _brightnessValue = brightness;
 
             // Nothing listed is running at start: leave the TV as the user left it
-            if (firstCheck && active == null) return;
+            if (firstCheck && app == null) return;
 
-            ApplyBrightness(snapshot.BrightnessFor(active), active);
+            ApplyBrightness(brightness, app);
         }
 
         /// <summary>
-        /// The application whose brightness belongs on screen: the running HDR game, otherwise the listed program in
-        /// front (HDR or SDR list), otherwise null for the desktop brightness. A program from either list that keeps
-        /// running in the background does not hold the brightness – switching to it is what applies it.
+        /// The program whose brightness belongs on screen: the running HDR game (it keeps its brightness even when the
+        /// user switches away), otherwise the listed program in front, otherwise null for the desktop brightness. A
+        /// program from either list that keeps running in the background does not hold the brightness – switching to
+        /// it is what applies it.
         /// </summary>
-        private string? ResolveBrightnessApp(Snapshot snapshot, string procName)
+        private ListedProgram? ResolveBrightnessOwner(Snapshot snapshot)
         {
-            if (_runningGame != null) return _runningGame;
-            if (string.IsNullOrEmpty(procName) || !_foregroundInGamesList) return null;
-            if (snapshot.HdrGames.Contains(procName) || snapshot.SdrGames.Contains(procName)) return procName;
-            return null;
+            if (_runningGame == null) return _contentProgram;
+
+            // A game the launcher follow just started is only in the config, not yet in this snapshot
+            return snapshot.Programs.Match(_runningGame) ?? new ListedProgram { Entry = _runningGame, IsHdr = true };
         }
 
         private void ApplyBrightness(int brightness, string? app)
@@ -736,13 +812,12 @@ namespace SmartHdrManager
             }
         }
 
-        private static bool EvaluateHdrRequirement(Snapshot snapshot, string procName, out string reason)
+        private static bool EvaluateHdrRequirement(ListedProgram? front, out string reason)
         {
             reason = string.Empty;
-            if (string.IsNullOrEmpty(procName)) return false;
-            if (!snapshot.HdrGames.Contains(procName)) return false;
+            if (front is not { IsHdr: true }) return false;
 
-            reason = $"HDR 游戏 / 应用在前台（{procName}）";
+            reason = $"HDR 游戏 / 应用在前台（{front.Entry}）";
             return true;
         }
     }
