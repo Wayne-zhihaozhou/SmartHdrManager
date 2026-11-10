@@ -79,7 +79,7 @@ namespace HdrBrightControl
 
             SuspendLayout();
 
-            Text = "HDR";
+            Text = "HDR亮控";
             Icon = _windowIcon;
             Font = Theme.Body;
             BackColor = Theme.Back;
