@@ -178,15 +178,21 @@ namespace SmartHdrManager
         private static async Task<LgeTvClient?> EnsureConnectedAsync(CancellationToken ct)
         {
             LgeTvClient? client;
+            string? tvIp;
             lock (Sync)
             {
-                if (_client == null && !string.IsNullOrWhiteSpace(_tvIp))
+                tvIp = _tvIp ?? BrightnessConfig.DefaultTvIp;
+            }
+
+            lock (Sync)
+            {
+                if (_client == null && !string.IsNullOrWhiteSpace(tvIp))
                 {
-                    string? savedKey = TvClientKeyStore.Load(_tvIp);
-                    _client = new LgeTvClient(_tvIp) { ClientKey = savedKey };
+                    string? savedKey = TvClientKeyStore.Load(tvIp);
+                    _client = new LgeTvClient(tvIp) { ClientKey = savedKey };
                     HdrEngine.WriteFileLog(savedKey == null
-                        ? $"[TV] {_tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
-                        : $"[TV] {_tvIp} 复用已保存的配对凭证");
+                        ? $"[TV] {tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
+                        : $"[TV] {tvIp} 复用已保存的配对凭证");
                 }
                 client = _client;
             }
