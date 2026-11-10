@@ -50,37 +50,46 @@ namespace SmartHdrManager
         }
 
         /// <summary>Sets the brightness (0-100) and reads it back to verify.</summary>
-        public static async Task<bool> SetBrightnessAsync(int value)
+        public static async Task<BrightnessResult> SetBrightnessAsync(int value)
         {
             if (value < MinBrightness || value > MaxBrightness)
-            {
-                HdrEngine.WriteFileLog($"[TV] 亮度值超出范围: {value}（有效范围 {MinBrightness}-{MaxBrightness}）");
-                return false;
-            }
+                return Fail($"亮度值超出范围: {value}（有效范围 {MinBrightness}-{MaxBrightness}）");
 
             await Gate.WaitAsync().ConfigureAwait(false);
             try
             {
                 var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
-                if (client == null) return false;
+                if (client == null) return Fail("无法连接电视，请确认电视已开机并与电脑处于同一网络");
 
                 var alertId = await CreateBrightnessAlertAsync(client, value, CancellationToken.None).ConfigureAwait(false);
                 await CloseAlertAsync(client, alertId, CancellationToken.None).ConfigureAwait(false);
                 await Task.Delay(WriteSettleDelayMs).ConfigureAwait(false);
 
-                bool applied = await VerifyBrightnessAsync(client, value, CancellationToken.None).ConfigureAwait(false);
-                if (applied) HdrEngine.WriteFileLog($"[TV] 亮度已设置为 {value}");
-                return applied;
+                int? applied = await ReadSettledBrightnessAsync(client, value, CancellationToken.None).ConfigureAwait(false);
+                if (applied == value)
+                {
+                    HdrEngine.WriteFileLog($"[TV] 亮度已设置为 {value}");
+                    return new BrightnessResult(true, $"设置成功，当前亮度 {value}");
+                }
+
+                return Fail(applied.HasValue
+                    ? $"电视未应用亮度 {value}（读回 {applied.Value}）"
+                    : $"电视未应用亮度 {value}（读回失败）");
             }
             catch (Exception ex)
             {
-                HdrEngine.WriteFileLog($"[TV] 设置亮度 {value} 失败: {ex.Message}");
-                return false;
+                return Fail($"设置亮度 {value} 失败: {ex.Message}");
             }
             finally
             {
                 Gate.Release();
             }
+        }
+
+        private static BrightnessResult Fail(string detail)
+        {
+            HdrEngine.WriteFileLog($"[TV] {detail}");
+            return new BrightnessResult(false, detail);
         }
 
         /// <summary>Tests the connection and reports the current brightness (also saves the pairing key).</summary>
@@ -303,18 +312,23 @@ namespace SmartHdrManager
             };
         }
 
-        private static async Task<bool> VerifyBrightnessAsync(LgeTvClient client, int expected, CancellationToken ct)
+        /// <summary>
+        /// Waits for the TV to pick the write up and returns what it reports; the caller compares it with the wanted
+        /// value, so a silently ignored write cannot pass as success.
+        /// </summary>
+        private static async Task<int?> ReadSettledBrightnessAsync(LgeTvClient client, int expected, CancellationToken ct)
         {
+            int? current = null;
             for (int attempt = 1; attempt <= ReadBackAttempts; attempt++)
             {
-                var current = await ReadBrightnessAsync(client, ct).ConfigureAwait(false);
-                if (current == expected) return true;
+                current = await ReadBrightnessAsync(client, ct).ConfigureAwait(false);
+                if (current == expected) return current;
 
                 HdrEngine.WriteFileLog($"[TV] 读回验证 {attempt}/{ReadBackAttempts}: 期望 {expected}，实际 {(current.HasValue ? current.Value.ToString() : "读取失败")}");
                 if (attempt < ReadBackAttempts)
                     await Task.Delay(WriteSettleDelayMs, ct).ConfigureAwait(false);
             }
-            return false;
+            return current;
         }
 
         private static string? ReadAlertId(JsonElement response)
@@ -357,6 +371,20 @@ namespace SmartHdrManager
             if (element.ValueKind != JsonValueKind.Object) return null;
             if (!element.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String) return null;
             return value.GetString();
+        }
+    }
+
+    /// <summary>Outcome of one brightness write, carrying the reason so callers can show it instead of a bare failure.</summary>
+    public readonly struct BrightnessResult
+    {
+        public bool Success { get; }
+
+        public string Detail { get; }
+
+        public BrightnessResult(bool success, string detail)
+        {
+            Success = success;
+            Detail = detail;
         }
     }
 }

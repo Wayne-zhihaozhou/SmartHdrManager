@@ -626,7 +626,11 @@ namespace SmartHdrManager
             Log("BRIGHT", $"{(app == null ? "桌面" : $"'{app}'")} – 亮度 {brightness}");
             _ = Task.Run(async () =>
             {
-                try { await TvCli.SetBrightnessAsync(brightness).ConfigureAwait(false); }
+                try
+                {
+                    var result = await TvCli.SetBrightnessAsync(brightness).ConfigureAwait(false);
+                    if (!result.Success) Log("ERROR", $"设置亮度失败：{result.Detail}");
+                }
                 catch (Exception ex) { Log("ERROR", $"设置亮度失败：{ex.Message}"); }
             });
         }

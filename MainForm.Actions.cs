@@ -109,8 +109,8 @@ namespace SmartHdrManager
         {
             if (!IsBrightnessControlEnabled()) return (false, "亮度控制已关闭");
 
-            bool applied = await TvCli.SetBrightnessAsync(brightness);
-            return (applied, applied ? "设置成功" : "设置失败");
+            var result = await TvCli.SetBrightnessAsync(brightness);
+            return (result.Success, result.Detail);
         }
 
         private void OnDesktopBrightnessChanged()
