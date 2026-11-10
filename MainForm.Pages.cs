@@ -207,7 +207,6 @@ namespace SmartHdrManager
             brightnessLow.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "设置中...", () => DescribeBrightnessAsync(0));
             brightnessHigh.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "设置中...", () => DescribeBrightnessAsync(100));
 
-            AddSection(page, "活动窗口", "当前 HDR 状态和活动窗口信息。");
             page.AddRow(BuildActivityPanel(), ActionRowHeight);
 
             page.AddFillerRow();
