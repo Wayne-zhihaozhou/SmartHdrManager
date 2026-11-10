@@ -19,6 +19,9 @@ namespace SmartHdrManager
         private const int RowDescriptionTop = 32;
         private const int RowDescriptionHeight = 20;
         private const int ButtonSpacing = 8;
+        private const int BrightnessValueWidth = 64;
+        private const string UnknownBrightnessText = "—";
+        private const string ReadingBrightnessText = "…";
 
         private Control BuildGamesPage(bool sdr)
         {
@@ -178,8 +181,98 @@ namespace SmartHdrManager
             var page = CreateScrollPage();
 
             AddSection(page, "测试", "测试电视连接和设置亮度。");
+            page.AddRow(BuildTvBrightnessRow(), SettingRowHeight);
+            page.AddRow(BuildTestActions(), ActionRowHeight);
+            page.AddRow(BuildActivityPanel(), ActionRowHeight);
 
-            var statusLabel = new Label
+            page.AddFillerRow();
+            return page;
+        }
+
+        /// <summary>Read-only card showing the brightness the TV currently reports.</summary>
+        private Control BuildTvBrightnessRow()
+        {
+            var row = new RoundedPanel
+            {
+                Radius = 10,
+                BackColor = Theme.Surface,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+
+            var titleLabel = new Label
+            {
+                UseMnemonic = false,
+                Text = "电视亮度",
+                Font = Theme.Semibold,
+                ForeColor = Theme.Text,
+                AutoSize = false,
+                AutoEllipsis = true
+            };
+
+            var descriptionLabel = new Label
+            {
+                UseMnemonic = false,
+                Text = "电视当前报告的背光值（0-100）。",
+                Font = Theme.Small,
+                ForeColor = Theme.Muted,
+                AutoSize = false,
+                AutoEllipsis = true
+            };
+
+            var valueLabel = new Label
+            {
+                UseMnemonic = false,
+                Text = UnknownBrightnessText,
+                Font = Theme.Section,
+                ForeColor = Theme.Muted,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleRight
+            };
+
+            var refreshButton = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "读取", AutoSize = true };
+            _toolTip.SetToolTip(refreshButton, "重新读取电视当前亮度");
+
+            _tvBrightnessValue = valueLabel;
+            _tvBrightnessRefresh = refreshButton;
+
+            refreshButton.Click += async (_, _) => await RefreshTvBrightnessAsync();
+
+            row.Controls.Add(refreshButton);
+            row.Controls.Add(valueLabel);
+            row.Controls.Add(titleLabel);
+            row.Controls.Add(descriptionLabel);
+
+            row.Layout += (_, _) => LayoutBrightnessRow(row, titleLabel, descriptionLabel, valueLabel, refreshButton);
+            return row;
+        }
+
+        private static void LayoutBrightnessRow(RoundedPanel row, Label titleLabel, Label descriptionLabel,
+                                                Label valueLabel, Control refreshButton)
+        {
+            int S(int value) => row.LogicalToDeviceUnits(value);
+
+            int rowHeight = row.ClientSize.Height;
+            int right = row.ClientSize.Width - S(RowHorizontalMargin);
+
+            refreshButton.Location = new Point(right - refreshButton.Width, (rowHeight - refreshButton.Height) / 2);
+
+            int valueRight = Math.Max(S(RowHorizontalMargin), refreshButton.Left - S(ButtonSpacing));
+            int valueLeft = Math.Max(S(RowHorizontalMargin), valueRight - S(BrightnessValueWidth));
+            valueLabel.SetBounds(valueLeft, 0, valueRight - valueLeft, rowHeight);
+
+            int textWidth = Math.Max(0, valueLeft - S(16) - S(RowHorizontalMargin));
+            int titleHeight = titleLabel.PreferredHeight;
+            int descriptionHeight = descriptionLabel.PreferredHeight;
+            int top = Math.Max(0, (rowHeight - titleHeight - descriptionHeight) / 2);
+
+            titleLabel.SetBounds(S(RowHorizontalMargin), top, textWidth, titleHeight);
+            descriptionLabel.SetBounds(S(RowHorizontalMargin), top + titleHeight, textWidth, descriptionHeight);
+        }
+
+        private Control BuildTestActions()
+        {
+            _tvStatusLabel = new Label
             {
                 UseMnemonic = false,
                 Text = "就绪",
@@ -194,23 +287,18 @@ namespace SmartHdrManager
             var brightnessLow = new ModernButton { Text = "亮度 0", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
             var brightnessHigh = new ModernButton { Text = "亮度 100", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
 
+            testButton.Click += async (_, _) => await ShowTvResultAsync("测试中...", TvCli.TestConnectionAsync);
+            pairButton.Click += async (_, _) => await ShowTvResultAsync("配对中...", TvCli.PairAsync);
+            brightnessLow.Click += async (_, _) => await ShowTvResultAsync("设置中...", () => SetTestBrightnessAsync(0));
+            brightnessHigh.Click += async (_, _) => await ShowTvResultAsync("设置中...", () => SetTestBrightnessAsync(100));
+
             var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
             panel.Controls.Add(testButton);
             panel.Controls.Add(pairButton);
             panel.Controls.Add(brightnessLow);
             panel.Controls.Add(brightnessHigh);
-            panel.Controls.Add(statusLabel);
-            page.AddRow(panel, ActionRowHeight);
-
-            testButton.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "测试中...", TvCli.TestConnectionAsync);
-            pairButton.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "配对中...", DescribePairAsync);
-            brightnessLow.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "设置中...", () => DescribeBrightnessAsync(0));
-            brightnessHigh.Click += async (_, _) => await ShowTvResultAsync(statusLabel, "设置中...", () => DescribeBrightnessAsync(100));
-
-            page.AddRow(BuildActivityPanel(), ActionRowHeight);
-
-            page.AddFillerRow();
-            return page;
+            panel.Controls.Add(_tvStatusLabel);
+            return panel;
         }
 
         private Control BuildActivityPanel()

@@ -15,6 +15,8 @@ namespace SmartHdrManager
         private const int RunningDialogWidth = 560;
         private const int RunningDialogHeight = 420;
 
+        private bool _readingBrightness;
+
         private void RebuildGames(bool sdr)
         {
             var list = sdr ? _gamesSdr : _gamesHdr;
@@ -80,36 +82,62 @@ namespace SmartHdrManager
             }
         }
 
-        private async Task ShowTvResultAsync(Label statusLabel, string busyText, Func<Task<(bool Success, string Message)>> action)
+        private async Task ShowTvResultAsync(string busyText, Func<Task<TvResult>> action)
         {
-            statusLabel.Text = busyText;
-            statusLabel.ForeColor = Theme.Muted;
+            _tvStatusLabel.Text = busyText;
+            _tvStatusLabel.ForeColor = Theme.Muted;
 
             try
             {
-                var (success, message) = await action();
-                statusLabel.Text = message;
-                statusLabel.ForeColor = success ? Color.Green : Color.Red;
+                var result = await action();
+                _tvStatusLabel.Text = result.Detail;
+                _tvStatusLabel.ForeColor = result.Success ? Color.Green : Color.Red;
+                if (result.Brightness.HasValue) ShowTvBrightness(result);
             }
             catch (Exception ex)
             {
-                statusLabel.Text = $"失败: {ex.Message}";
-                statusLabel.ForeColor = Color.Red;
+                _tvStatusLabel.Text = $"失败: {ex.Message}";
+                _tvStatusLabel.ForeColor = Color.Red;
             }
         }
 
-        private async Task<(bool Success, string Message)> DescribePairAsync()
+        private async Task<TvResult> SetTestBrightnessAsync(int brightness)
         {
-            bool paired = await TvCli.PairAsync();
-            return (paired, paired ? "配对成功" : "配对失败");
+            if (!IsBrightnessControlEnabled()) return new TvResult(false, "亮度控制已关闭");
+
+            return await TvCli.SetBrightnessAsync(brightness);
         }
 
-        private async Task<(bool Success, string Message)> DescribeBrightnessAsync(int brightness)
+        /// <summary>Reads the TV brightness for the display row on the test page.</summary>
+        private async Task RefreshTvBrightnessAsync()
         {
-            if (!IsBrightnessControlEnabled()) return (false, "亮度控制已关闭");
+            if (_readingBrightness) return;
 
-            var result = await TvCli.SetBrightnessAsync(brightness);
-            return (result.Success, result.Detail);
+            _readingBrightness = true;
+            _tvBrightnessRefresh.Enabled = false;
+            _tvBrightnessValue.Text = ReadingBrightnessText;
+            _tvBrightnessValue.ForeColor = Theme.Muted;
+
+            try
+            {
+                ShowTvBrightness(await TvCli.ReadCurrentBrightnessAsync());
+            }
+            catch (Exception ex)
+            {
+                ShowTvBrightness(new TvResult(false, $"读取亮度失败: {ex.Message}"));
+            }
+            finally
+            {
+                _readingBrightness = false;
+                _tvBrightnessRefresh.Enabled = true;
+            }
+        }
+
+        private void ShowTvBrightness(TvResult result)
+        {
+            _tvBrightnessValue.Text = result.Brightness?.ToString() ?? UnknownBrightnessText;
+            _tvBrightnessValue.ForeColor = result.Brightness.HasValue ? Theme.Accent : Theme.Muted;
+            _toolTip.SetToolTip(_tvBrightnessValue, $"{result.Detail} · {DateTime.Now:HH:mm:ss}");
         }
 
         private void OnDesktopBrightnessChanged()

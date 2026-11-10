@@ -50,7 +50,7 @@ namespace SmartHdrManager
         }
 
         /// <summary>Sets the brightness (0-100) and reads it back to verify.</summary>
-        public static async Task<BrightnessResult> SetBrightnessAsync(int value)
+        public static async Task<TvResult> SetBrightnessAsync(int value)
         {
             if (value < MinBrightness || value > MaxBrightness)
                 return Fail($"亮度值超出范围: {value}（有效范围 {MinBrightness}-{MaxBrightness}）");
@@ -69,12 +69,12 @@ namespace SmartHdrManager
                 if (applied == value)
                 {
                     HdrEngine.WriteFileLog($"[TV] 亮度已设置为 {value}");
-                    return new BrightnessResult(true, $"设置成功，当前亮度 {value}");
+                    return new TvResult(true, $"设置成功，当前亮度 {value}", value);
                 }
 
                 return Fail(applied.HasValue
                     ? $"电视未应用亮度 {value}（读回 {applied.Value}）"
-                    : $"电视未应用亮度 {value}（读回失败）");
+                    : $"电视未应用亮度 {value}（读回失败）", applied);
             }
             catch (Exception ex)
             {
@@ -86,14 +86,38 @@ namespace SmartHdrManager
             }
         }
 
-        private static BrightnessResult Fail(string detail)
+        /// <summary>Reads the brightness the TV reports right now, connecting first if needed.</summary>
+        public static async Task<TvResult> ReadCurrentBrightnessAsync()
+        {
+            await Gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                var client = await EnsureConnectedAsync(CancellationToken.None).ConfigureAwait(false);
+                if (client == null) return Fail("无法连接电视，请确认电视已开机并与电脑处于同一网络");
+
+                int? brightness = await ReadBrightnessAsync(client, CancellationToken.None).ConfigureAwait(false);
+                return brightness.HasValue
+                    ? new TvResult(true, $"当前亮度 {brightness.Value}", brightness)
+                    : Fail("已连接，但读取亮度失败");
+            }
+            catch (Exception ex)
+            {
+                return Fail($"读取亮度失败: {ex.Message}");
+            }
+            finally
+            {
+                Gate.Release();
+            }
+        }
+
+        private static TvResult Fail(string detail, int? brightness = null)
         {
             HdrEngine.WriteFileLog($"[TV] {detail}");
-            return new BrightnessResult(false, detail);
+            return new TvResult(false, detail, brightness);
         }
 
         /// <summary>Tests the connection and reports the current brightness (also saves the pairing key).</summary>
-        public static async Task<(bool success, string message)> TestConnectionAsync()
+        public static async Task<TvResult> TestConnectionAsync()
         {
             string tvIp;
             lock (Sync)
@@ -103,10 +127,10 @@ namespace SmartHdrManager
             return await TestConnectionInternalAsync(tvIp);
         }
 
-        private static async Task<(bool success, string message)> TestConnectionInternalAsync(string tvIp)
+        private static async Task<TvResult> TestConnectionInternalAsync(string tvIp)
         {
             if (string.IsNullOrWhiteSpace(tvIp))
-                return (false, "电视 IP 地址不能为空");
+                return Fail("电视 IP 地址不能为空");
 
             var client = new LgeTvClient(tvIp) { ClientKey = TvClientKeyStore.Load(tvIp) };
             try
@@ -114,18 +138,18 @@ namespace SmartHdrManager
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
                 PersistClientKey(client);
 
-                var brightness = await ReadBrightnessAsync(client, CancellationToken.None).ConfigureAwait(false);
-                if (brightness == null)
-                    return (false, "已连接，但读取亮度失败");
-                return (true, $"已连接！当前亮度: {brightness.Value}");
+                int? brightness = await ReadBrightnessAsync(client, CancellationToken.None).ConfigureAwait(false);
+                return brightness.HasValue
+                    ? new TvResult(true, $"已连接！当前亮度: {brightness.Value}", brightness)
+                    : Fail("已连接，但读取亮度失败");
             }
             catch (TimeoutException ex)
             {
-                return (false, $"{ex.Message}——请检查电视 IP 是否正确、电视是否与电脑在同一网络");
+                return Fail($"{ex.Message}——请检查电视 IP 是否正确、电视是否与电脑在同一网络");
             }
             catch (Exception ex)
             {
-                return (false, $"连接失败: {ex.Message}");
+                return Fail($"连接失败: {ex.Message}");
             }
             finally
             {
@@ -134,24 +158,22 @@ namespace SmartHdrManager
         }
 
         /// <summary>Forces a new pairing: saved credentials are ignored, so the TV asks again.</summary>
-        public static async Task<bool> PairAsync()
+        public static async Task<TvResult> PairAsync()
         {
             string? tvIp;
             lock (Sync)
             {
                 tvIp = _tvIp;
             }
-            if (string.IsNullOrWhiteSpace(tvIp)) return false;
+            if (string.IsNullOrWhiteSpace(tvIp))
+                return Fail("未配置电视 IP 地址，无法配对");
 
             var client = new LgeTvClient(tvIp);
             try
             {
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
                 if (string.IsNullOrEmpty(client.ClientKey))
-                {
-                    HdrEngine.WriteFileLog("[TV] 配对失败: 电视未返回 client-key");
-                    return false;
-                }
+                    return Fail("配对失败: 电视未返回 client-key");
 
                 TvClientKeyStore.Save(client.Host, client.ClientKey);
                 HdrEngine.WriteFileLog("[TV] 配对成功，已保存 client-key");
@@ -163,12 +185,11 @@ namespace SmartHdrManager
                 {
                     _client = new LgeTvClient(tvIp) { ClientKey = client.ClientKey };
                 }
-                return true;
+                return new TvResult(true, "配对成功");
             }
             catch (Exception ex)
             {
-                HdrEngine.WriteFileLog($"[TV] 配对失败: {ex.Message}");
-                return false;
+                return Fail($"配对失败: {ex.Message}");
             }
             finally
             {
@@ -374,17 +395,23 @@ namespace SmartHdrManager
         }
     }
 
-    /// <summary>Outcome of one brightness write, carrying the reason so callers can show it instead of a bare failure.</summary>
-    public readonly struct BrightnessResult
+    /// <summary>
+    /// Outcome of one TV command: the reason so callers can show it instead of a bare failure, plus the brightness the
+    /// TV reported for commands that read it.
+    /// </summary>
+    public readonly struct TvResult
     {
         public bool Success { get; }
 
         public string Detail { get; }
 
-        public BrightnessResult(bool success, string detail)
+        public int? Brightness { get; }
+
+        public TvResult(bool success, string detail, int? brightness = null)
         {
             Success = success;
             Detail = detail;
+            Brightness = brightness;
         }
     }
 }

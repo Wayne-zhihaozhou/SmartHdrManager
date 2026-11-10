@@ -51,6 +51,10 @@ namespace SmartHdrManager
         private readonly NumberStepper _desktopBrightness = new() { Minimum = 0, Maximum = 100, Step = 10 };
         private Label _hdrStatusLabel = null!;
         private Label _activityLabel = null!;
+        private Label _tvStatusLabel = null!;
+        private Label _tvBrightnessValue = null!;
+        private ModernButton _tvBrightnessRefresh = null!;
+        private int _testPageIndex = -1;
 
         private readonly TextBox _log = new()
         {
@@ -97,6 +101,7 @@ namespace SmartHdrManager
 
             AddPage(BuildGamesPage(sdr: false));
             AddPage(BuildGamesPage(sdr: true));
+            _testPageIndex = _pages.Count;
             AddPage(BuildTestPage());
             AddPage(BuildSettingsPage());
             AddPage(BuildLogPage());
@@ -147,6 +152,19 @@ namespace SmartHdrManager
                 _pages[i].Visible = i == index;
         }
 
+        /// <summary>Shows a page, reading the TV brightness again when it is the test page.</summary>
+        private void OnPageSelected(int index)
+        {
+            ShowPage(index);
+            RefreshTestPageIfVisible();
+        }
+
+        /// <summary>Keeps the brightness row of the test page current without polling the TV in the background.</summary>
+        private void RefreshTestPageIfVisible()
+        {
+            if (_tabs.SelectedIndex == _testPageIndex) _ = RefreshTvBrightnessAsync();
+        }
+
         /// <summary>Centres the content in a column of at most <see cref="MaxContentWidth"/> (wide / maximized windows).</summary>
         private void UpdateContentWidth()
         {
@@ -160,7 +178,7 @@ namespace SmartHdrManager
 
         private void WireEvents()
         {
-            _tabs.SelectedIndexChanged += (_, _) => ShowPage(_tabs.SelectedIndex);
+            _tabs.SelectedIndexChanged += (_, _) => OnPageSelected(_tabs.SelectedIndex);
 
             _searchHdr.TextChanged += (_, _) => RebuildGames(sdr: false);
             _searchSdr.TextChanged += (_, _) => RebuildGames(sdr: true);
@@ -233,6 +251,7 @@ namespace SmartHdrManager
             TopMost = false;
             Activate();
             RefreshView();
+            RefreshTestPageIfVisible();
         }
 
         public void HideToTray()
