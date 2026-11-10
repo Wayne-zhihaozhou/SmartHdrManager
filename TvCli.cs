@@ -147,9 +147,11 @@ namespace SmartHdrManager
                 TvClientKeyStore.Save(client.Host, client.ClientKey);
                 HdrEngine.WriteFileLog("[TV] 配对成功，已保存 client-key");
 
+                _client?.Dispose();
+                _client = null;
+
                 lock (Sync)
                 {
-                    _client?.Dispose();
                     _client = new LgeTvClient(tvIp) { ClientKey = client.ClientKey };
                 }
                 return true;
