@@ -13,7 +13,6 @@ namespace SmartHdrManager
         private const int LogLinesDropped = 100;
         private const long MaxLogBytes = 2_000_000;
         private const int LogRotationCheckEvery = 200;
-        private const int MaxQuickExitCount = 99;
 
         private static readonly object FileLogLock = new();
         private static int _fileLogWrites;
@@ -33,7 +32,7 @@ namespace SmartHdrManager
             catch { }
         }
 
-        /// <summary>Settings › Reset to defaults. Kept: the game lists, found games, program locations, extra folders.</summary>
+        /// <summary>Settings › Reset to defaults. Kept: the game lists, found games, program locations.</summary>
         public void ResetSettings()
         {
             lock (Sync)
@@ -43,11 +42,8 @@ namespace SmartHdrManager
                     ConfigVersion = Config.ConfigVersion,
                     HdrGamesAndApps = Config.HdrGamesAndApps,
                     SdrGamesAndApps = Config.SdrGamesAndApps,
-                    LibraryGames = Config.LibraryGames,
                     ProgramPaths = Config.ProgramPaths,
-                    CustomGameFolders = Config.CustomGameFolders,
-                    LauncherGames = Config.LauncherGames,
-                    QuickExitCounts = Config.QuickExitCounts
+                    LauncherGames = Config.LauncherGames
                 };
                 Normalize(fresh);
 
@@ -66,14 +62,8 @@ namespace SmartHdrManager
 
             if (config.ConfigVersion < 2)
             {
-                var installed = new HashSet<string>(config.ProgramPaths.Keys, Cmp);
-                foreach (var game in config.LibraryGames)
-                    foreach (string process in game.Processes)
-                        installed.Add(process);
-
                 foreach (string example in new[] { "cyberpunk2077", "eldenring", "alanwake2" })
                 {
-                    if (installed.Contains(example)) continue;
                     if (config.HdrGamesAndApps.RemoveAll(n => string.Equals(n, example, StringComparison.OrdinalIgnoreCase)) > 0)
                         Log("CONFIG", $"已从 HDR 游戏中移除示例条目 '{example}'（本机未安装）。");
                 }
@@ -123,10 +113,8 @@ namespace SmartHdrManager
         /// <summary>Lists / dictionaries that are missing or null in a hand-edited config.json become empty.</summary>
         private static AppConfig Normalize(AppConfig config)
         {
-            config.CustomGameFolders ??= new List<string>();
             config.HdrGamesAndApps ??= new List<string>();
             config.SdrGamesAndApps ??= new List<string>();
-            config.LibraryGames ??= new List<LibraryGame>();
 
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in config.ProgramPaths ?? new Dictionary<string, string>())
@@ -135,7 +123,6 @@ namespace SmartHdrManager
 
             config.SdrFallbackDelaySeconds = Math.Clamp(config.SdrFallbackDelaySeconds, 0, 30);
             config.DesktopBrightness = Math.Clamp(config.DesktopBrightness, 0, 100);
-            foreach (var game in config.LibraryGames) game.Processes ??= new List<string>();
 
             var hdrModes = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in config.GameHdrModes ?? new Dictionary<string, bool>())
@@ -154,12 +141,6 @@ namespace SmartHdrManager
                 if (games.Count > 0) launchers[entry.Key.Trim().ToLowerInvariant()] = games;
             }
             config.LauncherGames = launchers;
-
-            var quickExits = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in config.QuickExitCounts ?? new Dictionary<string, int>())
-                if (!string.IsNullOrWhiteSpace(entry.Key) && entry.Value > 0)
-                    quickExits[entry.Key.Trim().ToLowerInvariant()] = Math.Min(entry.Value, MaxQuickExitCount);
-            config.QuickExitCounts = quickExits;
 
             config.Brightness ??= new BrightnessConfig();
             return config;

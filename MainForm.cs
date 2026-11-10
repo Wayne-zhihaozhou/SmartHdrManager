@@ -293,9 +293,6 @@ namespace SmartHdrManager
         {
             if (status.Paused) return "在恢复前不会自动切换 HDR。";
 
-            if (status.LaunchHold)
-                return status.RunningGame != null ? $"以 HDR 启动 · {status.RunningGame}" : "以 HDR 启动 · 正在启动 …";
-
             if (status.RunningGame != null) return $"HDR 游戏运行中：{status.RunningGame}";
 
             if (status.RunningSdrApp != null) return $"SDR 游戏运行中：{status.RunningSdrApp}（HDR 关闭）";

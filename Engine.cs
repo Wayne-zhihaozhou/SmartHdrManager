@@ -16,7 +16,6 @@ namespace SmartHdrManager
         public bool IsFullscreen { get; init; }
         public string? RunningGame { get; init; }
         public string? RunningSdrApp { get; init; }
-        public bool LaunchHold { get; init; }
         public string? FollowingLauncher { get; init; }
     }
 
@@ -60,11 +59,8 @@ namespace SmartHdrManager
         private const int FailuresBeforeCooldown = 3;
         private const int FailureCooldownMs = 30000;
         private const int DisplayEventGraceMs = 5000;
-        private const int QuickExitMs = 12000;
-        private const int QuickExitClearMs = 60000;
         private const int LauncherShortRunMs = 15000;
         private const int LauncherFollowMs = 45000;
-        private const int LaunchHoldMs = 6000;
         private const int ExternalChangeGraceMs = 8000;
         private const int ExternalHoldCheckMs = 2000;
         private const int BrightnessMin = 0;
@@ -117,14 +113,10 @@ namespace SmartHdrManager
                 GameFolders = BuildGameFolders(c, AllGames);
             }
 
-            /// <summary>TV brightness per process: the library value first, then a program added by hand.</summary>
+            /// <summary>TV brightness per process: per-game config value.</summary>
             private static Dictionary<string, int> BuildBrightness(AppConfig c)
             {
                 var brightness = new Dictionary<string, int>(Cmp);
-
-                foreach (var game in c.LibraryGames ?? new List<LibraryGame>())
-                    foreach (string process in game.Processes ?? new List<string>())
-                        brightness[process] = Math.Clamp(game.Brightness, BrightnessMin, BrightnessMax);
 
                 foreach (var entry in c.PerGameBrightness ?? new Dictionary<string, int>())
                     if (!brightness.ContainsKey(entry.Key))
@@ -138,54 +130,14 @@ namespace SmartHdrManager
                 process != null && Brightness.TryGetValue(process, out int value) ? value : DesktopBrightness;
 
             /// <summary>
-            /// Install folders and known exes of the HDR games from the launcher libraries, by process name. Strings only:
-            /// the snapshot is built under the config lock, so nothing here touches the disk (a sleeping drive or an
-            /// offline NAS would block the UI). Programs added by hand are not listed and stay matched by name.
+            /// Game install folders and known exes, by process name. No library games are scanned anymore;
+            /// only explicitly added programs are matched (by name, not by folder).
             /// </summary>
             private static Dictionary<string, (string[] Folders, string[] Exes)> BuildGameFolders(AppConfig c, HashSet<string> trackedGames)
             {
-                var folders = new Dictionary<string, HashSet<string>>(Cmp);
-                var exes = new Dictionary<string, HashSet<string>>(Cmp);
-
-                void Add(string process, string? exePath)
-                {
-                    if (string.IsNullOrEmpty(exePath)) return;
-                    try
-                    {
-                        string? folder = InstallFolder(exePath);
-                        if (string.IsNullOrEmpty(folder)) return;
-                        if (!folders.TryGetValue(process, out var set)) folders[process] = set = new HashSet<string>(Cmp);
-                        set.Add(folder.TrimEnd('\\'));
-                        if (!exes.TryGetValue(process, out var files)) exes[process] = files = new HashSet<string>(Cmp);
-                        files.Add(Path.GetFullPath(exePath));
-                    }
-                    catch { }
-                }
-
-                foreach (var game in c.LibraryGames ?? new List<LibraryGame>())
-                    foreach (string process in game.Processes ?? new List<string>())
-                        if (trackedGames.Contains(process)) Add(process, game.ExePath);
-
-                return folders.ToDictionary(kv => kv.Key, kv => (kv.Value.ToArray(), exes[kv.Key].ToArray()), Cmp);
+                return new Dictionary<string, (string[] Folders, string[] Exes)>(Cmp);
             }
 
-            private static readonly HashSet<string> GameSubfolders = new(StringComparer.OrdinalIgnoreCase)
-            {
-                "boot", "launcher", "game", "client", "retailclient", "system", "engine", "content", "live", "release", "shipping"
-            };
-
-            /// <summary>
-            /// The game's install folder for an exe: its game folder, or the folder above when the exe sits in one of the
-            /// game's own subfolders ("boot\", "Launcher\", "game\", "_retail_\"). Never a shared folder.
-            /// </summary>
-            private static string? InstallFolder(string exePath)
-            {
-                string? folder = HdrLauncher.GameFolder(exePath) ?? Path.GetDirectoryName(Path.GetFullPath(exePath));
-                if (string.IsNullOrEmpty(folder)) return null;
-                string name = Path.GetFileName(folder);
-                if (!name.StartsWith('_') && !GameSubfolders.Contains(name)) return folder;
-                return HdrLauncher.GameFolder(folder) ?? folder;
-            }
         }
 
         /// <summary>The games list switch of one process: on unless the config disables it.</summary>
@@ -209,11 +161,6 @@ namespace SmartHdrManager
         private long _nextProcessScanMs;
         private string? _activeHdrGameProcess;
 
-        private long _launchHoldUntilMs;
-        private bool _launchHoldLogged;
-        private int _launchReleased;
-        private bool _launchEnded;
-
         private string? _seenGame;
         private long _seenGameSinceMs;
         private bool _launcherTrackingStarted;
@@ -236,9 +183,6 @@ namespace SmartHdrManager
 
         private string? _hdrOnForGame;
         private long _hdrOnForGameAtMs;
-        private string? _quickExitGame;
-        private long _quickExitAfterMs;
-        private readonly ConcurrentQueue<(string Title, string Text)> _notifications = new();
 
         private string _foregroundProcess = string.Empty;
         private bool _foregroundFullscreen;
@@ -310,7 +254,6 @@ namespace SmartHdrManager
 
                 string? busy = _runningGame != null ? $"'{_runningGame}' 仍在运行"
                     : _externalHoldProcess != null ? $"'{_externalHoldProcess}' 仍在运行"
-                    : Now < Interlocked.Read(ref _launchHoldUntilMs) ? "通过\"以 HDR 启动\"启动的游戏仍在运行"
                     : null;
                 if (busy != null)
                 {
@@ -325,24 +268,6 @@ namespace SmartHdrManager
             {
                 Log("ERROR", $"退出时无法切回 SDR：{ex.Message}");
             }
-        }
-
-        /// <summary>
-        /// "Launch with HDR": a launcher process asks to hold HDR while its game starts and runs. It repeats the request
-        /// every 2 s; the hold ends a few seconds after the last one.
-        /// </summary>
-        public void HoldHdrForLaunch()
-        {
-            Interlocked.Exchange(ref _launchHoldUntilMs, Now + LaunchHoldMs);
-            _wake.Set();
-        }
-
-        /// <summary>"Launch with HDR": the launcher's game / player was closed – end the hold and go back to SDR now.</summary>
-        public void ReleaseLaunchHold()
-        {
-            Interlocked.Exchange(ref _launchHoldUntilMs, 0);
-            Interlocked.Exchange(ref _launchReleased, 1);
-            _wake.Set();
         }
 
         /// <summary>Forces the HDR state to be re-read on the next tick (display change, resume from sleep).</summary>
@@ -434,7 +359,6 @@ namespace SmartHdrManager
                 IsFullscreen = isFullscreen,
                 RunningGame = _runningGame,
                 RunningSdrApp = _runningSdrApp,
-                LaunchHold = now < Interlocked.Read(ref _launchHoldUntilMs),
                 FollowingLauncher = _followLauncher
             };
         }
@@ -527,31 +451,6 @@ namespace SmartHdrManager
 
             if (TryForceSdr(snapshot, procName, shouldEnableHdr, canAttempt)) return;
 
-            bool launchHold = now < Interlocked.Read(ref _launchHoldUntilMs);
-            if (Interlocked.Exchange(ref _launchReleased, 0) == 1)
-            {
-                launchHold = false;
-                if (_launchHoldLogged) _launchEnded = true;
-            }
-            if (launchHold)
-            {
-                if (!_launchHoldLogged)
-                {
-                    _launchHoldLogged = true;
-                    Log("HDR", "以 HDR 启动：在游戏或播放器启动前开启 HDR。");
-                }
-                if (!shouldEnableHdr)
-                {
-                    shouldEnableHdr = true;
-                    reason = "Launch with HDR";
-                }
-            }
-            else if (_launchHoldLogged)
-            {
-                _launchHoldLogged = false;
-                Log("HDR", "以 HDR 启动：游戏或播放器已关闭。");
-            }
-
             if (_externalHoldProcess != null)
             {
                 if (now >= _nextExternalCheckMs)
@@ -591,7 +490,6 @@ namespace SmartHdrManager
             if (!shouldEnableHdr) demand = "none";
             else if (_runningGame != null) demand = "game:" + _runningGame;
             else if (snapshot.HdrGames.Contains(procName) && !_foregroundElsewhere) demand = "game:" + procName;
-            else if (launchHold) demand = "launch";
             else if (_externalHoldProcess != null) demand = "ext:" + _externalHoldProcess;
             else if (_followLauncher != null && _followHoldsHdr) demand = "follow:" + _followLauncher;
             else demand = "focus:" + procName;
@@ -599,7 +497,6 @@ namespace SmartHdrManager
             if (HandedOff(demand))
             {
                 _sdrFallbackAtMs = -1;
-                _launchEnded = false;
                 _externalEnded = false;
                 if (_runningGame == null) _activeHdrGameProcess = null;
                 return;
@@ -610,13 +507,12 @@ namespace SmartHdrManager
             if (shouldEnableHdr)
             {
                 _sdrFallbackAtMs = -1;
-                _launchEnded = false;
                 _externalEnded = false;
                 if (!_hdrAny && canAttempt)
                 {
                     string? game = _runningGame ?? (snapshot.HdrGames.Contains(procName) && !_foregroundElsewhere ? procName : null);
                     TurnHdrOn(reason);
-                    if (_hdrAny && game != null && !launchHold)
+                    if (_hdrAny && game != null)
                     {
                         _hdrOnForGame = game;
                         _hdrOnForGameAtMs = now;
@@ -629,7 +525,6 @@ namespace SmartHdrManager
             {
                 _activeHdrGameProcess = null;
                 _sdrFallbackAtMs = -1;
-                _launchEnded = false;
                 _externalEnded = false;
                 return;
             }
@@ -654,17 +549,6 @@ namespace SmartHdrManager
                     _externalEnded = false;
                     _sdrFallbackAtMs = -1;
                     TurnHdrOff($"'{_externalEndedWhat}' 已关闭（它曾自行开启 HDR）");
-                }
-                return;
-            }
-
-            if (_launchEnded)
-            {
-                if (canAttempt)
-                {
-                    _launchEnded = false;
-                    _sdrFallbackAtMs = -1;
-                    if (owns) UndoOwnHdr("以 HDR 启动：游戏或播放器已关闭");
                 }
                 return;
             }
@@ -700,7 +584,6 @@ namespace SmartHdrManager
 
             _activeHdrGameProcess = null;
             _sdrFallbackAtMs = -1;
-            _launchEnded = false;
             _externalEnded = false;
 
             if (_hdrAny && canAttempt)
@@ -783,7 +666,6 @@ namespace SmartHdrManager
             return kind switch
             {
                 "game" or "ext" or "focus" => $"'{what}'",
-                "launch" => "通过\"以 HDR 启动\"启动的游戏",
                 "follow" => $"由 '{what}' 启动的游戏",
                 "sdr" => $"'{what}'（SDR 程序）",
                 _ => "此项目"

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,17 +46,6 @@ namespace SmartHdrManager
                 }
                 _launcherTrackingStarted = true;
                 if (_followLauncher != null) EndFollow();
-
-                if (_quickExitGame != null && string.Equals(game, _quickExitGame, StringComparison.OrdinalIgnoreCase))
-                    ReportQuickExit();
-                _quickExitGame = null;
-
-                if (_hdrOnForGame != null && string.Equals(game, _hdrOnForGame, StringComparison.OrdinalIgnoreCase) &&
-                    now - _hdrOnForGameAtMs > QuickExitClearMs)
-                {
-                    ClearQuickExit(game);
-                    _hdrOnForGame = null;
-                }
                 return;
             }
 
@@ -66,18 +56,10 @@ namespace SmartHdrManager
                 long ranMs = now - _seenGameSinceMs;
                 _seenGame = null;
 
-                if (_hdrOnForGame != null && string.Equals(closed, _hdrOnForGame, StringComparison.OrdinalIgnoreCase) &&
-                    now - _hdrOnForGameAtMs <= QuickExitMs && !IsLauncher(closed))
-                {
-                    _quickExitGame = closed;
-                    _quickExitAfterMs = now - _hdrOnForGameAtMs;
-                }
                 _hdrOnForGame = null;
 
                 if (_followLauncher == null && ranMs < LauncherShortRunMs && !Paused)
                     StartFollow(snapshot, now, closed, ranMs);
-
-                if (_quickExitGame != null && _followLauncher == null) ReportQuickExit();
             }
 
             if (_followLauncher == null) return;
@@ -88,7 +70,6 @@ namespace SmartHdrManager
             {
                 string launcher = _followLauncher;
                 EndFollow();
-                _quickExitGame = null;
                 LearnLauncherGame(launcher, child);
 
                 _runningGame = child;
@@ -100,7 +81,6 @@ namespace SmartHdrManager
             {
                 Log("HDR", $"'{_followLauncher}' 在 {LauncherFollowMs / 1000} 秒内未启动游戏 – 恢复正常切换。");
                 EndFollow();
-                if (_quickExitGame != null) ReportQuickExit();
             }
         }
 
@@ -109,7 +89,7 @@ namespace SmartHdrManager
             if (!snapshot.HdrGames.Contains(closed) || ProcessNames.IsRunning(closed)) return;
 
             string? exe = KnownExePath(closed);
-            string? folder = exe == null ? null : HdrLauncher.GameFolder(exe);
+            string? folder = exe == null ? null : GameFolder(exe);
             if (folder == null) return;
 
             string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
@@ -131,7 +111,7 @@ namespace SmartHdrManager
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 try
                 {
-                    foreach (string name in HdrLauncher.GameExeNames(folder))
+                    foreach (string name in GameExeNames(folder))
                     {
                         if (name.Equals(closed, StringComparison.OrdinalIgnoreCase) || IsExcludedExeName(name)) continue;
                         names.Add(name);
@@ -152,65 +132,16 @@ namespace SmartHdrManager
             Interlocked.Increment(ref _followGeneration);
         }
 
-        /// <summary>
-        /// Some games crash when Windows switches to HDR while they start (seen with NVIDIA RTX HDR). The first time, a
-        /// HINT goes to the log; from the second time on also a notification.
-        /// </summary>
-        private void ReportQuickExit()
-        {
-            string? game = _quickExitGame;
-            _quickExitGame = null;
-            if (game == null) return;
-
-            int seconds = (int)Math.Max(1, Math.Round(_quickExitAfterMs / 1000.0));
-
-            int count;
-            lock (Sync)
-            {
-                Config.QuickExitCounts.TryGetValue(game, out count);
-                count = Math.Min(MaxQuickExitCount, count + 1);
-                Config.QuickExitCounts[game] = count;
-                Save();
-            }
-
-            Log("HINT", $"'{game}' 在为其开启 HDR 后 {seconds} 秒关闭。如果它崩溃了：请关闭 NVIDIA RTX HDR " +
-                        "（NVIDIA App › 图形 › 全局设置 › RTX HDR），或使用 游戏 › 选项 › 以 HDR 启动。");
-            if (count >= 2)
-                _notifications.Enqueue(($"是否 {game} 崩溃了？",
-                    $"它在 HDR 开启后 {seconds} 秒关闭了（共 {count} 次）。请在 NVIDIA App 中关闭 RTX HDR，或使用以 HDR 启动。"));
-        }
-
         private bool IsLauncher(string process)
         {
             if (KnownLaunchers.Contains(process)) return true;
             lock (Sync) return Config.LauncherGames.ContainsKey(process);
         }
 
-        private void ClearQuickExit(string game)
-        {
-            lock (Sync)
-            {
-                if (Config.QuickExitCounts.Remove(game)) Save();
-            }
-        }
-
         private static bool IsExcludedExeName(string name)
         {
             foreach (string part in ExcludedExeParts)
                 if (name.Contains(part, StringComparison.OrdinalIgnoreCase)) return true;
-            return false;
-        }
-
-        /// <summary>Tray notifications from the engine (crash hint). Called by the tray timer on the UI thread.</summary>
-        public bool TryTakeNotification(out string title, out string text)
-        {
-            if (_notifications.TryDequeue(out var notification))
-            {
-                title = notification.Title;
-                text = notification.Text;
-                return true;
-            }
-            title = text = string.Empty;
             return false;
         }
 
@@ -229,14 +160,67 @@ namespace SmartHdrManager
                     Config.HdrGamesAndApps.Sort(Cmp);
                 }
 
-                foreach (var libraryGame in Config.LibraryGames)
-                    if (libraryGame.Processes.Contains(launcher, Cmp) && !libraryGame.Processes.Contains(game, Cmp))
-                        libraryGame.Processes.Add(game);
-
                 InvalidateSnapshot();
                 Save();
             }
             Log("HDR", $"正在跟踪 '{game}'（由 '{launcher}' 启动）。已记住：下次 '{game}' 一启动 HDR 就保持开启。");
+        }
+
+        /// <summary>The game's folder: the exe's folder, or its parent when the exe sits in a "bin\x64"-style subfolder.</summary>
+        private static string? GameFolder(string exePath)
+        {
+            string[] binNames = { "bin", "bin64", "x64", "x86", "win64", "win32", "binaries", "retail" };
+            string[] sharedFolders =
+            {
+                "games", "spiele", "program files", "program files (x86)", "steamlibrary", "common", "xboxgames",
+                "epic games", "gog games"
+            };
+
+            try
+            {
+                string? dir = Path.GetDirectoryName(Path.GetFullPath(exePath));
+                for (int i = 0; i < 3 && dir != null; i++)
+                {
+                    string name = Path.GetFileName(dir);
+                    if (!binNames.Contains(name, StringComparer.OrdinalIgnoreCase)) break;
+                    dir = Path.GetDirectoryName(dir);
+                }
+
+                if (dir == null || dir.TrimEnd('\\').IndexOf('\\') < 0) return null;
+                if (sharedFolders.Contains(Path.GetFileName(dir.TrimEnd('\\')), StringComparer.OrdinalIgnoreCase)) return null;
+                return dir;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static HashSet<string> GameExeNames(string folder)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var options = new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    MaxRecursionDepth = 4,
+                    IgnoreInaccessible = true
+                };
+
+                foreach (string exe in Directory.EnumerateFiles(folder, "*.exe", options))
+                {
+                    string name = Path.GetFileNameWithoutExtension(exe);
+                    if (name.Contains("unins", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("crash", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("redist", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("setup", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    names.Add(name);
+                }
+            }
+            catch { }
+            return names;
         }
     }
 }

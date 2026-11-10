@@ -97,16 +97,6 @@ namespace SmartHdrManager
             var command = _commands.TakeSignaled();
             if (command != CliCommand.None) RunCommand(command);
 
-            if (_commands.TakeLaunchHold())
-            {
-                if (_engine.Paused) _commands.RefuseLaunch();
-                else _engine.HoldHdrForLaunch();
-            }
-            if (_commands.TakeLaunchRelease()) _engine.ReleaseLaunchHold();
-
-            while (_engine.TryTakeNotification(out string noteTitle, out string noteText))
-                _tray.ShowBalloon(noteTitle, noteText);
-
             UpdateTrayStatus();
 
             if (_form == null) return;
@@ -174,15 +164,7 @@ namespace SmartHdrManager
 
         private readonly EventWaitHandle _togglePause = new(false, EventResetMode.AutoReset, TogglePauseEventName);
 
-        private readonly EventWaitHandle _launchHold = new(false, EventResetMode.AutoReset, HdrLauncher.HoldEventName);
-        private readonly EventWaitHandle _launchRefused = new(false, EventResetMode.AutoReset, HdrLauncher.RefusedEventName);
-        private readonly EventWaitHandle _launchRelease = new(false, EventResetMode.AutoReset, HdrLauncher.ReleaseEventName);
 
-        public bool TakeLaunchHold() => _launchHold.WaitOne(0);
-
-        public bool TakeLaunchRelease() => _launchRelease.WaitOne(0);
-
-        public void RefuseLaunch() => _launchRefused.Set();
 
         public void Signal(CliCommand command)
         {
@@ -202,16 +184,12 @@ namespace SmartHdrManager
         public void Dispose()
         {
             _togglePause.Dispose();
-            _launchHold.Dispose();
-            _launchRefused.Dispose();
-            _launchRelease.Dispose();
         }
     }
 
     internal static class Program
     {
         private const string AppUserModelId = "VantaCode420.SmartHdrManager";
-        private const string LauncherUserModelId = "VantaCode420.SmartHdrManager.Launcher";
         private const string NotificationIconFileName = "app.ico";
         private const int NotificationIconSize = 64;
         private const int UpdateMutexWaitSeconds = 30;
@@ -224,47 +202,9 @@ namespace SmartHdrManager
             try { SetCurrentProcessExplicitAppUserModelID(id); } catch { }
         }
 
-        /// <summary>
-        /// Windows shows the app identity as the sender of notifications. Without a registered name that is the raw id;
-        /// this gives it the name "Smart HDR Manager" and the app icon. Per user (HKCU), no administrator rights.
-        /// </summary>
-        private static void RegisterNotificationName()
-        {
-            try
-            {
-                string iconPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(HdrEngine.LogPath)!,
-                                                          NotificationIconFileName);
-                try
-                {
-                    System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(iconPath)!);
-                    if (!System.IO.File.Exists(iconPath))
-                    {
-                        using var icon = AppIcons.Create(IconStyle.Vivid, NotificationIconSize);
-                        using var stream = System.IO.File.Create(iconPath);
-                        icon.Save(stream);
-                    }
-                }
-                catch { iconPath = string.Empty; }
-
-                using var key = Registry.CurrentUser.CreateSubKey($@"Software\Classes\AppUserModelId\{AppUserModelId}");
-                key.SetValue("DisplayName", "Smart HDR Manager");
-                if (iconPath.Length > 0) key.SetValue("IconUri", iconPath);
-            }
-            catch { }
-        }
-
         [STAThread]
         private static void Main(string[] args)
         {
-            int launchIndex = Array.FindIndex(args, arg => arg.Equals("--launch", StringComparison.OrdinalIgnoreCase));
-            if (launchIndex >= 0)
-            {
-                SetTaskbarIdentity(LauncherUserModelId);
-                Application.EnableVisualStyles();
-                Environment.ExitCode = HdrLauncher.Run(args, launchIndex);
-                return;
-            }
-
             SetTaskbarIdentity(AppUserModelId);
             var command = CommandEvents.Parse(args);
             bool startHidden = command != CliCommand.None ||
@@ -291,7 +231,6 @@ namespace SmartHdrManager
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            RegisterNotificationName();
 
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => HdrEngine.WriteFileLog($"ERROR  界面异常：{e.Exception}");

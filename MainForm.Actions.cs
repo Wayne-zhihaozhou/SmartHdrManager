@@ -157,7 +157,7 @@ namespace SmartHdrManager
                 Title = sdr ? "选择应保持 SDR 的游戏或程序（.exe）" : "选择应使用 HDR 的游戏或程序（.exe）",
                 Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*",
                 Multiselect = true,
-                InitialDirectory = _engine.GetInitialDirectory() ?? string.Empty
+                InitialDirectory = string.Empty
             };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
 

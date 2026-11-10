@@ -90,13 +90,6 @@ namespace SmartHdrManager
             lock (Sync)
             {
                 if (Config.ProgramPaths.TryGetValue(process, out var path) && File.Exists(path)) return path;
-
-                foreach (var game in Config.LibraryGames)
-                {
-                    if (game.ExePath == null) continue;
-                    if (!Path.GetFileNameWithoutExtension(game.ExePath).Equals(process, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (File.Exists(game.ExePath)) return game.ExePath;
-                }
                 return null;
             }
         }

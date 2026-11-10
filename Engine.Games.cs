@@ -17,12 +17,6 @@ namespace SmartHdrManager
             return trimmed.ToLowerInvariant();
         }
 
-        public string? GetInitialDirectory()
-        {
-            lock (Sync)
-                return Config.CustomGameFolders.FirstOrDefault(Directory.Exists);
-        }
-
         /// <summary>Rows for one of the two lists: every library game (real name, source, icon) plus its own programs.</summary>
         /// <param name="sdr">True for the SDR list, false for the HDR list.</param>
         public List<GameRow> GetGameRows(bool sdr = false)
@@ -36,33 +30,9 @@ namespace SmartHdrManager
                 var hdrModes = Config.GameHdrModes;
 
                 var rows = new List<GameRow>();
-                var covered = new HashSet<string>(Cmp);
-
-                foreach (var game in Config.LibraryGames ?? new List<LibraryGame>())
-                {
-                    covered.UnionWith(game.Processes);
-                    var processes = game.Processes.ToList();
-                    if (processes.Count == 0) continue;
-
-                    rows.Add(new GameRow
-                    {
-                        Key = game.Id,
-                        Name = game.Name,
-                        Subtitle = processes.Count > 1
-                            ? $"{game.Source}  ·  {processes[0]}.exe +{processes.Count - 1}"
-                            : $"{game.Source}  ·  {processes[0]}.exe",
-                        Processes = processes,
-                        ExePath = game.ExePath ?? processes.Select(p => paths.TryGetValue(p, out var known) ? known : null)
-                                                           .FirstOrDefault(p => p != null),
-                        Tracked = IsTracked(processes, tracked, hdrModes, sdr),
-                        Brightness = game.Brightness
-                    });
-                }
 
                 foreach (string process in list ?? new List<string>())
                 {
-                    if (covered.Contains(process)) continue;
-
                     rows.Add(new GameRow
                     {
                         Key = "proc:" + process,
@@ -79,12 +49,6 @@ namespace SmartHdrManager
             }
         }
 
-        private static bool IsTracked(List<string> processes, HashSet<string> tracked, Dictionary<string, bool>? hdrModes, bool sdr)
-        {
-            if (!processes.Any(tracked.Contains)) return false;
-            return sdr || processes.All(p => IsHdrEnabledFor(hdrModes, p));
-        }
-
         public void SetGameBrightness(string gameKey, IEnumerable<string> processes, int brightness, string displayName)
         {
             var list = processes.ToList();
@@ -92,21 +56,9 @@ namespace SmartHdrManager
 
             lock (Sync)
             {
-                bool isLibraryGame = false;
-                foreach (var game in Config.LibraryGames ?? new List<LibraryGame>())
-                {
-                    if (game.Id != gameKey) continue;
-                    game.Brightness = value;
-                    isLibraryGame = true;
-                    break;
-                }
-
-                if (!isLibraryGame)
-                {
-                    var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
-                    foreach (string process in list) brightnessMap[process] = value;
-                    Config.PerGameBrightness = brightnessMap;
-                }
+                var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
+                foreach (string process in list) brightnessMap[process] = value;
+                Config.PerGameBrightness = brightnessMap;
 
                 Save();
             }
@@ -170,14 +122,6 @@ namespace SmartHdrManager
                     target.RemoveAll(name => name.Equals(process, StringComparison.OrdinalIgnoreCase));
                     Config.ProgramPaths.Remove(process);
                     if (!sdr) Config.GameHdrModes.Remove(process);
-                }
-
-                var libraryGames = Config.LibraryGames ?? new List<LibraryGame>();
-                var gameToRemove = libraryGames.FirstOrDefault(g => g.Id == key);
-                if (gameToRemove != null)
-                {
-                    libraryGames.Remove(gameToRemove);
-                    Log("LIST", $"'- {gameToRemove.Name}' 已从游戏库移除");
                 }
 
                 target.Sort(Cmp);

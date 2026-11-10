@@ -17,7 +17,6 @@ namespace SmartHdrManager
         private const string AppRegistryName = "SmartHdrManager";
         private const string AutostartArguments = "--tray";
         private const int TooltipMaxLength = 63;
-        private const int BalloonTimeoutMs = 4000;
         private const int MinIconSize = 16;
 
         private readonly NotifyIcon _icon;
@@ -72,9 +71,6 @@ namespace SmartHdrManager
         {
             _icon.Text = text.Length > TooltipMaxLength ? text[..TooltipMaxLength] : text;
         }
-
-        public void ShowBalloon(string title, string message) =>
-            _icon.ShowBalloonTip(BalloonTimeoutMs, title, message, ToolTipIcon.Info);
 
         public void Dispose()
         {
