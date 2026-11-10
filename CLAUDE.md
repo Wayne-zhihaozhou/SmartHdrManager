@@ -83,6 +83,7 @@ dotnet clean SmartHdrManager.csproj
 
 - **仅允许 Release 配置**，禁止 Debug 配置
 - **每次代码修改后必须重新编译**，确保代码能正确构建
+- **编译前必须关闭 SmartHdrManager.exe**——若进程正在运行，先执行 `Stop-Process -Name SmartHdrManager -Force`
 
 ## 代码规范
 
