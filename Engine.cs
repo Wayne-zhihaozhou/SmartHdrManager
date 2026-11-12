@@ -106,6 +106,14 @@ namespace HdrBrightControl
 
         public EngineStatus Status { get; private set; } = new();
 
+        /// <summary>Program entry whose brightness is on the TV right now, or null for desktop brightness.</summary>
+        public string? BrightnessOwner => _brightnessOwner;
+
+        /// <summary>Configured brightness for the current brightness owner.</summary>
+        public int ConfiguredBrightness { get; private set; } = -1;
+
+        public event Action<int?>? BrightnessChanged;
+
         private Thread? _thread;
         private volatile bool _stop;
         private readonly AutoResetEvent _wake = new(false);
@@ -751,6 +759,16 @@ namespace HdrBrightControl
                 _brightnessVerifying = true;
                 _ = Task.Run(() => VerifyBrightnessAsync(brightness, app));
             }
+
+            ConfiguredBrightness = brightness;
+            NotifyBrightnessChanged();
+        }
+
+        private void NotifyBrightnessChanged()
+        {
+            var handler = BrightnessChanged;
+            if (handler == null) return;
+            handler.Invoke(_brightnessStarted ? _brightnessValue : -1);
         }
 
         /// <summary>

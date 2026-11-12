@@ -50,8 +50,6 @@ namespace HdrBrightControl
         private readonly ToggleSwitch _swBrightnessControl = new();
         private readonly NumberStepper _desktopBrightness = new() { Minimum = 0, Maximum = 100, Step = 10 };
         private Label _tvStatusLabel = null!;
-        private Label _tvBrightnessValue = null!;
-        private ModernButton _tvBrightnessRefresh = null!;
         private int _testPageIndex = -1;
 
         private readonly TextBox _log = new()
@@ -119,6 +117,7 @@ namespace HdrBrightControl
             WireEvents();
             LoadSettings();
             RebuildAllGames();
+            _engine.BrightnessChanged += OnBrightnessChanged;
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -150,17 +149,10 @@ namespace HdrBrightControl
                 _pages[i].Visible = i == index;
         }
 
-        /// <summary>Shows a page, reading the TV brightness again when it is the test page.</summary>
+        /// <summary>Shows a page.</summary>
         private void OnPageSelected(int index)
         {
             ShowPage(index);
-            RefreshTestPageIfVisible();
-        }
-
-        /// <summary>Keeps the brightness row of the test page current without polling the TV in the background.</summary>
-        private void RefreshTestPageIfVisible()
-        {
-            if (_tabs.SelectedIndex == _testPageIndex) _ = RefreshTvBrightnessAsync();
         }
 
         /// <summary>Centres the content in a column of at most <see cref="MaxContentWidth"/> (wide / maximized windows).</summary>
@@ -252,7 +244,6 @@ namespace HdrBrightControl
             TopMost = false;
             Activate();
             RefreshView();
-            RefreshTestPageIfVisible();
         }
 
         public void HideToTray()
@@ -279,6 +270,15 @@ namespace HdrBrightControl
         }
 
         public void AllowExit() => _reallyExit = true;
+
+        private int _currentBrightness = -1;
+
+        private void OnBrightnessChanged(int? brightness)
+        {
+            if (brightness == null || brightness == -1) return;
+            _currentBrightness = brightness.Value;
+            BeginInvoke(new Action(() => UpdateWindowTitle(_engine.Status)));
+        }
 
         /// <summary>Called on the UI thread while the window is visible.</summary>
         public void RefreshView()
@@ -307,8 +307,7 @@ namespace HdrBrightControl
                 ? (status.HdrOn ? "HDR 开·暂停" : "自动化暂停")
                 : status.HdrOn ? "HDR 开" : "HDR 关";
 
-            string tvBright = _tvBrightnessValue?.Text ?? "—";
-            if (string.IsNullOrEmpty(tvBright)) tvBright = "—";
+            string tvBright = _currentBrightness > 0 ? _currentBrightness.ToString() : "—";
             Text = $"HDR 亮控 · {hdrState} · 亮度 {tvBright}";
         }
 

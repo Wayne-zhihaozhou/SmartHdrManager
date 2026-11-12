@@ -15,8 +15,6 @@ namespace HdrBrightControl
         private const int RunningDialogWidth = 560;
         private const int RunningDialogHeight = 420;
 
-        private bool _readingBrightness;
-
         private void RebuildGames(bool sdr)
         {
             var list = sdr ? _gamesSdr : _gamesHdr;
@@ -92,7 +90,6 @@ namespace HdrBrightControl
                 var result = await action();
                 _tvStatusLabel.Text = result.Detail;
                 _tvStatusLabel.ForeColor = result.Success ? Color.Green : Color.Red;
-                if (result.Brightness.HasValue) ShowTvBrightness(result);
             }
             catch (Exception ex)
             {
@@ -106,38 +103,6 @@ namespace HdrBrightControl
             if (!IsBrightnessControlEnabled()) return new TvResult(false, "亮度控制已关闭");
 
             return await TvCli.SetBrightnessAsync(brightness);
-        }
-
-        /// <summary>Reads the TV brightness for the display row on the test page.</summary>
-        private async Task RefreshTvBrightnessAsync()
-        {
-            if (_readingBrightness) return;
-
-            _readingBrightness = true;
-            _tvBrightnessRefresh.Enabled = false;
-            _tvBrightnessValue.Text = ReadingBrightnessText;
-            _tvBrightnessValue.ForeColor = Theme.Muted;
-
-            try
-            {
-                ShowTvBrightness(await TvCli.ReadCurrentBrightnessAsync());
-            }
-            catch (Exception ex)
-            {
-                ShowTvBrightness(new TvResult(false, $"读取亮度失败: {ex.Message}"));
-            }
-            finally
-            {
-                _readingBrightness = false;
-                _tvBrightnessRefresh.Enabled = true;
-            }
-        }
-
-        private void ShowTvBrightness(TvResult result)
-        {
-            _tvBrightnessValue.Text = result.Brightness?.ToString() ?? UnknownBrightnessText;
-            _tvBrightnessValue.ForeColor = result.Brightness.HasValue ? Theme.Accent : Theme.Muted;
-            _toolTip.SetToolTip(_tvBrightnessValue, $"{result.Detail} · {DateTime.Now:HH:mm:ss}");
         }
 
         private void OnDesktopBrightnessChanged()
