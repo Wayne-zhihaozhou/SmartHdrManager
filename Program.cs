@@ -31,6 +31,8 @@ namespace HdrBrightControl
 
         public ITrayService TrayService => _tray;
 
+        public IStartupManager StartupManager => _startup;
+
         public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, EventWaitHandle showEvent, CommandEvents commands, CliOptions opts, IStartupManager startup)
         {
             _engine = engine;
@@ -71,7 +73,7 @@ namespace HdrBrightControl
 
             if (_form == null || _form.IsDisposed)
             {
-                _form = new MainForm(_engine, SetPaused);
+                _form = new MainForm(_engine, SetPaused, _startup);
                 _form.HiddenToTray += OnFormHidden;
             }
             _form.ShowFromTray();

@@ -16,6 +16,8 @@ namespace HdrBrightControl
         bool IsEnabled();
         bool Set(bool enable);
         bool RefreshPath();
+        bool IsAutostartEnabled();
+        bool SetAutostart(bool enable);
     }
 
     public sealed class TrayService : ITrayService, IDisposable
@@ -153,6 +155,16 @@ namespace HdrBrightControl
             {
                 return false;
             }
+        }
+
+        public bool IsAutostartEnabled()
+        {
+            return IsEnabled();
+        }
+
+        public bool SetAutostart(bool enable)
+        {
+            return Set(enable);
         }
 
         private static string? ParseRegisteredExePath(string registryValue)

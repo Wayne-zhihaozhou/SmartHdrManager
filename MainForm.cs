@@ -27,6 +27,7 @@ namespace HdrBrightControl
 
         private readonly HdrEngine _engine;
         private readonly Action<bool> _setPaused;
+        private readonly IStartupManager _startup;
         private readonly Icon _windowIcon = AppIcons.Create(IconStyle.Vivid, 48);
         private readonly ToolTip _toolTip = new();
 
@@ -68,10 +69,11 @@ namespace HdrBrightControl
 
         public event EventHandler? HiddenToTray;
 
-        public MainForm(HdrEngine engine, Action<bool> setPaused)
+        public MainForm(HdrEngine engine, Action<bool> setPaused, IStartupManager startup)
         {
             _engine = engine;
             _setPaused = setPaused;
+            _startup = startup;
 
             SuspendLayout();
 
@@ -184,10 +186,10 @@ namespace HdrBrightControl
             _swAutostart.CheckedChanged += (_, _) =>
             {
                 if (_loadingSettings) return;
-                if (TrayAndStartupManager.SetAutostart(_swAutostart.Checked)) return;
+                if (_startup.SetAutostart(_swAutostart.Checked)) return;
 
                 MessageBox.Show(this, "无法更新 Windows 启动项。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                ApplySwitch(_swAutostart, TrayAndStartupManager.IsAutostartEnabled());
+                ApplySwitch(_swAutostart, _startup.IsAutostartEnabled());
             };
 
             _swHdrControl.CheckedChanged += (_, _) =>
@@ -324,7 +326,7 @@ namespace HdrBrightControl
             try
             {
                 _swHdrControl.Checked = !_engine.Paused;
-                _swAutostart.Checked = TrayAndStartupManager.IsAutostartEnabled();
+                _swAutostart.Checked = _startup.IsAutostartEnabled();
                 _swBrightnessControl.Checked = IsBrightnessControlEnabled();
                 _desktopBrightness.Value = _engine.Read(config => config.DesktopBrightness);
             }
