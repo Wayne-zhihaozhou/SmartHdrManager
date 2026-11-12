@@ -34,7 +34,6 @@ namespace HdrBrightControl
     /// </summary>
     public sealed class GameList : Control
     {
-        private const double GlideRate = 8.5;
         private const int RowTextPadding = 22;
         private const int RowGapPx = 4;
         private const int ScrollbarWidthPx = 10;
@@ -43,7 +42,6 @@ namespace HdrBrightControl
         private const int BrightnessTextWidthPx = 80;
         private const int HitInflationPx = 4;
         private const int MaxCachedRows = 40;
-        private const float ScrollAnimationTolerance = 0.3f;
 
         private List<GameItem> _items = new();
         private float _offset;
@@ -209,12 +207,12 @@ namespace HdrBrightControl
 
         private void AnimateScroll()
         {
-            float dt = Math.Clamp((float)_frameClock.Elapsed.TotalSeconds, 0.001f, 0.05f);
+            float dt = Math.Clamp((float)_frameClock.Elapsed.TotalSeconds, ScrollTuning.MinFrameSeconds, ScrollTuning.MaxFrameSeconds);
             _frameClock.Restart();
 
-            float k = 1f - (float)Math.Exp(-dt * GlideRate);
+            float k = 1f - (float)Math.Exp(-dt * ScrollTuning.GlideRate);
             _offset += (_target - _offset) * k;
-            if (Math.Abs(_target - _offset) < ScrollAnimationTolerance)
+            if (Math.Abs(_target - _offset) < ScrollTuning.Tolerance)
             {
                 _offset = _target;
                 _animation.Stop();
@@ -228,7 +226,7 @@ namespace HdrBrightControl
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             int lines = SystemInformation.MouseWheelScrollLines;
-            float perNotch = lines < 0 ? ClientSize.Height * 0.9f : Math.Max(RowHeight * 1.2f, lines * Font.Height * 1.6f);
+            float perNotch = lines < 0 ? ClientSize.Height * ScrollTuning.FullPageFactor : Math.Max(RowHeight * ScrollTuning.WheelRowFactor, lines * Font.Height * ScrollTuning.WheelLineFactor);
             ScrollTo(_target - e.Delta / 120f * perNotch);
             if (e is HandledMouseEventArgs handled) handled.Handled = true;
             base.OnMouseWheel(e);

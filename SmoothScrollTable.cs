@@ -10,14 +10,6 @@ namespace HdrBrightControl
     /// </summary>
     public sealed class SmoothScrollTable : TableLayoutPanel
     {
-        private const double GlideRate = 8.5;
-        private const float AnimationTolerance = 0.3f;
-        private const float MaxFrameSeconds = 0.05f;
-        private const float MinFrameSeconds = 0.001f;
-        private const float FullPageWheelFactor = 0.9f;
-        private const float MinWheelStep = 60f;
-        private const float WheelStepLineFactor = 2.2f;
-
         private readonly FrameLoop _animation;
         private readonly System.Diagnostics.Stopwatch _frameClock = new();
         private float _current;
@@ -68,8 +60,8 @@ namespace HdrBrightControl
 
             int lines = SystemInformation.MouseWheelScrollLines;
             float perNotch = lines < 0
-                ? ClientSize.Height * FullPageWheelFactor
-                : Math.Max(MinWheelStep, lines * Font.Height * WheelStepLineFactor);
+                ? ClientSize.Height * ScrollTuning.FullPageFactor
+                : Math.Max(ScrollTuning.MinWheelStep, lines * Font.Height * 2.2f);
             _target = Math.Clamp(_target - e.Delta / 120f * perNotch, 0, MaxScroll);
             if (e is HandledMouseEventArgs handled) handled.Handled = true;
 
@@ -81,12 +73,12 @@ namespace HdrBrightControl
 
         private void Animate()
         {
-            float dt = Math.Clamp((float)_frameClock.Elapsed.TotalSeconds, MinFrameSeconds, MaxFrameSeconds);
+            float dt = Math.Clamp((float)_frameClock.Elapsed.TotalSeconds, ScrollTuning.MinFrameSeconds, ScrollTuning.MaxFrameSeconds);
             _frameClock.Restart();
 
-            float k = 1f - (float)Math.Exp(-dt * GlideRate);
+            float k = 1f - (float)Math.Exp(-dt * ScrollTuning.GlideRate);
             _current += (_target - _current) * k;
-            if (Math.Abs(_target - _current) < AnimationTolerance)
+            if (Math.Abs(_target - _current) < ScrollTuning.Tolerance)
             {
                 _current = _target;
                 _animation.Stop();
