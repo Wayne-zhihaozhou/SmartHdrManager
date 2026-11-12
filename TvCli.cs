@@ -178,11 +178,9 @@ namespace HdrBrightControl
                 TvClientKeyStore.Save(client.Host, client.ClientKey);
                 HdrEngine.WriteFileLog("[TV] 配对成功，已保存 client-key");
 
-                _client?.Dispose();
-                _client = null;
-
                 lock (Sync)
                 {
+                    _client?.Dispose();
                     _client = new LgeTvClient(tvIp) { ClientKey = client.ClientKey };
                 }
                 return new TvResult(true, "配对成功");
@@ -210,24 +208,26 @@ namespace HdrBrightControl
         private static async Task<LgeTvClient?> EnsureConnectedAsync(CancellationToken ct)
         {
             LgeTvClient? client;
-            string? tvIp;
+            string? logMsg;
             lock (Sync)
             {
-                tvIp = _tvIp ?? BrightnessConfig.DefaultTvIp;
-            }
-
-            lock (Sync)
-            {
+                string tvIp = _tvIp ?? BrightnessConfig.DefaultTvIp;
                 if (_client == null && !string.IsNullOrWhiteSpace(tvIp))
                 {
                     string? savedKey = TvClientKeyStore.Load(tvIp);
                     _client = new LgeTvClient(tvIp) { ClientKey = savedKey };
-                    HdrEngine.WriteFileLog(savedKey == null
+                    logMsg = savedKey == null
                         ? $"[TV] {tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
-                        : $"[TV] {tvIp} 复用已保存的配对凭证");
+                        : $"[TV] {tvIp} 复用已保存的配对凭证";
+                }
+                else
+                {
+                    logMsg = null;
                 }
                 client = _client;
             }
+
+            if (logMsg != null) HdrEngine.WriteFileLog(logMsg);
 
             if (client == null) return null;
             if (client.Connected) return client;
