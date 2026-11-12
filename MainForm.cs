@@ -49,7 +49,6 @@ namespace HdrBrightControl
         private readonly ToggleSwitch _swHdrControl = new();
         private readonly ToggleSwitch _swBrightnessControl = new();
         private readonly NumberStepper _desktopBrightness = new() { Minimum = 0, Maximum = 100, Step = 10 };
-        private Label _hdrStatusLabel = null!;
         private Label _tvStatusLabel = null!;
         private Label _tvBrightnessValue = null!;
         private ModernButton _tvBrightnessRefresh = null!;
@@ -286,22 +285,10 @@ namespace HdrBrightControl
         {
             var status = _engine.Status;
 
-            UpdateStatusLabel(status);
             AppendNewLogLines();
             UpdateWindowTitle(status);
 
             if (_swHdrControl.Checked != !status.Paused) ApplySwitch(_swHdrControl, !status.Paused);
-        }
-
-        private void UpdateStatusLabel(EngineStatus status)
-        {
-            string text = status.Paused
-                ? (status.HdrOn ? "HDR 开 · 已暂停" : "自动化已暂停")
-                : status.HdrOn ? "HDR 已开启" : "HDR 已关闭";
-            Color color = status.Paused ? Theme.Muted : status.HdrOn ? Theme.Accent : Theme.Text;
-
-            if (_hdrStatusLabel.Text != text) _hdrStatusLabel.Text = text;
-            if (_hdrStatusLabel.ForeColor != color) _hdrStatusLabel.ForeColor = color;
         }
 
         private void AppendNewLogLines()
@@ -321,6 +308,7 @@ namespace HdrBrightControl
                 : status.HdrOn ? "HDR 开" : "HDR 关";
 
             string tvBright = _tvBrightnessValue?.Text ?? "—";
+            if (string.IsNullOrEmpty(tvBright)) tvBright = "—";
             Text = $"HDR 亮控 · {hdrState} · 亮度 {tvBright}";
         }
 
