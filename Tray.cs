@@ -136,10 +136,12 @@ namespace HdrBrightControl
                 string wanted = $"\"{exePath}\" {AutostartArguments}";
                 if (string.Equals(current, wanted, StringComparison.OrdinalIgnoreCase)) return false;
 
-                string registered = current.TrimStart();
-                registered = registered.StartsWith('"')
-                    ? registered[1..Math.Max(1, registered.IndexOf('"', 1))]
-                    : registered.Split(' ')[0];
+                string? registered = ParseRegisteredExePath(current);
+                if (registered == null)
+                {
+                    HdrEngine.WriteFileLog("[TRAY] 注册表项格式无法识别，未改动自启动条目");
+                    return false;
+                }
                 if (registered.Length > 0 && File.Exists(registered)) return false;
 
                 key.SetValue(AppRegistryName, wanted);
@@ -149,6 +151,22 @@ namespace HdrBrightControl
             {
                 return false;
             }
+        }
+
+        private static string? ParseRegisteredExePath(string registryValue)
+        {
+            string value = registryValue.Trim();
+            if (value.Length == 0) return null;
+
+            if (value[0] == '"')
+            {
+                int closing = value.IndexOf('"', 1);
+                return closing > 1 ? value[1..closing] : null;
+            }
+
+            int space = value.IndexOf(' ');
+            string candidate = space < 0 ? value : value[..space];
+            return candidate.Length == 0 ? null : candidate;
         }
     }
 }
