@@ -30,8 +30,9 @@ namespace HdrBrightControl
                 var hdrModes = Config.GameHdrModes;
 
                 var rows = new List<GameRow>();
+                var processes = list ?? new List<string>();
 
-                foreach (string process in list ?? new List<string>())
+                foreach (string process in processes)
                 {
                     rows.Add(new GameRow
                     {
