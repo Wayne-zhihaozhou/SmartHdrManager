@@ -15,6 +15,12 @@ namespace HdrBrightControl
 
         private static readonly object Sync = new();
         private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+        private static IAppLog? _log;
+
+        public static void Initialize(IAppLog log)
+        {
+            _log = log;
+        }
 
         private static readonly string KeyFilePath = Path.Combine(
             Path.GetDirectoryName(HdrEngine.ConfigPath) ?? AppContext.BaseDirectory,
@@ -48,7 +54,7 @@ namespace HdrBrightControl
                 }
                 catch (Exception ex)
                 {
-                    HdrEngine.WriteFileLog($"[TV] 保存配对凭证失败: {ex.Message}");
+                    _log?.WriteLine($"[TV] 保存配对凭证失败: {ex.Message}");
                 }
             }
         }

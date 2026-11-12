@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace HdrBrightControl
 {
-    public sealed partial class HdrEngine
+    public sealed partial class HdrEngine : IAppLog
     {
         private const int LogLinesKept = 500;
         private const int LogLinesDropped = 100;
@@ -42,6 +42,11 @@ namespace HdrBrightControl
                     _logBase += LogLinesDropped;
                 }
             }
+            WriteFileLog(line);
+        }
+
+        public void WriteLine(string line)
+        {
             WriteFileLog(line);
         }
 

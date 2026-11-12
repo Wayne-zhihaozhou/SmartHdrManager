@@ -221,10 +221,15 @@ namespace HdrBrightControl
             Application.SetCompatibleTextRenderingDefault(false);
 
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-            Application.ThreadException += (_, e) => HdrEngine.WriteFileLog($"ERROR  界面异常：{e.Exception}");
-            AppDomain.CurrentDomain.UnhandledException += (_, e) => HdrEngine.WriteFileLog($"FATAL  {e.ExceptionObject}");
 
             var engine = new HdrEngine();
+            TvCli.Initialize(engine);
+            TvClientKeyStore.Initialize(engine);
+            TrayAndStartupManager.Initialize(engine);
+
+            Application.ThreadException += (_, e) => engine.WriteLine($"ERROR  界面异常：{e.Exception}");
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => engine.WriteLine($"FATAL  {e.ExceptionObject}");
+
             using var context = new TrayAppContext(engine, showEvent, commands, opts);
             Application.Run(context);
         }

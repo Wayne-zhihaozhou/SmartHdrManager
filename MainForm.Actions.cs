@@ -74,7 +74,7 @@ namespace HdrBrightControl
             }
             catch (Exception ex)
             {
-                HdrEngine.WriteFileLog($"[TV] 无法应用游戏亮度: {ex.Message}");
+                _engine.WriteLine($"[TV] 无法应用游戏亮度: {ex.Message}");
             }
         }
 

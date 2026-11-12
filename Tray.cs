@@ -19,6 +19,13 @@ namespace HdrBrightControl
         private const int TooltipMaxLength = 63;
         private const int MinIconSize = 16;
 
+        private static IAppLog? _log;
+
+        public static void Initialize(IAppLog log)
+        {
+            _log = log;
+        }
+
         private readonly NotifyIcon _icon;
         private readonly Icon _iconOff;
         private readonly Icon _iconOn;
@@ -139,7 +146,7 @@ namespace HdrBrightControl
                 string? registered = ParseRegisteredExePath(current);
                 if (registered == null)
                 {
-                    HdrEngine.WriteFileLog("[TRAY] 注册表项格式无法识别，未改动自启动条目");
+                    _log?.WriteLine("[TRAY] 注册表项格式无法识别，未改动自启动条目");
                     return false;
                 }
                 if (registered.Length > 0 && File.Exists(registered)) return false;

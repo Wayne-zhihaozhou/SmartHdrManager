@@ -41,6 +41,8 @@ namespace HdrBrightControl
         private const string ClientKeyField = "client-key";
         private const string ClientKeyAltField = "clientKey";
 
+        private readonly IAppLog _log;
+
         private static readonly string[] RegisterPermissions =
         {
             "APP_TO_APP", "CLOSE", "CONTROL_AUDIO", "CONTROL_DISPLAY",
@@ -72,9 +74,10 @@ namespace HdrBrightControl
         private int _nextId;
         private bool _disposed;
 
-        public LgeTvClient(string host, bool secureFirst = true)
+        public LgeTvClient(string host, IAppLog log, bool secureFirst = true)
         {
             _host = host;
+            _log = log;
             _secureFirst = secureFirst;
         }
 
@@ -119,7 +122,7 @@ namespace HdrBrightControl
                 }
                 catch (Exception ex)
                 {
-                    HdrEngine.WriteFileLog($"[TV] getSystemInfo 未返回（部分固件允许跳过）: {ex.Message}");
+                    _log.WriteLine($"[TV] getSystemInfo 未返回（部分固件允许跳过）: {ex.Message}");
                 }
 
                 var registered = await SendHandshakeAsync(RegisterRequestId, BuildRegisterPayload(), RegisterTimeoutMs, ct)
@@ -127,7 +130,7 @@ namespace HdrBrightControl
                 ClientKey = ReadClientKey(registered) ?? ClientKey;
 
                 if (string.IsNullOrEmpty(ClientKey))
-                    HdrEngine.WriteFileLog("[TV] 电视未下发 client-key：本次连接仍需在电视上确认，下次启动会再次询问");
+                    _log.WriteLine("[TV] 电视未下发 client-key：本次连接仍需在电视上确认，下次启动会再次询问");
             }
             finally
             {
@@ -198,7 +201,7 @@ namespace HdrBrightControl
             var urls = _secureFirst ? new[] { secureUrl, plainUrl } : new[] { plainUrl, secureUrl };
 
             var source = TvNetworkRoute.FindSourceAddress(_host);
-            HdrEngine.WriteFileLog(source == null
+            _log.WriteLine(source == null
                 ? $"[TV] 未找到与 {_host} 同网段的网卡，使用默认路由连接"
                 : $"[TV] 绑定本机网卡 {source} 直连 {_host}");
 
@@ -327,7 +330,7 @@ namespace HdrBrightControl
                 }
                 catch (Exception ex)
                 {
-                    HdrEngine.WriteFileLog($"[TV] 接收消息失败: {ex.Message}");
+                    _log.WriteLine($"[TV] 接收消息失败: {ex.Message}");
                 }
             }
         }
@@ -393,7 +396,7 @@ namespace HdrBrightControl
                 return;
             }
 
-            HdrEngine.WriteFileLog("[TV] 已收到注册确认，继续等待电视下发 client-key…");
+            _log.WriteLine("[TV] 已收到注册确认，继续等待电视下发 client-key…");
         }
 
         /// <summary>Some firmwares push hello right after connecting, before the client asks; it is buffered until then.</summary>

@@ -32,6 +32,12 @@ namespace HdrBrightControl
 
         private static LgeTvClient? _client;
         private static string? _tvIp;
+        private static IAppLog? _log;
+
+        public static void Initialize(IAppLog log)
+        {
+            _log = log;
+        }
 
         /// <summary>
         /// Remembers where the TV is. Nothing is connected here: the connection is made the first time brightness is
@@ -66,7 +72,7 @@ namespace HdrBrightControl
                 int? applied = await ReadSettledBrightnessAsync(client, value, CancellationToken.None).ConfigureAwait(false);
                 if (applied == value)
                 {
-                    HdrEngine.WriteFileLog($"[TV] 亮度已设置为 {value}");
+                    _log?.WriteLine($"[TV] 亮度已设置为 {value}");
                     return new TvResult(true, $"设置成功，当前亮度 {value}", value);
                 }
 
@@ -110,7 +116,7 @@ namespace HdrBrightControl
 
         private static TvResult Fail(string detail, int? brightness = null)
         {
-            HdrEngine.WriteFileLog($"[TV] {detail}");
+            _log?.WriteLine($"[TV] {detail}");
             return new TvResult(false, detail, brightness);
         }
 
@@ -130,7 +136,7 @@ namespace HdrBrightControl
             if (string.IsNullOrWhiteSpace(tvIp))
                 return Fail("电视 IP 地址不能为空");
 
-            var client = new LgeTvClient(tvIp) { ClientKey = TvClientKeyStore.Load(tvIp) };
+            var client = new LgeTvClient(tvIp, _log!) { ClientKey = TvClientKeyStore.Load(tvIp) };
             try
             {
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
@@ -166,7 +172,7 @@ namespace HdrBrightControl
             if (string.IsNullOrWhiteSpace(tvIp))
                 return Fail("未配置电视 IP 地址，无法配对");
 
-            var client = new LgeTvClient(tvIp);
+            var client = new LgeTvClient(tvIp, _log!);
             try
             {
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
@@ -174,12 +180,12 @@ namespace HdrBrightControl
                     return Fail("配对失败: 电视未返回 client-key");
 
                 TvClientKeyStore.Save(client.Host, client.ClientKey);
-                HdrEngine.WriteFileLog("[TV] 配对成功，已保存 client-key");
+                _log?.WriteLine("[TV] 配对成功，已保存 client-key");
 
                 lock (Sync)
                 {
                     _client?.Dispose();
-                    _client = new LgeTvClient(tvIp) { ClientKey = client.ClientKey };
+                    _client = new LgeTvClient(tvIp, _log!) { ClientKey = client.ClientKey };
                 }
                 return new TvResult(true, "配对成功");
             }
@@ -213,7 +219,7 @@ namespace HdrBrightControl
                 if (_client == null && !string.IsNullOrWhiteSpace(tvIp))
                 {
                     string? savedKey = TvClientKeyStore.Load(tvIp);
-                    _client = new LgeTvClient(tvIp) { ClientKey = savedKey };
+                    _client = new LgeTvClient(tvIp, _log!) { ClientKey = savedKey };
                     logMsg = savedKey == null
                         ? $"[TV] {tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
                         : $"[TV] {tvIp} 复用已保存的配对凭证";
@@ -225,7 +231,7 @@ namespace HdrBrightControl
                 client = _client;
             }
 
-            if (logMsg != null) HdrEngine.WriteFileLog(logMsg);
+            if (logMsg != null) _log?.WriteLine(logMsg);
 
             if (client == null) return null;
             if (client.Connected) return client;
@@ -234,12 +240,12 @@ namespace HdrBrightControl
             {
                 await client.ConnectAsync(ct).ConfigureAwait(false);
                 PersistClientKey(client);
-                HdrEngine.WriteFileLog($"[TV] 电视已连接: {client.Host} ({client.TvInfo?.ModelName ?? "未知型号"})");
+                _log?.WriteLine($"[TV] 电视已连接: {client.Host} ({client.TvInfo?.ModelName ?? "未知型号"})");
                 return client;
             }
             catch (Exception ex)
             {
-                HdrEngine.WriteFileLog($"[TV] 连接电视失败: {ex.Message}");
+                _log?.WriteLine($"[TV] 连接电视失败: {ex.Message}");
                 return null;
             }
         }
@@ -251,7 +257,7 @@ namespace HdrBrightControl
             if (string.Equals(TvClientKeyStore.Load(client.Host), key, StringComparison.Ordinal)) return;
 
             TvClientKeyStore.Save(client.Host, key);
-            HdrEngine.WriteFileLog("[TV] 已保存配对凭证，之后启动不再弹出配对确认");
+            _log?.WriteLine("[TV] 已保存配对凭证，之后启动不再弹出配对确认");
         }
 
         private static async Task<string> CreateBrightnessAlertAsync(LgeTvClient client, int value, CancellationToken ct)
@@ -301,11 +307,11 @@ namespace HdrBrightControl
             {
                 var response = await client.RequestAsync(CloseAlertUri, payload, AlertRequestTimeoutMs, ct).ConfigureAwait(false);
                 if (!IsSuccessfulResponse(response))
-                    HdrEngine.WriteFileLog($"[TV] closeAlert 返回异常: {DescribeFailure(response)}");
+                    _log?.WriteLine($"[TV] closeAlert 返回异常: {DescribeFailure(response)}");
             }
             catch (Exception ex)
             {
-                HdrEngine.WriteFileLog($"[TV] closeAlert 未确认（{ex.Message}），亮度仍由关闭回调写入");
+                _log?.WriteLine($"[TV] closeAlert 未确认（{ex.Message}），亮度仍由关闭回调写入");
             }
         }
 
@@ -343,7 +349,7 @@ namespace HdrBrightControl
                 current = await ReadBrightnessAsync(client, ct).ConfigureAwait(false);
                 if (current == expected) return current;
 
-                HdrEngine.WriteFileLog($"[TV] 读回验证 {attempt}/{ReadBackAttempts}: 期望 {expected}，实际 {(current.HasValue ? current.Value.ToString() : "读取失败")}");
+                _log?.WriteLine($"[TV] 读回验证 {attempt}/{ReadBackAttempts}: 期望 {expected}，实际 {(current.HasValue ? current.Value.ToString() : "读取失败")}");
                 if (attempt < ReadBackAttempts)
                     await Task.Delay(WriteSettleDelayMs, ct).ConfigureAwait(false);
             }
