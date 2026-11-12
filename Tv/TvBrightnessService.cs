@@ -27,10 +27,12 @@ namespace HdrBrightControl
         private LgeTvClient? _client;
         private string? _tvIp;
         private readonly IAppLog _log;
+        private readonly ITvClientKeyStore _keyStore;
 
-        public TvBrightnessService(IAppLog log)
+        public TvBrightnessService(IAppLog log, ITvClientKeyStore keyStore)
         {
             _log = log;
+            _keyStore = keyStore;
         }
 
         public void Configure(string tvIp)
@@ -117,7 +119,7 @@ namespace HdrBrightControl
             if (string.IsNullOrWhiteSpace(tvIp))
                 return Fail("电视 IP 地址不能为空");
 
-            var client = new LgeTvClient(tvIp, _log) { ClientKey = TvClientKeyStore.Load(tvIp) };
+            var client = new LgeTvClient(tvIp, _log) { ClientKey = _keyStore.Load(tvIp) };
             try
             {
                 await client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
@@ -159,7 +161,7 @@ namespace HdrBrightControl
                 if (string.IsNullOrEmpty(client.ClientKey))
                     return Fail("配对失败: 电视未返回 client-key");
 
-                TvClientKeyStore.Save(client.Host, client.ClientKey);
+                _keyStore.Save(client.Host, client.ClientKey);
                 _log.WriteLine("[TV] 配对成功，已保存 client-key");
 
                 lock (_sync)
@@ -204,7 +206,7 @@ namespace HdrBrightControl
                 string tvIp = _tvIp ?? BrightnessConfig.DefaultTvIp;
                 if (_client == null && !string.IsNullOrWhiteSpace(tvIp))
                 {
-                    string? savedKey = TvClientKeyStore.Load(tvIp);
+                    string? savedKey = _keyStore.Load(tvIp);
                     _client = new LgeTvClient(tvIp, _log) { ClientKey = savedKey };
                     logMsg = savedKey == null
                         ? $"[TV] {tvIp} 尚无配对凭证，本次连接需要在电视上确认一次"
@@ -240,9 +242,9 @@ namespace HdrBrightControl
         {
             var key = client.ClientKey;
             if (string.IsNullOrEmpty(key)) return;
-            if (string.Equals(TvClientKeyStore.Load(client.Host), key, StringComparison.Ordinal)) return;
+            if (string.Equals(_keyStore.Load(client.Host), key, StringComparison.Ordinal)) return;
 
-            TvClientKeyStore.Save(client.Host, key);
+            _keyStore.Save(client.Host, key);
             _log.WriteLine("[TV] 已保存配对凭证，之后启动不再弹出配对确认");
         }
 

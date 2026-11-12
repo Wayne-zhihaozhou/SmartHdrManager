@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
@@ -225,7 +226,8 @@ namespace HdrBrightControl
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
             var engine = new HdrEngine();
-            var tvService = new TvBrightnessService(engine);
+            var keyStore = new DiskTvClientKeyStore(Path.GetDirectoryName(HdrEngine.ConfigPath) ?? AppContext.BaseDirectory);
+            var tvService = new TvBrightnessService(engine, keyStore);
             TvCli.Initialize(tvService);
             TvClientKeyStore.Initialize(engine);
             TrayAndStartupManager.Initialize(engine);
