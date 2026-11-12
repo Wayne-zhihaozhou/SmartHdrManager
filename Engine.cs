@@ -87,7 +87,7 @@ namespace HdrBrightControl
 
         public EngineStatus Status { get; private set; } = new();
 
-        public event Action<int?>? BrightnessChanged;
+        public event Action<int>? BrightnessChanged;
 
         private Thread? _thread;
         private volatile bool _stop;
@@ -729,15 +729,17 @@ namespace HdrBrightControl
                 _ = Task.Run(() => VerifyBrightnessAsync(brightness, app));
             }
 
-            NotifyBrightnessChanged();
+            NotifyBrightnessChanged(brightness);
         }
 
-        private void NotifyBrightnessChanged()
+        private void NotifyBrightnessChanged(int brightness)
         {
-            var handler = BrightnessChanged;
-            if (handler == null) return;
-            handler.Invoke(_brightnessStarted ? _brightnessValue : -1);
+            if (_notifiedBrightness == brightness) return;
+            _notifiedBrightness = brightness;
+            BrightnessChanged?.Invoke(brightness);
         }
+
+        private int _notifiedBrightness = -1;
 
         /// <summary>
         /// A write made close to an HDR change needs one more read afterwards: the TV may switch picture mode after

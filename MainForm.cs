@@ -128,11 +128,13 @@ namespace HdrBrightControl
 
         protected override void Dispose(bool disposing)
         {
+            if (disposing)
+            {
+                _engine.BrightnessChanged -= OnBrightnessChanged;
+                _toolTip.Dispose();
+                _windowIcon.Dispose();
+            }
             base.Dispose(disposing);
-            if (!disposing) return;
-
-            _toolTip.Dispose();
-            _windowIcon.Dispose();
         }
 
         private void AddPage(Control page)
@@ -273,10 +275,10 @@ namespace HdrBrightControl
 
         private int _currentBrightness = -1;
 
-        private void OnBrightnessChanged(int? brightness)
+        private void OnBrightnessChanged(int brightness)
         {
-            if (brightness == null || brightness == -1) return;
-            _currentBrightness = brightness.Value;
+            if (IsDisposed || !IsHandleCreated) return;
+            _currentBrightness = brightness;
             BeginInvoke(new Action(() => UpdateWindowTitle(_engine.Status)));
         }
 
