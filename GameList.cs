@@ -607,13 +607,18 @@ namespace HdrBrightControl
                         if (icon != null) bitmap = icon.ToBitmap();
                     }
                 }
-                catch { }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"图标加载失败: {ex.Message}"); }
 
                 try
                 {
                     BeginInvoke(new Action(() =>
                     {
                         if (IsDisposed) { bitmap?.Dispose(); return; }
+                        if (!_iconsLoading.Contains(file))
+                        {
+                            bitmap?.Dispose();
+                            return;
+                        }
                         _icons[file] = bitmap;
                         _iconsLoading.Remove(file);
                         Invalidate();

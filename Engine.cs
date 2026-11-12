@@ -62,6 +62,7 @@ namespace HdrBrightControl
         private const int BrightnessRetryDelayMs = 2000;
         private const int BrightnessMaxAttempts = 5;
         private const long NeverHappenedMs = long.MinValue / 2;
+        private const int DefaultEngineWaitMs = 100;
 
         /// <summary>Process name of this app, lower case: its own window is not content that decides anything.</summary>
         public static readonly string SelfProcessName = ResolveSelfProcessName();
@@ -292,7 +293,7 @@ namespace HdrBrightControl
         {
             while (!_stop)
             {
-                int waitMs = 100;
+                int waitMs = DefaultEngineWaitMs;
                 try
                 {
                     var snapshot = GetSnapshot();
@@ -847,8 +848,10 @@ namespace HdrBrightControl
         private static string DescribeDemand(string demand)
         {
             int colon = demand.IndexOf(':');
-            string kind = colon < 0 ? demand : demand.Substring(0, colon);
-            string what = colon < 0 ? string.Empty : demand.Substring(colon + 1);
+            string kind = colon >= 0 ? demand[..colon] : demand;
+            string what = colon >= 0 && colon + 1 < demand.Length
+                ? demand[(colon + 1)..]
+                : string.Empty;
             return kind switch
             {
                 "game" or "ext" or "focus" => $"'{what}'",

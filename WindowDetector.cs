@@ -130,7 +130,7 @@ namespace HdrBrightControl
                     return false;
                 }, IntPtr.Zero);
             }
-            catch { }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"UWP 子窗口枚举失败: {ex.Message}"); }
 
             return found ?? fallback;
         }

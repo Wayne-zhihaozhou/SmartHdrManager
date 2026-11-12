@@ -48,7 +48,7 @@ namespace HdrBrightControl
                         sdrApp = program.Entry;
                     }
                 }
-                catch { }
+                catch (Exception ex) { Log("DEBUG", $"进程匹配失败: {ex.Message}"); }
                 finally { process.Dispose(); }
             }
 
@@ -89,7 +89,7 @@ namespace HdrBrightControl
 
             Process[] processes;
             try { processes = Process.GetProcesses(); }
-            catch { return null; }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"查找文件夹进程失败: {ex.Message}"); return null; }
 
             string? found = null;
             int ownProcessId = Environment.ProcessId;
@@ -104,7 +104,7 @@ namespace HdrBrightControl
                         process.StartTime >= notBefore)
                         found = name.ToLowerInvariant();
                 }
-                catch { }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"进程枚举失败: {ex.Message}"); }
                 finally { process.Dispose(); }
             }
             return found;

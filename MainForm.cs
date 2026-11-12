@@ -24,6 +24,7 @@ namespace HdrBrightControl
         private const int LogKeepLength = 100_000;
         private const int WM_SYSCOMMAND = 0x0112;
         private const int SC_MINIMIZE = 0xF020;
+        private const int SC_MINIMIZE_MASK = 0xFFF0;
 
         private readonly HdrEngine _engine;
         private readonly Action<bool> _setPaused;
@@ -265,7 +266,7 @@ namespace HdrBrightControl
         /// </summary>
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == WM_SYSCOMMAND && ((int)m.WParam.ToInt64() & 0xFFF0) == SC_MINIMIZE)
+            if (m.Msg == WM_SYSCOMMAND && ((int)m.WParam.ToInt64() & SC_MINIMIZE_MASK) == SC_MINIMIZE)
             {
                 HideToTray();
                 return;
