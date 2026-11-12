@@ -852,7 +852,6 @@ namespace HdrBrightControl
             {
                 "game" or "ext" or "focus" => $"'{what}'",
                 "follow" => $"由 '{what}' 启动的游戏",
-                "sdr" => $"'{what}'（SDR 程序）",
                 _ => "此项目"
             };
         }
