@@ -11,10 +11,6 @@ namespace HdrBrightControl
 {
     public sealed partial class MainForm
     {
-        private const int RunningTitleMaxLength = 60;
-        private const int RunningDialogWidth = 560;
-        private const int RunningDialogHeight = 420;
-
         private void RebuildGames(ProgramListKind kind)
         {
             var list = kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr;
@@ -185,54 +181,9 @@ namespace HdrBrightControl
 
             rows = rows.GroupBy(row => row.Name).Select(group => group.First()).OrderBy(row => row.Name).ToList();
 
-            using var dialog = new Form
-            {
-                Text = "添加正在运行的程序",
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MinimizeBox = false,
-                MaximizeBox = false,
-                ShowInTaskbar = false,
-                Padding = new Padding(12)
-            };
-            dialog.SuspendLayout();
-
-            var list = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
-            foreach (var row in rows)
-            {
-                string title = row.Title.Length > RunningTitleMaxLength
-                    ? row.Title[..(RunningTitleMaxLength - 3)] + "..."
-                    : row.Title;
-                list.Items.Add($"{row.Name}   —   {title}");
-            }
-
-            var ok = new Button { Text = "添加", DialogResult = DialogResult.OK, AutoSize = true };
-            var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
-            var bottom = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Bottom,
-                AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft,
-                Padding = new Padding(0, 10, 0, 0)
-            };
-            bottom.Controls.Add(cancel);
-            bottom.Controls.Add(ok);
-
-            list.DoubleClick += (_, _) => { if (list.SelectedIndex >= 0) dialog.DialogResult = DialogResult.OK; };
-
-            dialog.Controls.Add(list);
-            dialog.Controls.Add(bottom);
-            dialog.AutoScaleDimensions = new SizeF(96F, 96F);
-            dialog.AutoScaleMode = AutoScaleMode.Dpi;
-            dialog.ClientSize = new Size(RunningDialogWidth, RunningDialogHeight);
-            dialog.ResumeLayout(false);
-            dialog.AcceptButton = ok;
-            dialog.CancelButton = cancel;
-            dialog.Icon = _windowIcon;
-            Theme.ApplyForm(dialog);
-
-            if (dialog.ShowDialog(this) != DialogResult.OK || list.SelectedIndex < 0) return null;
-            return (rows[list.SelectedIndex].Name, rows[list.SelectedIndex].Path);
+            using var dialog = new RunningProcessDialog(rows, _windowIcon);
+            if (dialog.ShowDialog(this) != DialogResult.OK) return null;
+            return dialog.Selected;
         }
 
         private void OnRemoveGame(ProgramListKind kind)
