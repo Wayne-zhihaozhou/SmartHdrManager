@@ -45,8 +45,10 @@ namespace HdrBrightControl
         {
             _engine.Update(config =>
             {
-                config.Brightness ??= new BrightnessConfig();
-                config.Brightness.Enabled = enabled;
+                var brightness = config.Brightness ?? new BrightnessConfig();
+                config = config with { Brightness = brightness };
+                config.Brightness!.Enabled = enabled;
+                return config;
             });
             _engine.ApplyBrightnessControlSettings();
         }
@@ -108,7 +110,7 @@ namespace HdrBrightControl
         private void OnDesktopBrightnessChanged()
         {
             int value = _desktopBrightness.Value;
-            _engine.Update(config => config.DesktopBrightness = value);
+            _engine.Update(config => { _desktopBrightness.Value = value; return config with { DesktopBrightness = value }; });
 
             if (!IsBrightnessControlEnabled()) return;
 

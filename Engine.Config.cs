@@ -37,9 +37,8 @@ namespace HdrBrightControl
         {
             lock (Sync)
             {
-                var fresh = new AppConfig
+                var fresh = Config with
                 {
-                    ConfigVersion = Config.ConfigVersion,
                     HdrGamesAndApps = Config.HdrGamesAndApps,
                     SdrGamesAndApps = Config.SdrGamesAndApps,
                     ProgramPaths = Config.ProgramPaths,
@@ -57,9 +56,9 @@ namespace HdrBrightControl
             Log("CONFIG", "设置已恢复默认值（游戏列表已保留）。");
         }
 
-        private void UpgradeConfig(AppConfig config)
+        private AppConfig UpgradeConfig(AppConfig config)
         {
-            if (config.ConfigVersion >= CurrentConfigVersion) return;
+            if (config.ConfigVersion >= CurrentConfigVersion) return config;
 
             if (config.ConfigVersion < 2)
             {
@@ -70,7 +69,7 @@ namespace HdrBrightControl
                 }
             }
 
-            config.ConfigVersion = CurrentConfigVersion;
+            return config with { ConfigVersion = CurrentConfigVersion };
         }
 
         /// <summary>
@@ -114,21 +113,26 @@ namespace HdrBrightControl
         /// <summary>Lists / dictionaries that are missing or null in a hand-edited config.json become empty.</summary>
         private static AppConfig Normalize(AppConfig config)
         {
-            config.HdrGamesAndApps ??= new List<string>();
-            config.SdrGamesAndApps ??= new List<string>();
+            var hdrGames = config.HdrGamesAndApps ?? new List<string>();
+            var sdrGames = config.SdrGamesAndApps ?? new List<string>();
 
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in config.ProgramPaths ?? new Dictionary<string, string>())
                 if (!string.IsNullOrEmpty(entry.Value)) paths[entry.Key] = entry.Value;
-            config.ProgramPaths = paths;
 
-            config.SdrFallbackDelaySeconds = Math.Clamp(config.SdrFallbackDelaySeconds, 0, 30);
-            config.DesktopBrightness = Math.Clamp(config.DesktopBrightness, 0, 100);
+            var result = config with
+            {
+                HdrGamesAndApps = hdrGames,
+                SdrGamesAndApps = sdrGames,
+                ProgramPaths = paths,
+                SdrFallbackDelaySeconds = Math.Clamp(config.SdrFallbackDelaySeconds, 0, 30),
+                DesktopBrightness = Math.Clamp(config.DesktopBrightness, 0, 100),
+            };
 
             var hdrModes = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in config.GameHdrModes ?? new Dictionary<string, bool>())
                 if (!string.IsNullOrWhiteSpace(entry.Key)) hdrModes[entry.Key.Trim().ToLowerInvariant()] = entry.Value;
-            config.GameHdrModes = hdrModes;
+            result = result with { GameHdrModes = hdrModes };
 
             var launchers = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in config.LauncherGames ?? new Dictionary<string, List<string>>())
@@ -141,10 +145,12 @@ namespace HdrBrightControl
                     .ToList();
                 if (games.Count > 0) launchers[entry.Key.Trim().ToLowerInvariant()] = games;
             }
-            config.LauncherGames = launchers;
+            result = result with { LauncherGames = launchers };
 
-            config.Brightness ??= new BrightnessConfig();
-            return config;
+            var brightness = config.Brightness ?? new BrightnessConfig();
+            result = result with { Brightness = brightness };
+
+            return result;
         }
 
         /// <summary>Caller must hold <see cref="Sync"/> (or be in the constructor).</summary>
@@ -182,6 +188,18 @@ namespace HdrBrightControl
                 change(Config);
                 InvalidateSnapshot();
                 Save();
+            }
+        }
+
+        public AppConfig Update(Func<AppConfig, AppConfig> change)
+        {
+            lock (Sync)
+            {
+                var result = change(Config);
+                Config = result;
+                InvalidateSnapshot();
+                Save();
+                return result;
             }
         }
 

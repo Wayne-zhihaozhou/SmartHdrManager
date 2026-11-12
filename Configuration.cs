@@ -3,42 +3,42 @@ using System.Collections.Generic;
 namespace HdrBrightControl
 {
     /// <summary>Everything that is stored in config.json.</summary>
-    public sealed class AppConfig
+    public sealed record AppConfig
     {
         /// <summary>Format version of this file: lets a newer version fix default lists in an existing config.json once.</summary>
-        public int ConfigVersion { get; set; }
+        public int ConfigVersion { get; init; }
 
         /// <summary>Active HDR list: only these games switch HDR on automatically.</summary>
-        public List<string> HdrGamesAndApps { get; set; } = new();
+        public List<string> HdrGamesAndApps { get; init; } = new();
 
         /// <summary>SDR list: these games keep HDR off while they run.</summary>
-        public List<string> SdrGamesAndApps { get; set; } = new();
+        public List<string> SdrGamesAndApps { get; init; } = new();
 
         /// <summary>Learned launchers: launcher process -> the game process(es) it started.</summary>
-        public Dictionary<string, List<string>> LauncherGames { get; set; } = new();
+        public Dictionary<string, List<string>> LauncherGames { get; init; } = new();
 
         /// <summary>Full exe paths of known programs (for their icons in the games list).</summary>
-        public Dictionary<string, string> ProgramPaths { get; set; } = new();
+        public Dictionary<string, string> ProgramPaths { get; init; } = new();
 
         /// <summary>Per-game TV brightness (process name -> 0-100), used for programs added by hand.</summary>
-        public Dictionary<string, int> PerGameBrightness { get; set; } = new();
+        public Dictionary<string, int> PerGameBrightness { get; init; } = new();
 
         /// <summary>Per-game HDR switch (process name -> enabled). A process without an entry counts as enabled.</summary>
-        public Dictionary<string, bool> GameHdrModes { get; set; } = new();
+        public Dictionary<string, bool> GameHdrModes { get; init; } = new();
 
         /// <summary>Switch HDR on as soon as a listed game process is running (not only when it is in the foreground).</summary>
-        public bool EnableHdrOnProcessStart { get; set; } = true;
+        public bool EnableHdrOnProcessStart { get; init; } = true;
 
         /// <summary>How often the decision loop runs, in milliseconds.</summary>
-        public int ProcessScanIntervalMs { get; set; } = 100;
+        public int ProcessScanIntervalMs { get; init; } = 100;
 
         /// <summary>Seconds without HDR content before the desktop goes back to SDR.</summary>
-        public int SdrFallbackDelaySeconds { get; set; } = 3;
+        public int SdrFallbackDelaySeconds { get; init; } = 3;
 
         /// <summary>TV brightness while no application of either list is running.</summary>
-        public int DesktopBrightness { get; set; } = BrightnessRange.Default;
+        public int DesktopBrightness { get; init; } = BrightnessRange.Default;
 
-        public BrightnessConfig? Brightness { get; set; }
+        public BrightnessConfig? Brightness { get; init; }
     }
 
     /// <summary>LG webOS TV the app sets brightness on.</summary>

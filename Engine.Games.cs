@@ -55,7 +55,7 @@ namespace HdrBrightControl
             {
                 var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>(Cmp);
                 foreach (string process in processes) brightnessMap[process] = value;
-                Config.PerGameBrightness = brightnessMap;
+                Config = Config with { PerGameBrightness = brightnessMap };
 
                 InvalidateSnapshot();
                 Save();
