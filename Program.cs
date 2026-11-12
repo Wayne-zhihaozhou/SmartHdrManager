@@ -18,9 +18,10 @@ namespace HdrBrightControl
 
         private readonly HdrEngine _engine;
         private readonly TvBrightnessService _tvService;
+        private readonly ITrayService _tray;
+        private readonly IStartupManager _startup;
         private readonly EventWaitHandle _showEvent;
         private readonly CommandEvents _commands;
-        private readonly TrayAndStartupManager _tray;
         private readonly System.Windows.Forms.Timer _timer;
 
         private MainForm? _form;
@@ -28,14 +29,17 @@ namespace HdrBrightControl
         private bool _exiting;
         private string _lastTooltip = string.Empty;
 
-        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, EventWaitHandle showEvent, CommandEvents commands, CliOptions opts)
+        public ITrayService TrayService => _tray;
+
+        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, EventWaitHandle showEvent, CommandEvents commands, CliOptions opts, IStartupManager startup)
         {
             _engine = engine;
             _tvService = tvService;
+            _startup = startup;
             _showEvent = showEvent;
             _commands = commands;
 
-            _tray = new TrayAndStartupManager(ShowMain, Exit);
+            _tray = new TrayService(ShowMain, Exit);
 
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
@@ -45,7 +49,7 @@ namespace HdrBrightControl
             _timer.Start();
 
             _engine.Start();
-            if (TrayAndStartupManager.RefreshAutostartPath())
+            if (_startup.RefreshPath())
                 _engine.Log("INFO", "\"开机自启动\"指向了旧位置 – 已更新为本程序。");
             if (opts.Command != CliCommand.None) RunCommand(opts.Command);
 
@@ -230,13 +234,20 @@ namespace HdrBrightControl
             var tvService = new TvBrightnessService(engine, keyStore);
             TvCli.Initialize(tvService);
             TvClientKeyStore.Initialize(engine);
-            TrayAndStartupManager.Initialize(engine);
+
+            var startupManager = new RegistryStartupManager();
 
             Application.ThreadException += (_, e) => engine.WriteLine($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => engine.WriteLine($"FATAL  {e.ExceptionObject}");
 
-            using var context = new TrayAppContext(engine, tvService, showEvent, commands, opts);
-            Application.Run(context);
+            var context = new TrayAppContext(engine, tvService, showEvent, commands, opts, startupManager);
+            var trayService = context.TrayService;
+            startupManager.RefreshPath();
+
+            using (context)
+            {
+                Application.Run(context);
+            }
         }
     }
 }
