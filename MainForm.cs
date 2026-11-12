@@ -120,7 +120,6 @@ namespace HdrBrightControl
             WireEvents();
             LoadSettings();
             RebuildAllGames();
-            _engine.BrightnessChanged += OnBrightnessChanged;
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -133,7 +132,6 @@ namespace HdrBrightControl
         {
             if (disposing)
             {
-                _engine.BrightnessChanged -= OnBrightnessChanged;
                 _toolTip.Dispose();
                 _windowIcon.Dispose();
             }
@@ -276,15 +274,6 @@ namespace HdrBrightControl
 
         public void AllowExit() => _reallyExit = true;
 
-        private int _currentBrightness = -1;
-
-        private void OnBrightnessChanged(int brightness)
-        {
-            if (IsDisposed || !IsHandleCreated) return;
-            _currentBrightness = brightness;
-            BeginInvoke(new Action(() => UpdateWindowTitle(_engine.Status)));
-        }
-
         /// <summary>Called on the UI thread while the window is visible.</summary>
         public void RefreshView()
         {
@@ -317,8 +306,7 @@ namespace HdrBrightControl
                 ? (status.HdrOn ? "HDR 开·暂停" : "自动化暂停")
                 : status.HdrOn ? "HDR 开" : "HDR 关";
 
-            string tvBright = _currentBrightness > 0 ? _currentBrightness.ToString() : "—";
-            Text = $"HDR 亮控 · {hdrState} · 亮度 {tvBright}";
+            Text = $"HDR 亮控 · {hdrState}";
         }
 
         private void LoadSettings()
