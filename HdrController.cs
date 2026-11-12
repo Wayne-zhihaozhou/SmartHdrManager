@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace HdrBrightControl
 {
@@ -25,13 +26,9 @@ namespace HdrBrightControl
         /// <summary>Windows 11 24H2 is build 26100; the HDR requests exist from there on.</summary>
         private const int WINDOWS_24H2_BUILD = 26100;
 
-        private const int API_UNKNOWN = -1;
-        private const int API_CLASSIC = 0;
-        private const int API_MODERN = 1;
-
         private static readonly bool IsWindows24H2OrNewer = Environment.OSVersion.Version.Build >= WINDOWS_24H2_BUILD;
 
-        private static volatile int _hdrApi = API_UNKNOWN;
+        private static int _hdrApiKind = (int)HdrApiKind.Unknown;
 
         private enum DISPLAYCONFIG_DEVICE_INFO_TYPE
         {
@@ -155,15 +152,7 @@ namespace HdrBrightControl
         private static extern int DisplayConfigSetDeviceInfo(ref DISPLAYCONFIG_SET_HDR_STATE setPacket);
 
         /// <summary>Which Windows HDR API is used (for the log).</summary>
-        public static string HdrApiName => _hdrApi switch
-        {
-            API_MODERN => "modern HDR API (Windows 11 24H2 或更新版本)",
-            API_CLASSIC => "classic 高级颜色 API",
-            _ => "not determined yet"
-        };
-
-        /// <summary>Why the last <see cref="SetHdrState"/> call failed; empty after a success.</summary>
-        public static string LastError { get; private set; } = string.Empty;
+        public static HdrApiKind ApiKind => (HdrApiKind)Volatile.Read(ref _hdrApiKind);
 
         /// <summary>Reads the HDR state of the display. Returns false when the configuration cannot be read.</summary>
         public static bool TryQueryHdrState(out bool supported, out bool enabled)
@@ -184,33 +173,24 @@ namespace HdrBrightControl
         }
 
         /// <summary>Switches HDR on the HDR-capable display.</summary>
-        public static bool SetHdrState(bool enable)
+        public static HdrSwitchResult SetHdrState(bool enable)
         {
-            LastError = string.Empty;
-
             int rc = QueryActivePaths(out var paths, out _);
             if (rc != ERROR_SUCCESS)
-            {
-                LastError = $"读取显示配置失败 (code {rc})";
-                return false;
-            }
+                return HdrSwitchResult.Failure($"读取显示配置失败 (code {rc})");
 
             foreach (var path in paths)
             {
                 if (!TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool supported, out bool isOn, out bool useNewApi))
                     continue;
                 if (!supported) continue;
-                if (isOn == enable) return true;
+                if (isOn == enable) return HdrSwitchResult.Success();
 
                 int result = SetHdrOnDisplay(path.targetInfo.adapterId, path.targetInfo.id, enable, useNewApi);
-                if (result == ERROR_SUCCESS) return true;
-
-                LastError = $"DisplayConfigSetDeviceInfo 失败 (code {result})";
-                return false;
+                if (result == ERROR_SUCCESS) return HdrSwitchResult.Success();
             }
 
-            LastError = "未找到支持 HDR 的显示器";
-            return false;
+            return HdrSwitchResult.Failure("未找到支持 HDR 的显示器");
         }
 
         /// <summary>HDR support / state of one display, preferring the 24H2 API.</summary>
@@ -220,7 +200,7 @@ namespace HdrBrightControl
             enabled = false;
             usedNewApi = false;
 
-            if (_hdrApi != API_CLASSIC)
+            if (_hdrApiKind != (int)HdrApiKind.Classic)
             {
                 var modern = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2();
                 modern.header.type = DISPLAYCONFIG_DEVICE_INFO_TYPE.GET_ADVANCED_COLOR_INFO_2;
@@ -231,16 +211,16 @@ namespace HdrBrightControl
                 int rc = DisplayConfigGetDeviceInfo(ref modern);
                 if (rc == ERROR_SUCCESS)
                 {
-                    _hdrApi = API_MODERN;
+                    Volatile.Write(ref _hdrApiKind, (int)HdrApiKind.Modern);
                     usedNewApi = true;
                     supported = (modern.value & HDR_SUPPORTED) != 0;
                     enabled = supported && ((modern.value & HDR_USER_ENABLED) != 0 || modern.activeColorMode == ACTIVE_COLOR_MODE_HDR);
                     return true;
                 }
 
-                if (_hdrApi == API_UNKNOWN && (rc == ERROR_INVALID_PARAMETER || rc == ERROR_NOT_SUPPORTED) && !IsWindows24H2OrNewer)
-                    _hdrApi = API_CLASSIC;
-                if (_hdrApi == API_MODERN)
+                if (_hdrApiKind == (int)HdrApiKind.Unknown && (rc == ERROR_INVALID_PARAMETER || rc == ERROR_NOT_SUPPORTED) && !IsWindows24H2OrNewer)
+                    Volatile.Write(ref _hdrApiKind, (int)HdrApiKind.Classic);
+                if (_hdrApiKind == (int)HdrApiKind.Modern)
                     return false;
             }
 

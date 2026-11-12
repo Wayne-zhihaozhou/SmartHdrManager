@@ -292,7 +292,8 @@ namespace HdrBrightControl
                 }
 
                 Log("SDR", "程序已关闭 – 切回 SDR，HDR 是本程序开启的。");
-                if (!HdrController.SetHdrState(false)) Log("ERROR", HdrController.LastError);
+                var result = HdrController.SetHdrState(false);
+                if (!result.Ok) Log("ERROR", result.Error);
             }
             catch (Exception ex)
             {
@@ -432,10 +433,16 @@ namespace HdrBrightControl
 
             if (HdrController.TryQueryHdrState(out bool supported, out bool any))
             {
-                if (!_apiLogged && HdrController.HdrApiName != "not determined yet")
+                if (!_apiLogged && HdrController.ApiKind != HdrApiKind.Unknown)
                 {
                     _apiLogged = true;
-                    Log("INFO", $"显示控制：{HdrController.HdrApiName} – {WindowsVersion.Describe()}。");
+                    string apiName = HdrController.ApiKind switch
+                    {
+                        HdrApiKind.Modern => "modern HDR API (Windows 11 24H2 或更新版本)",
+                        HdrApiKind.Classic => "classic 高级颜色 API",
+                        _ => "unknown"
+                    };
+                    Log("INFO", $"显示控制：{apiName} – {WindowsVersion.Describe()}。");
                 }
 
                 if (!supported)
@@ -882,8 +889,8 @@ namespace HdrBrightControl
             _lastAttemptMs = now;
             Log("HDR", $"开启 HDR – {reason}");
 
-            bool ok = HdrController.SetHdrState(true);
-            if (ok)
+            var result = HdrController.SetHdrState(true);
+            if (result.Ok)
             {
                 _hdrOnByApp = true;
                 _hdrAny = true;
@@ -894,9 +901,9 @@ namespace HdrBrightControl
             }
             else
             {
-                Log("ERROR", HdrController.LastError);
+                Log("ERROR", result.Error);
             }
-            AfterSwitch(ok, now);
+            AfterSwitch(result.Ok, now);
         }
 
         private void TurnHdrOff(string reason)
@@ -905,8 +912,8 @@ namespace HdrBrightControl
             _lastAttemptMs = now;
             Log("SDR", $"切换到 SDR – {reason}");
 
-            bool ok = HdrController.SetHdrState(false);
-            if (ok)
+            var result = HdrController.SetHdrState(false);
+            if (result.Ok)
             {
                 _hdrOnByApp = false;
                 _expectAny = false;
@@ -917,9 +924,9 @@ namespace HdrBrightControl
             }
             else
             {
-                Log("ERROR", HdrController.LastError);
+                Log("ERROR", result.Error);
             }
-            AfterSwitch(ok, now);
+            AfterSwitch(result.Ok, now);
         }
 
         private void AfterSwitch(bool ok, long now)
