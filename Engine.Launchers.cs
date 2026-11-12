@@ -25,47 +25,47 @@ namespace HdrBrightControl
             string? game = _runningGame;
             if (game != null)
             {
-                if (!string.Equals(game, _seenGame, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(game, _launcher.SeenGame, StringComparison.OrdinalIgnoreCase))
                 {
-                    _seenGame = game;
-                    _seenGameSinceMs = _launcherTrackingStarted ? now : now - LauncherShortRunMs;
+                    _launcher.SeenGame = game;
+                    _launcher.SeenGameSinceMs = _launcher.TrackingStarted ? now : now - LauncherShortRunMs;
                 }
-                _launcherTrackingStarted = true;
-                if (_followLauncher != null) EndFollow();
+                _launcher.TrackingStarted = true;
+                if (_launcher.FollowLauncher != null) EndFollow();
                 return;
             }
 
-            _launcherTrackingStarted = true;
-            if (_seenGame != null)
+            _launcher.TrackingStarted = true;
+            if (_launcher.SeenGame != null)
             {
-                string closed = _seenGame;
-                long ranMs = now - _seenGameSinceMs;
-                _seenGame = null;
+                string closed = _launcher.SeenGame;
+                long ranMs = now - _launcher.SeenGameSinceMs;
+                _launcher.SeenGame = null;
 
                 _hdrOnForGame = null;
 
-                if (_followLauncher == null && ranMs < LauncherShortRunMs && !Paused)
+                if (_launcher.FollowLauncher == null && ranMs < LauncherShortRunMs && !Paused)
                     StartFollow(snapshot, now, closed, ranMs);
             }
 
-            if (_followLauncher == null) return;
+            if (_launcher.FollowLauncher == null) return;
 
-            var names = _followNames;
-            string? child = names == null ? null : FindRunningFromFolder(names, _followLauncher, _followNotBefore);
+            var names = _launcher.Names;
+            string? child = names == null ? null : FindRunningFromFolder(names, _launcher.FollowLauncher, _launcher.FollowNotBefore);
             if (child != null)
             {
-                string launcher = _followLauncher;
+                string launcher = _launcher.FollowLauncher;
                 EndFollow();
                 LearnLauncherGame(launcher, child);
 
                 _runningGame = child;
                 _activeHdrGameProcess = child;
-                _seenGame = child;
-                _seenGameSinceMs = now;
+                _launcher.SeenGame = child;
+                _launcher.SeenGameSinceMs = now;
             }
-            else if (now >= _followUntilMs)
+            else if (now >= _launcher.FollowUntilMs)
             {
-                Log("HDR", $"'{_followLauncher}' 在 {LauncherFollowMs / 1000} 秒内未启动游戏 – 恢复正常切换。");
+                Log("HDR", $"'{_launcher.FollowLauncher}' 在 {LauncherFollowMs / 1000} 秒内未启动游戏 – 恢复正常切换。");
                 EndFollow();
             }
         }
@@ -81,12 +81,12 @@ namespace HdrBrightControl
             string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             if (windows.Length > 0 && folder.StartsWith(windows, StringComparison.OrdinalIgnoreCase)) return;
 
-            _followLauncher = closed;
-            _followUntilMs = now + LauncherFollowMs;
-            _followNotBefore = DateTime.Now - TimeSpan.FromMilliseconds(Math.Max(0, ranMs)) - TimeSpan.FromSeconds(3);
-            _followHoldsHdr = _hdrAny;
-            _followNames = null;
-            int generation = ++_followGeneration;
+            _launcher.FollowLauncher = closed;
+            _launcher.FollowUntilMs = now + LauncherFollowMs;
+            _launcher.FollowNotBefore = DateTime.Now - TimeSpan.FromMilliseconds(Math.Max(0, ranMs)) - TimeSpan.FromSeconds(3);
+            _launcher.FollowHoldsHdr = _hdrAny;
+            _launcher.Names = null;
+            int generation = ++_launcher.Generation;
 
             Log("HDR", $"'{closed}' 运行 {Math.Max(1, ranMs / 1000)} 秒后关闭 – 它可能是一个启动器。 " +
                        (_hdrAny ? $"在等待它启动的游戏期间，最长保持 HDR 开启 {LauncherFollowMs / 1000} 秒。"
@@ -106,16 +106,16 @@ namespace HdrBrightControl
                 catch { }
 
                 if (names.Count > MaxFollowExeNames) names.Clear();
-                if (Volatile.Read(ref _followGeneration) == generation) _followNames = names;
+                if (Volatile.Read(ref _launcher.Generation) == generation) _launcher.Names = names;
             });
         }
 
         private void EndFollow()
         {
-            _followLauncher = null;
-            _followNames = null;
-            _followHoldsHdr = false;
-            Interlocked.Increment(ref _followGeneration);
+            _launcher.FollowLauncher = null;
+            _launcher.Names = null;
+            _launcher.FollowHoldsHdr = false;
+            Interlocked.Increment(ref _launcher.Generation);
         }
 
         private static bool IsExcludedExeName(string name)

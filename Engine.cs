@@ -174,40 +174,15 @@ namespace HdrBrightControl
         private int _contentProcessId;
         private readonly HashSet<string> _identityLogged = new(Cmp);
 
-        /// <summary>List entry the TV brightness belongs to; null is the desktop brightness.</summary>
-        private string? _brightnessOwner;
-        private int _brightnessValue;
-        private bool _brightnessStarted;
-        private bool _brightnessPending;
-        private bool _brightnessApplying;
-        private bool _brightnessVerifying;
-        private bool _brightnessHdrKnown;
-        private bool _brightnessAppliedOnHdr;
-        private int _brightnessAttempts;
-        private long _brightnessNextAttemptMs;
-        private long _brightnessVerifyAtMs;
+        private BrightnessState _brightness = new();
 
         private long _hdrChangedMs = NeverHappenedMs;
         private long _nextProcessScanMs;
         private string? _activeHdrGameProcess;
 
-        private string? _seenGame;
-        private long _seenGameSinceMs;
-        private bool _launcherTrackingStarted;
-        private string? _followLauncher;
-        private long _followUntilMs;
-        private bool _followHoldsHdr;
-        private DateTime _followNotBefore;
-        private int _followGeneration;
-        private volatile HashSet<string>? _followNames;
+        private LauncherState _launcher = new();
 
-        private bool _hdrOnByApp;
-
-        private string? _handOffDemand;
-        private string _lastDemand = "none";
-        private bool? _expectAny;
-        private bool _switchConfirmed = true;
-        private long _displayEventMs = NeverHappenedMs;
+        private HdrState _hdr = new();
         private bool _externalEnded;
         private string _externalEndedWhat = string.Empty;
 
@@ -219,10 +194,7 @@ namespace HdrBrightControl
         private string? _externalHoldProcess;
         private long _nextExternalCheckMs;
 
-        private long _sdrFallbackAtMs = -1;
-        private long _lastAttemptMs = NeverHappenedMs;
-        private long _cooldownUntilMs;
-        private int _consecutiveFailures;
+        private DecisionState _decision = new();
 
         private static long Now => Environment.TickCount64;
 
@@ -287,7 +259,7 @@ namespace HdrBrightControl
         {
             try
             {
-                if (!_hdrAny || !_hdrOnByApp) return;
+                if (!_hdrAny || !_hdr.OnByApp) return;
 
                 string? busy = _runningGame != null ? $"'{_runningGame}' 仍在运行"
                     : _externalHoldProcess != null ? $"'{_externalHoldProcess}' 仍在运行"
@@ -311,7 +283,7 @@ namespace HdrBrightControl
         /// <summary>Forces the HDR state to be re-read on the next tick (display change, resume from sleep).</summary>
         public void InvalidateHdrState(bool resumed = false)
         {
-            if (resumed) Interlocked.Exchange(ref _displayEventMs, _clock.NowMs);
+            if (resumed) Interlocked.Exchange(ref _hdr.DisplayEventMs, _clock.NowMs);
             Interlocked.Exchange(ref _forceHdrQuery, 1);
             _wake.Set();
         }
@@ -390,7 +362,7 @@ namespace HdrBrightControl
             {
                 HdrOn = _hdrAny,
                 Paused = Paused,
-                BrightnessOwner = _brightnessOwner
+                BrightnessOwner = _brightness.Owner
             };
         }
 
@@ -463,11 +435,11 @@ namespace HdrBrightControl
                 else if (!_firstHdrQueryDone && any)
                     Log("HDR", "HDR 已开启 – 保持现状（本程序只切回自己开启的 HDR）。");
 
-                bool towardOwn = _expectAny.HasValue && any == _expectAny.Value;
-                if (towardOwn) _switchConfirmed = true;
+                bool towardOwn = _hdr.ExpectAny.HasValue && any == _hdr.ExpectAny.Value;
+                if (towardOwn) _hdr.SwitchConfirmed = true;
 
                 if (_firstHdrQueryDone && any != _hdrAny && !towardOwn &&
-                    (_switchConfirmed || now - _lastAttemptMs > ExternalChangeGraceMs))
+                    (_hdr.SwitchConfirmed || now - _decision.LastAttemptMs > ExternalChangeGraceMs))
                     HandleExternalChange(any, now);
 
                 if (!any) _externalHoldProcess = null;
@@ -486,7 +458,7 @@ namespace HdrBrightControl
                     }
                     else
                     {
-                        _consecutiveFailures = 0;
+                        _decision.ConsecutiveFailures = 0;
                     }
                 }
             }
@@ -503,10 +475,10 @@ namespace HdrBrightControl
             string front = string.IsNullOrEmpty(_foregroundProcess) ? ProcessNames.Unknown : _foregroundProcess;
             Log("INFO", $"Windows HDR 在未经本程序的情况下变为 {(any ? "开启" : "关闭")} – 由游戏、Win+Alt+B 或 Windows 设置触发（前台窗口：{front}）。");
 
-            _hdrOnByApp = false;
+            _hdr.OnByApp = false;
             _hdrOnForGame = null;
-            _expectAny = any;
-            _switchConfirmed = true;
+            _hdr.ExpectAny = any;
+            _hdr.SwitchConfirmed = true;
 
             if (any && _foregroundFullscreen && !IsSelf(front) &&
                 front is not (ProcessNames.Unknown or ProcessNames.Explorer))
@@ -519,20 +491,20 @@ namespace HdrBrightControl
 
             if (Paused) return;
 
-            bool displayEvent = now - Interlocked.Read(ref _displayEventMs) < DisplayEventGraceMs;
+            bool displayEvent = now - Interlocked.Read(ref _hdr.DisplayEventMs) < DisplayEventGraceMs;
             if (!any && displayEvent) return;
 
-            _handOffDemand = _lastDemand;
+            _hdr.HandOffDemand = _hdr.LastDemand;
             if (any)
                 Log("HDR", "HDR 由您或其他程序开启 – 保持开启。本程序只切回自己开启的 HDR。");
-            else if (_lastDemand != "none")
-                Log("HDR", $"HDR 由您或其他程序关闭 – 在 {DescribeDemand(_lastDemand)} 结束前（或下一个游戏 / 视频启动前）不再开启。");
+            else if (_hdr.LastDemand != "none")
+                Log("HDR", $"HDR 由您或其他程序关闭 – 在 {DescribeDemand(_hdr.LastDemand)} 结束前（或下一个游戏 / 视频启动前）不再开启。");
         }
 
         private void Decide(Snapshot snapshot, long now)
         {
             bool shouldEnableHdr = EvaluateHdrRequirement(_contentProgram, out string reason);
-            bool canAttempt = now - _lastAttemptMs >= SwitchSpacingMs && now >= _cooldownUntilMs;
+            bool canAttempt = now - _decision.LastAttemptMs >= SwitchSpacingMs && now >= _decision.CooldownUntilMs;
 
             if (TryForceSdr(shouldEnableHdr, canAttempt)) return;
 
@@ -556,10 +528,10 @@ namespace HdrBrightControl
                 }
             }
 
-            if (_followLauncher != null && _followHoldsHdr && !shouldEnableHdr)
+            if (_launcher.FollowLauncher != null && _launcher.FollowHoldsHdr && !shouldEnableHdr)
             {
                 shouldEnableHdr = true;
-                reason = $"等待 '{_followLauncher}' 启动的游戏";
+                reason = $"等待 '{_launcher.FollowLauncher}' 启动的游戏";
             }
 
             if (!shouldEnableHdr && snapshot.EnableOnProcessStart && _runningGame != null)
@@ -576,22 +548,22 @@ namespace HdrBrightControl
             else if (_runningGame != null) demand = "game:" + _runningGame;
             else if (_contentProgram is { IsHdr: true } hdrInFront) demand = "game:" + hdrInFront.Entry;
             else if (_externalHoldProcess != null) demand = "ext:" + _externalHoldProcess;
-            else if (_followLauncher != null && _followHoldsHdr) demand = "follow:" + _followLauncher;
+            else if (_launcher.FollowLauncher != null && _launcher.FollowHoldsHdr) demand = "follow:" + _launcher.FollowLauncher;
             else demand = "focus:" + _contentProcess;
 
             if (HandedOff(demand))
             {
-                _sdrFallbackAtMs = -1;
+                _decision.SdrFallbackAtMs = -1;
                 _externalEnded = false;
                 if (_runningGame == null) _activeHdrGameProcess = null;
                 return;
             }
 
-            bool owns = _hdrOnByApp;
+            bool owns = _hdr.OnByApp;
 
             if (shouldEnableHdr)
             {
-                _sdrFallbackAtMs = -1;
+                _decision.SdrFallbackAtMs = -1;
                 _externalEnded = false;
                 if (!_hdrAny && canAttempt)
                 {
@@ -609,18 +581,18 @@ namespace HdrBrightControl
             if (!_hdrAny)
             {
                 _activeHdrGameProcess = null;
-                _sdrFallbackAtMs = -1;
+                _decision.SdrFallbackAtMs = -1;
                 _externalEnded = false;
                 return;
             }
 
             if (_activeHdrGameProcess != null && _runningGame == null)
             {
-                if (now >= _cooldownUntilMs)
+                if (now >= _decision.CooldownUntilMs)
                 {
                     string closedGame = _activeHdrGameProcess;
                     _activeHdrGameProcess = null;
-                    _sdrFallbackAtMs = -1;
+                    _decision.SdrFallbackAtMs = -1;
                     if (owns) UndoOwnHdr($"HDR game closed ({closedGame})");
                     else Log("HDR", $"'{closedGame}' 已关闭 – HDR 保持开启（不是本程序开启的）。");
                 }
@@ -632,7 +604,7 @@ namespace HdrBrightControl
                 if (canAttempt)
                 {
                     _externalEnded = false;
-                    _sdrFallbackAtMs = -1;
+                    _decision.SdrFallbackAtMs = -1;
                     TurnHdrOff($"'{_externalEndedWhat}' 已关闭（它曾自行开启 HDR）");
                 }
                 return;
@@ -640,17 +612,17 @@ namespace HdrBrightControl
 
             if (!owns)
             {
-                _sdrFallbackAtMs = -1;
+                _decision.SdrFallbackAtMs = -1;
                 return;
             }
 
-            if (_sdrFallbackAtMs < 0)
+            if (_decision.SdrFallbackAtMs < 0)
             {
-                _sdrFallbackAtMs = now + snapshot.FallbackSeconds * 1000L;
+                _decision.SdrFallbackAtMs = now + snapshot.FallbackSeconds * 1000L;
             }
-            else if (now >= _sdrFallbackAtMs && canAttempt)
+            else if (now >= _decision.SdrFallbackAtMs && canAttempt)
             {
-                _sdrFallbackAtMs = -1;
+                _decision.SdrFallbackAtMs = -1;
                 UndoOwnHdr("无 HDR 内容处于活动状态（桌面模式）");
             }
         }
@@ -668,7 +640,7 @@ namespace HdrBrightControl
             if (sdrApp == null) return false;
 
             _activeHdrGameProcess = null;
-            _sdrFallbackAtMs = -1;
+            _decision.SdrFallbackAtMs = -1;
             _externalEnded = false;
 
             if (_hdrAny && canAttempt)
@@ -690,11 +662,11 @@ namespace HdrBrightControl
         {
             if (!snapshot.BrightnessEnabled)
             {
-                _brightnessOwner = null;
-                _brightnessStarted = false;
-                _brightnessPending = false;
-                _brightnessHdrKnown = false;
-                _brightnessVerifyAtMs = 0;
+                _brightness.Owner = null;
+                _brightness.Started = false;
+                _brightness.Pending = false;
+                _brightness.HdrKnown = false;
+                _brightness.VerifyAtMs = 0;
                 return;
             }
 
@@ -703,16 +675,16 @@ namespace HdrBrightControl
             string? app = owner?.Entry;
             int brightness = snapshot.BrightnessFor(owner);
 
-            bool firstCheck = !_brightnessStarted;
-            _brightnessStarted = true;
+            bool firstCheck = !_brightness.Started;
+            _brightness.Started = true;
 
-            bool targetChanged = firstCheck || brightness != _brightnessValue ||
-                                 !string.Equals(app, _brightnessOwner, StringComparison.OrdinalIgnoreCase);
+            bool targetChanged = firstCheck || brightness != _brightness.Value ||
+                                 !string.Equals(app, _brightness.Owner, StringComparison.OrdinalIgnoreCase);
 
             if (targetChanged)
             {
-                _brightnessOwner = app;
-                _brightnessValue = brightness;
+                _brightness.Owner = app;
+                _brightness.Value = brightness;
 
                 // Nothing listed is running at start: leave the TV as the user left it
                 if (firstCheck && app == null) return;
@@ -720,31 +692,31 @@ namespace HdrBrightControl
                 ScheduleBrightnessWrite(now);
             }
 
-            if (_brightnessHdrKnown && _brightnessAppliedOnHdr != _hdrAny)
+            if (_brightness.HdrKnown && _brightness.AppliedOnHdr != _hdrAny)
             {
                 ScheduleBrightnessWrite(now);
                 ScheduleBrightnessVerify(now);
             }
 
-            if (_brightnessApplying || _brightnessVerifying) return;
+            if (_brightness.Applying || _brightness.Verifying) return;
 
-            if (_brightnessPending && now >= _brightnessNextAttemptMs &&
+            if (_brightness.Pending && now >= _brightness.NextAttemptMs &&
                 now - _hdrChangedMs >= BrightnessSettleAfterHdrMs)
             {
-                _brightnessPending = false;
-                _brightnessApplying = true;
-                _brightnessAppliedOnHdr = _hdrAny;
-                _brightnessHdrKnown = true;
+                _brightness.Pending = false;
+                _brightness.Applying = true;
+                _brightness.AppliedOnHdr = _hdrAny;
+                _brightness.HdrKnown = true;
                 ScheduleBrightnessVerify(now);
                 StartBrightnessWrite(brightness, app);
                 return;
             }
 
-            if (_brightnessVerifyAtMs > 0 && now >= _brightnessVerifyAtMs && !_brightnessPending &&
-                _brightnessHdrKnown && _brightnessAppliedOnHdr == _hdrAny)
+            if (_brightness.VerifyAtMs > 0 && now >= _brightness.VerifyAtMs && !_brightness.Pending &&
+                _brightness.HdrKnown && _brightness.AppliedOnHdr == _hdrAny)
             {
-                _brightnessVerifyAtMs = 0;
-                _brightnessVerifying = true;
+                _brightness.VerifyAtMs = 0;
+                _brightness.Verifying = true;
                 _ = Task.Run(() => VerifyBrightnessAsync(brightness, app));
             }
 
@@ -767,16 +739,16 @@ namespace HdrBrightControl
         private void ScheduleBrightnessVerify(long now)
         {
             if (now - _hdrChangedMs >= BrightnessVerifyAfterHdrMs) return;
-            _brightnessVerifyAtMs = Math.Max(_brightnessVerifyAtMs, _hdrChangedMs + BrightnessVerifyAfterHdrMs);
+            _brightness.VerifyAtMs = Math.Max(_brightness.VerifyAtMs, _hdrChangedMs + BrightnessVerifyAfterHdrMs);
         }
 
         /// <summary>A write is needed: the retries start over, and an HDR switch may still reset the value.</summary>
         private void ScheduleBrightnessWrite(long now)
         {
-            _brightnessPending = true;
-            _brightnessAttempts = 0;
-            _brightnessNextAttemptMs = now;
-            _brightnessHdrKnown = false;
+            _brightness.Pending = true;
+            _brightness.Attempts = 0;
+            _brightness.NextAttemptMs = now;
+            _brightness.HdrKnown = false;
         }
 
         private void StartBrightnessWrite(int brightness, string? app)
@@ -788,26 +760,26 @@ namespace HdrBrightControl
         private async Task WriteBrightnessAsync(int brightness, string? app)
         {
             TvResult result = await RunTvCommandAsync(() => TvCli.SetBrightnessAsync(brightness)).ConfigureAwait(false);
-            _brightnessApplying = false;
+            _brightness.Applying = false;
             if (!IsSameTarget(brightness, app)) return;
 
             if (result.Success)
             {
-                _brightnessAttempts = 0;
+                _brightness.Attempts = 0;
                 return;
             }
 
-            _brightnessAttempts++;
-            if (_brightnessAttempts >= BrightnessMaxAttempts)
+            _brightness.Attempts++;
+            if (_brightness.Attempts >= BrightnessMaxAttempts)
             {
                 Log("ERROR", $"亮度 {brightness} 连续 {BrightnessMaxAttempts} 次未被电视接受（{result.Detail}）– 本轮不再重试，下次切换时再设置。");
                 return;
             }
 
-            _brightnessPending = true;
-            _brightnessNextAttemptMs = _clock.NowMs + (long)BrightnessRetryDelayMs * _brightnessAttempts;
-            Log("ERROR", $"设置亮度 {brightness} 失败：{result.Detail} – {BrightnessRetryDelayMs * _brightnessAttempts / 1000} 秒后重试" +
-                         $"（{_brightnessAttempts}/{BrightnessMaxAttempts}）。");
+            _brightness.Pending = true;
+            _brightness.NextAttemptMs = _clock.NowMs + (long)BrightnessRetryDelayMs * _brightness.Attempts;
+            Log("ERROR", $"设置亮度 {brightness} 失败：{result.Detail} – {BrightnessRetryDelayMs * _brightness.Attempts / 1000} 秒后重试" +
+                         $"（{_brightness.Attempts}/{BrightnessMaxAttempts}）。");
         }
 
         /// <summary>
@@ -817,7 +789,7 @@ namespace HdrBrightControl
         private async Task VerifyBrightnessAsync(int brightness, string? app)
         {
             TvResult result = await RunTvCommandAsync(() => TvCli.ReadCurrentBrightnessAsync()).ConfigureAwait(false);
-            _brightnessVerifying = false;
+            _brightness.Verifying = false;
             if (!result.Success || result.Brightness == brightness) return;
             if (!IsSameTarget(brightness, app)) return;
 
@@ -840,8 +812,8 @@ namespace HdrBrightControl
 
         /// <summary>The value was not replaced by another program or slider while the TV command was running.</summary>
         private bool IsSameTarget(int brightness, string? app) =>
-            brightness == _brightnessValue &&
-            string.Equals(app, _brightnessOwner, StringComparison.OrdinalIgnoreCase);
+            brightness == _brightness.Value &&
+            string.Equals(app, _brightness.Owner, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// The program whose brightness belongs on screen: the running HDR game (it keeps its brightness even when the
@@ -863,10 +835,10 @@ namespace HdrBrightControl
         /// </summary>
         private bool HandedOff(string demand)
         {
-            _lastDemand = demand;
-            if (_handOffDemand == null) return false;
-            if (string.Equals(demand, _handOffDemand, StringComparison.OrdinalIgnoreCase)) return true;
-            _handOffDemand = null;
+            _hdr.LastDemand = demand;
+            if (_hdr.HandOffDemand == null) return false;
+            if (string.Equals(demand, _hdr.HandOffDemand, StringComparison.OrdinalIgnoreCase)) return true;
+            _hdr.HandOffDemand = null;
             Log("HDR", $"自动切换重新接管（{(demand == "none" ? "您的列表中已无活动项目" : DescribeDemand(demand))}）。");
             return false;
         }
@@ -893,18 +865,18 @@ namespace HdrBrightControl
         private void TurnHdrOn(string reason)
         {
             long now = _clock.NowMs;
-            _lastAttemptMs = now;
+            _decision.LastAttemptMs = now;
             Log("HDR", $"开启 HDR – {reason}");
 
             var result = _hdrSwitch.Set(true);
             if (result.Ok)
             {
-                _hdrOnByApp = true;
+                _hdr.OnByApp = true;
                 _hdrAny = true;
                 _hdrChangedMs = now;
                 _verifyOn = true;
-                _expectAny = true;
-                _switchConfirmed = false;
+                _hdr.ExpectAny = true;
+                _hdr.SwitchConfirmed = false;
             }
             else
             {
@@ -916,15 +888,15 @@ namespace HdrBrightControl
         private void TurnHdrOff(string reason)
         {
             long now = _clock.NowMs;
-            _lastAttemptMs = now;
+            _decision.LastAttemptMs = now;
             Log("SDR", $"切换到 SDR – {reason}");
 
             var result = _hdrSwitch.Set(false);
             if (result.Ok)
             {
-                _hdrOnByApp = false;
-                _expectAny = false;
-                _switchConfirmed = false;
+                _hdr.OnByApp = false;
+                _hdr.ExpectAny = false;
+                _hdr.SwitchConfirmed = false;
                 _hdrAny = false;
                 _hdrChangedMs = now;
                 _verifyOn = false;
@@ -942,7 +914,7 @@ namespace HdrBrightControl
 
             if (ok)
             {
-                if (!_verifyOn) _consecutiveFailures = 0;
+                if (!_verifyOn) _decision.ConsecutiveFailures = 0;
                 return;
             }
 
@@ -951,10 +923,10 @@ namespace HdrBrightControl
 
         private void RegisterFailure(long now)
         {
-            if (++_consecutiveFailures >= FailuresBeforeCooldown)
+            if (++_decision.ConsecutiveFailures >= FailuresBeforeCooldown)
             {
-                _consecutiveFailures = 0;
-                _cooldownUntilMs = now + FailureCooldownMs;
+                _decision.ConsecutiveFailures = 0;
+                _decision.CooldownUntilMs = now + FailureCooldownMs;
                 Log("ERROR", $"HDR 切换连续失败 {FailuresBeforeCooldown} 次 – 暂停自动尝试 {FailureCooldownMs / 1000} 秒。");
             }
         }
@@ -967,5 +939,55 @@ namespace HdrBrightControl
             reason = $"HDR 游戏 / 应用在前台（{front.Entry}）";
             return true;
         }
+
+        #region State Classes
+
+        private sealed class BrightnessState
+        {
+            public string? Owner;
+            public int Value;
+            public bool Started;
+            public bool Pending;
+            public bool Applying;
+            public bool Verifying;
+            public bool HdrKnown;
+            public bool AppliedOnHdr;
+            public int Attempts;
+            public long NextAttemptMs;
+            public long VerifyAtMs;
+        }
+
+        private sealed class LauncherState
+        {
+            public string? SeenGame;
+            public long SeenGameSinceMs;
+            public bool TrackingStarted;
+            public string? FollowLauncher;
+            public long FollowUntilMs;
+            public bool FollowHoldsHdr;
+            public DateTime FollowNotBefore;
+            public int Generation;
+            public volatile HashSet<string>? Names;
+        }
+
+        private sealed class HdrState
+        {
+            public bool OnByApp;
+            public string? HandOffDemand;
+            public string LastDemand = string.Empty;
+            public bool? ExpectAny;
+            public bool SwitchConfirmed;
+            public long DisplayEventMs;
+        }
+
+        private sealed class DecisionState
+        {
+            public long SdrFallbackAtMs = -1;
+            public long LastAttemptMs = NeverHappenedMs;
+            public long CooldownUntilMs;
+            public int ConsecutiveFailures;
+        }
+
+        #endregion
     }
 }
