@@ -61,6 +61,7 @@ namespace HdrBrightControl
         private const int BrightnessVerifyAfterHdrMs = 6000;
         private const int BrightnessRetryDelayMs = 2000;
         private const int BrightnessMaxAttempts = 5;
+        private const long NeverHappenedMs = long.MinValue / 2;
 
         /// <summary>Process name of this app, lower case: its own window is not content that decides anything.</summary>
         public static readonly string SelfProcessName = ResolveSelfProcessName();
@@ -189,7 +190,7 @@ namespace HdrBrightControl
         private long _brightnessNextAttemptMs;
         private long _brightnessVerifyAtMs;
 
-        private long _hdrChangedMs = long.MinValue / 2;
+        private long _hdrChangedMs = NeverHappenedMs;
         private long _nextProcessScanMs;
         private string? _activeHdrGameProcess;
 
@@ -209,7 +210,7 @@ namespace HdrBrightControl
         private string _lastDemand = "none";
         private bool? _expectAny;
         private bool _switchConfirmed = true;
-        private long _displayEventMs = long.MinValue / 2;
+        private long _displayEventMs = NeverHappenedMs;
         private bool _externalEnded;
         private string _externalEndedWhat = string.Empty;
 
@@ -222,7 +223,7 @@ namespace HdrBrightControl
         private long _nextExternalCheckMs;
 
         private long _sdrFallbackAtMs = -1;
-        private long _lastAttemptMs = long.MinValue / 2;
+        private long _lastAttemptMs = NeverHappenedMs;
         private long _cooldownUntilMs;
         private int _consecutiveFailures;
 
