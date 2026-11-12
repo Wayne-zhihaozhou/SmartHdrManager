@@ -32,7 +32,7 @@ namespace HdrBrightControl
     /// The HDR / SDR decision loop. Runs on its own background thread and owns every display switch.
     /// The UI only changes the configuration, which it always does under <see cref="Sync"/>.
     /// </summary>
-    public sealed partial class HdrEngine
+    public sealed partial class HdrEngine : IAppLog
     {
         /// <summary>Old location next to the exe. Not writable when the app is installed in "Program Files".</summary>
         public static readonly string LegacyConfigPath = Path.Combine(AppContext.BaseDirectory, "config.json");
