@@ -70,7 +70,9 @@ namespace HdrBrightControl
         /// <param name="sdr">True for the SDR list, false for the HDR list.</param>
         public bool AddGame(string procName, string? exePath = null, bool sdr = false)
         {
-            if (string.IsNullOrWhiteSpace(procName) || procName is ExplorerProcessName or SelfProcessName)
+            if (string.IsNullOrWhiteSpace(procName) ||
+                procName.Equals(ExplorerProcessName, StringComparison.OrdinalIgnoreCase) ||
+                IsSelf(procName))
             {
                 Log("ERROR", "无效的程序名。");
                 return false;

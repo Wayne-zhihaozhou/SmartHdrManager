@@ -65,7 +65,14 @@ namespace HdrBrightControl
         private const int BrightnessMaxAttempts = 5;
 
         /// <summary>Process name of this app, lower case: its own window is not content that decides anything.</summary>
-        public const string SelfProcessName = "smarthdrmanager";
+        public static readonly string SelfProcessName = ResolveSelfProcessName();
+
+        private static string ResolveSelfProcessName()
+        {
+            string? exe = Environment.ProcessPath;
+            string name = string.IsNullOrEmpty(exe) ? "HdrBrightControl" : Path.GetFileNameWithoutExtension(exe);
+            return name.ToLowerInvariant();
+        }
 
         /// <summary>Windows desktop and search UI: no game, no video.</summary>
         private const string ExplorerProcessName = "explorer";
@@ -482,7 +489,8 @@ namespace HdrBrightControl
             _expectAny = any;
             _switchConfirmed = true;
 
-            if (any && _foregroundFullscreen && front is not ("unknown" or ExplorerProcessName or SelfProcessName))
+            if (any && _foregroundFullscreen && !IsSelf(front) &&
+                front is not ("unknown" or ExplorerProcessName))
             {
                 _externalHoldProcess = front;
                 _externalEnded = false;
