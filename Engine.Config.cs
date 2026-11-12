@@ -47,11 +47,12 @@ namespace HdrBrightControl
                 };
                 Normalize(fresh);
 
-                foreach (var property in typeof(AppConfig).GetProperties())
-                    if (property.CanWrite) property.SetValue(Config, property.GetValue(fresh));
-
-                InvalidateSnapshot();
-                Save();
+                lock (Sync)
+                {
+                    ApplyConfigValues(fresh);
+                    InvalidateSnapshot();
+                    Save();
+                }
             }
             Log("CONFIG", "设置已恢复默认值（游戏列表已保留）。");
         }
@@ -147,6 +148,13 @@ namespace HdrBrightControl
         }
 
         /// <summary>Caller must hold <see cref="Sync"/> (or be in the constructor).</summary>
+        private void ApplyConfigValues(AppConfig source)
+        {
+            foreach (var property in typeof(AppConfig).GetProperties())
+                if (property.CanWrite) property.SetValue(Config, property.GetValue(source));
+        }
+
+        /// <summary>Caller must hold <see cref="Sync"/> (or be in the constructor).</summary>
         private void Save()
         {
             try
@@ -188,8 +196,7 @@ namespace HdrBrightControl
 
                 lock (Sync)
                 {
-                    foreach (var property in typeof(AppConfig).GetProperties())
-                        if (property.CanWrite) property.SetValue(Config, property.GetValue(fresh));
+                    ApplyConfigValues(fresh);
                     InvalidateSnapshot();
                 }
                 Log("CONFIG", "config.json 已重新加载。");
