@@ -71,23 +71,9 @@ namespace HdrBrightControl
         private const int ExternalHoldCheckMs = 2000;
         private const int BrightnessMin = 0;
         private const int BrightnessMax = 100;
-
-        /// <summary>
-        /// The TV stores the brightness per picture mode (SDR / HDR) and restores its own value when an HDR change
-        /// makes it switch mode. A write issued right at the switch lands in the old mode and is lost, so every write
-        /// waits this long after an HDR change.
-        /// </summary>
         private const int BrightnessSettleAfterHdrMs = 2500;
-
-        /// <summary>
-        /// The picture mode may come up after the write: one extra read this long after the HDR change confirms that
-        /// the TV kept the value, and rewrites it when the TV fell back to its own value.
-        /// </summary>
         private const int BrightnessVerifyAfterHdrMs = 6000;
-
-        /// <summary>A write the TV did not take is repeated with this base delay.</summary>
         private const int BrightnessRetryDelayMs = 2000;
-
         private const int BrightnessMaxAttempts = 5;
 
         /// <summary>Process name of this app, lower case: its own window is not content that decides anything.</summary>
@@ -520,8 +506,7 @@ namespace HdrBrightControl
             _expectAny = any;
             _switchConfirmed = true;
 
-            if (any && _foregroundFullscreen &&
-                front is not ("unknown" or ExplorerProcessName or SelfProcessName))
+            if (any && _foregroundFullscreen && front is not ("unknown" or ExplorerProcessName or SelfProcessName))
             {
                 _externalHoldProcess = front;
                 _externalEnded = false;
