@@ -227,9 +227,11 @@ namespace HdrBrightControl
         private static long Now => Environment.TickCount64;
 
         private readonly IHdrSwitch _hdrSwitch;
+        private readonly IClock _clock;
 
         public HdrEngine()
         {
+            _clock = new SystemClock();
             _hdrSwitch = new WindowsHdrSwitch();
             InitializeLogFile();
             MigrateLegacyConfig();
@@ -307,7 +309,7 @@ namespace HdrBrightControl
         /// <summary>Forces the HDR state to be re-read on the next tick (display change, resume from sleep).</summary>
         public void InvalidateHdrState(bool resumed = false)
         {
-            if (resumed) Interlocked.Exchange(ref _displayEventMs, Now);
+            if (resumed) Interlocked.Exchange(ref _displayEventMs, _clock.NowMs);
             Interlocked.Exchange(ref _forceHdrQuery, 1);
             _wake.Set();
         }
@@ -353,7 +355,7 @@ namespace HdrBrightControl
 
         private void Tick(Snapshot snapshot)
         {
-            long now = Now;
+            long now = _clock.NowMs;
 
             if (!ReferenceEquals(snapshot, _lastSnapshot))
             {
@@ -694,7 +696,7 @@ namespace HdrBrightControl
                 return;
             }
 
-            long now = Now;
+            long now = _clock.NowMs;
             var owner = ResolveBrightnessOwner(snapshot);
             string? app = owner?.Entry;
             int brightness = snapshot.BrightnessFor(owner);
@@ -801,7 +803,7 @@ namespace HdrBrightControl
             }
 
             _brightnessPending = true;
-            _brightnessNextAttemptMs = Now + (long)BrightnessRetryDelayMs * _brightnessAttempts;
+            _brightnessNextAttemptMs = _clock.NowMs + (long)BrightnessRetryDelayMs * _brightnessAttempts;
             Log("ERROR", $"设置亮度 {brightness} 失败：{result.Detail} – {BrightnessRetryDelayMs * _brightnessAttempts / 1000} 秒后重试" +
                          $"（{_brightnessAttempts}/{BrightnessMaxAttempts}）。");
         }
@@ -818,7 +820,7 @@ namespace HdrBrightControl
             if (!IsSameTarget(brightness, app)) return;
 
             Log("BRIGHT", $"电视在新图像模式下用了自己的亮度 {result.Brightness}（期望 {brightness}）– 重新写入。");
-            ScheduleBrightnessWrite(Now);
+            ScheduleBrightnessWrite(_clock.NowMs);
         }
 
         /// <summary>A TV command never throws at the caller: a failure is reported as a result.</summary>
@@ -888,7 +890,7 @@ namespace HdrBrightControl
 
         private void TurnHdrOn(string reason)
         {
-            long now = Now;
+            long now = _clock.NowMs;
             _lastAttemptMs = now;
             Log("HDR", $"开启 HDR – {reason}");
 
@@ -911,7 +913,7 @@ namespace HdrBrightControl
 
         private void TurnHdrOff(string reason)
         {
-            long now = Now;
+            long now = _clock.NowMs;
             _lastAttemptMs = now;
             Log("SDR", $"切换到 SDR – {reason}");
 
