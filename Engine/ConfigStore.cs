@@ -108,21 +108,6 @@ namespace HdrBrightControl
                 if (property.CanWrite) property.SetValue(Config, property.GetValue(source));
         }
 
-        private void Save()
-        {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-                string temporaryPath = ConfigPath + ".tmp";
-                File.WriteAllText(temporaryPath, JsonSerializer.Serialize(Config, new JsonSerializerOptions { WriteIndented = true }));
-                File.Move(temporaryPath, ConfigPath, overwrite: true);
-            }
-            catch (Exception ex)
-            {
-                Log("ERROR", $"config.json 无法保存：{ex.Message}");
-            }
-        }
-
         public void ResetSettings()
         {
             lock (Sync)

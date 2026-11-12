@@ -31,5 +31,10 @@ namespace HdrBrightControl
                 return result;
             }
         }
+
+        private void Save()
+        {
+            _configStore.Save(ConfigPath, Config, this);
+        }
     }
 }

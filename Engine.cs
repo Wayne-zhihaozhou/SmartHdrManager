@@ -228,14 +228,16 @@ namespace HdrBrightControl
 
         private readonly IHdrSwitch _hdrSwitch;
         private readonly IClock _clock;
+        private readonly IConfigStore _configStore;
 
         public HdrEngine()
         {
             _clock = new SystemClock();
             _hdrSwitch = new WindowsHdrSwitch();
+            _configStore = new DiskConfigStore();
             InitializeLogFile();
             MigrateLegacyConfig();
-            Config = LoadOrCreateConfig();
+            Config = _configStore.Load(ConfigPath, this, ConfigPath + ".bak", LegacyConfigPath);
             UpgradeConfig(Config);
             Save();
         }
