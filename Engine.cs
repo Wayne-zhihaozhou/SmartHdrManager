@@ -226,8 +226,11 @@ namespace HdrBrightControl
 
         private static long Now => Environment.TickCount64;
 
+        private readonly IHdrSwitch _hdrSwitch;
+
         public HdrEngine()
         {
+            _hdrSwitch = new WindowsHdrSwitch();
             InitializeLogFile();
             MigrateLegacyConfig();
             Config = LoadOrCreateConfig();
@@ -292,7 +295,7 @@ namespace HdrBrightControl
                 }
 
                 Log("SDR", "程序已关闭 – 切回 SDR，HDR 是本程序开启的。");
-                var result = HdrController.SetHdrState(false);
+                var result = _hdrSwitch.Set(false);
                 if (!result.Ok) Log("ERROR", result.Error);
             }
             catch (Exception ex)
@@ -431,16 +434,16 @@ namespace HdrBrightControl
             if (!forced && now < _nextHdrQueryMs)
                 return;
 
-            if (HdrController.TryQueryHdrState(out bool supported, out bool any))
+            if (_hdrSwitch.TryQuery(out bool supported, out bool any))
             {
-                if (!_apiLogged && HdrController.ApiKind != HdrApiKind.Unknown)
+                if (!_apiLogged && _hdrSwitch.ApiDescription != "未知")
                 {
                     _apiLogged = true;
-                    string apiName = HdrController.ApiKind switch
+                    string apiName = _hdrSwitch.ApiDescription switch
                     {
-                        HdrApiKind.Modern => "modern HDR API (Windows 11 24H2 或更新版本)",
-                        HdrApiKind.Classic => "classic 高级颜色 API",
-                        _ => "unknown"
+                        "modern HDR API (Windows 11 24H2 或更新版本)" => "modern HDR API (Windows 11 24H2 或更新版本)",
+                        "classic 高级颜色 API" => "classic 高级颜色 API",
+                        _ => _hdrSwitch.ApiDescription
                     };
                     Log("INFO", $"显示控制：{apiName} – {WindowsVersion.Describe()}。");
                 }
@@ -889,7 +892,7 @@ namespace HdrBrightControl
             _lastAttemptMs = now;
             Log("HDR", $"开启 HDR – {reason}");
 
-            var result = HdrController.SetHdrState(true);
+            var result = _hdrSwitch.Set(true);
             if (result.Ok)
             {
                 _hdrOnByApp = true;
@@ -912,7 +915,7 @@ namespace HdrBrightControl
             _lastAttemptMs = now;
             Log("SDR", $"切换到 SDR – {reason}");
 
-            var result = HdrController.SetHdrState(false);
+            var result = _hdrSwitch.Set(false);
             if (result.Ok)
             {
                 _hdrOnByApp = false;
