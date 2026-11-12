@@ -30,12 +30,14 @@ namespace HdrBrightControl
         private const int ReceiveBufferSize = 8192;
         private const int MaxMessageBytes = 4 * 1024 * 1024;
 
-        private const string HelloType = "hello";
+        private const string HelloRequestId = "hello";
         private const string RegisteredType = "registered";
-        private const string RegisterType = "register";
+        private const string RegisterRequestId = "register";
         private const string RequestType = "request";
         private const string ResponseType = "response";
         private const string ErrorType = "error";
+        private const string CloseReason = "bye";
+        private const string ConnectionResetMessage = "电视连接已重置";
         private const string ClientKeyField = "client-key";
         private const string ClientKeyAltField = "clientKey";
 
@@ -105,7 +107,7 @@ namespace HdrBrightControl
                 var socket = await OpenSocketAsync(ct).ConfigureAwait(false);
                 StartReceiveLoop(socket);
 
-                var hello = await SendHandshakeAsync(HelloType, new Dictionary<string, object>(), HelloTimeoutMs, ct)
+                var hello = await SendHandshakeAsync(HelloRequestId, new Dictionary<string, object>(), HelloTimeoutMs, ct)
                     .ConfigureAwait(false);
                 TvInfo = ReadTvInfo(hello, null);
 
@@ -120,7 +122,7 @@ namespace HdrBrightControl
                     HdrEngine.WriteFileLog($"[TV] getSystemInfo 未返回（部分固件允许跳过）: {ex.Message}");
                 }
 
-                var registered = await SendHandshakeAsync(RegisterType, BuildRegisterPayload(), RegisterTimeoutMs, ct)
+                var registered = await SendHandshakeAsync(RegisterRequestId, BuildRegisterPayload(), RegisterTimeoutMs, ct)
                     .ConfigureAwait(false);
                 ClientKey = ReadClientKey(registered) ?? ClientKey;
 
@@ -344,13 +346,13 @@ namespace HdrBrightControl
 
             switch (type)
             {
-                case HelloType:
-                case ResponseType when id == HelloType:
+                case HelloRequestId:
+                case ResponseType when id == HelloRequestId:
                     BufferOrCompleteHello(message);
                     return;
                 case RegisteredType:
-                case ResponseType when id == RegisterType:
-                case ErrorType when id == RegisterType:
+                case ResponseType when id == RegisterRequestId:
+                case ErrorType when id == RegisterRequestId:
                     DispatchRegister(message, type);
                     return;
                 case ResponseType:
@@ -452,13 +454,13 @@ namespace HdrBrightControl
         private async Task<JsonElement> SendHandshakeAsync(string type, Dictionary<string, object> payload, int timeoutMs,
                                                            CancellationToken ct)
         {
-            if (type == HelloType && TryTakeBufferedHello(out var buffered))
+            if (type == HelloRequestId && TryTakeBufferedHello(out var buffered))
                 return buffered;
 
             var waiter = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
             lock (_sync)
             {
-                if (type == HelloType) _helloWaiter = waiter;
+                if (type == HelloRequestId) _helloWaiter = waiter;
                 else _registeredWaiter = waiter;
             }
 
@@ -475,7 +477,7 @@ namespace HdrBrightControl
             }
             catch (TimeoutException)
             {
-                throw new TimeoutException(type == RegisterType
+                throw new TimeoutException(type == RegisterRequestId
                     ? "配对超时（电视是否弹出确认提示？）"
                     : "hello 握手超时");
             }
@@ -483,7 +485,7 @@ namespace HdrBrightControl
             {
                 lock (_sync)
                 {
-                    if (type == HelloType)
+                    if (type == HelloRequestId)
                     {
                         if (_helloWaiter == waiter) _helloWaiter = null;
                     }
@@ -568,7 +570,7 @@ namespace HdrBrightControl
                     try
                     {
                         using var timeout = new CancellationTokenSource(ShutdownTimeoutMs);
-                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", timeout.Token)
+                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, CloseReason, timeout.Token)
                             .ConfigureAwait(false);
                     }
                     catch { }
@@ -577,7 +579,7 @@ namespace HdrBrightControl
             }
 
             invoker?.Dispose();
-            FailWaiters(new InvalidOperationException("电视连接已重置"));
+            FailWaiters(new InvalidOperationException(ConnectionResetMessage));
         }
 
         private void FailWaiters(Exception error)
