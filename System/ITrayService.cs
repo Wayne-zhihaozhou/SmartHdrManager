@@ -7,7 +7,6 @@ namespace HdrBrightControl
     public interface ITrayService
     {
         void UpdateState(bool hdrOn, bool paused);
-        void UpdateTooltip(string text);
         void Dispose();
     }
 
@@ -22,7 +21,6 @@ namespace HdrBrightControl
 
     public sealed class TrayService : ITrayService, IDisposable
     {
-        private const int TooltipMaxLength = 63;
         private const int MinIconSize = 16;
 
         private readonly NotifyIcon _icon;
@@ -71,11 +69,6 @@ namespace HdrBrightControl
 
             _iconState = state;
             _icon.Icon = state == 2 ? _iconPaused : state == 1 ? _iconOn : _iconOff;
-        }
-
-        public void UpdateTooltip(string text)
-        {
-            _icon.Text = text.Length > TooltipMaxLength ? text.Substring(0, TooltipMaxLength) : text;
         }
 
         public void Dispose()

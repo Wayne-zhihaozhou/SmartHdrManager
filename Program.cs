@@ -27,7 +27,6 @@ namespace HdrBrightControl
         private MainForm? _form;
         private long _formHiddenAt;
         private bool _exiting;
-        private string _lastTooltip = string.Empty;
 
         public ITrayService TrayService => _tray;
 
@@ -130,13 +129,6 @@ namespace HdrBrightControl
         private void UpdateTrayStatus()
         {
             var status = _engine.Status;
-            string state = status.Paused ? "已暂停" : status.HdrOn ? "HDR 开" : "HDR 关";
-            string tooltip = $"HDR亮控 – {state}";
-            if (tooltip != _lastTooltip)
-            {
-                _lastTooltip = tooltip;
-                _tray.UpdateTooltip(tooltip);
-            }
             _tray.UpdateState(status.HdrOn, status.Paused);
         }
 
