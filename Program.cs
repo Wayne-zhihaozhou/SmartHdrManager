@@ -16,6 +16,7 @@ namespace HdrBrightControl
         private const int TrayTimerIntervalMs = 500;
 
         private readonly HdrEngine _engine;
+        private readonly TvBrightnessService _tvService;
         private readonly EventWaitHandle _showEvent;
         private readonly CommandEvents _commands;
         private readonly TrayAndStartupManager _tray;
@@ -26,9 +27,10 @@ namespace HdrBrightControl
         private bool _exiting;
         private string _lastTooltip = string.Empty;
 
-        public TrayAppContext(HdrEngine engine, EventWaitHandle showEvent, CommandEvents commands, CliOptions opts)
+        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, EventWaitHandle showEvent, CommandEvents commands, CliOptions opts)
         {
             _engine = engine;
+            _tvService = tvService;
             _showEvent = showEvent;
             _commands = commands;
 
@@ -223,14 +225,15 @@ namespace HdrBrightControl
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
             var engine = new HdrEngine();
-            TvCli.Initialize(engine);
+            var tvService = new TvBrightnessService(engine);
+            TvCli.Initialize(tvService);
             TvClientKeyStore.Initialize(engine);
             TrayAndStartupManager.Initialize(engine);
 
             Application.ThreadException += (_, e) => engine.WriteLine($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => engine.WriteLine($"FATAL  {e.ExceptionObject}");
 
-            using var context = new TrayAppContext(engine, showEvent, commands, opts);
+            using var context = new TrayAppContext(engine, tvService, showEvent, commands, opts);
             Application.Run(context);
         }
     }
