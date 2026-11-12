@@ -42,11 +42,11 @@ namespace HdrBrightControl
     }
 
     /// <summary>LG webOS TV the app sets brightness on.</summary>
-    public sealed class BrightnessConfig
+    public sealed record BrightnessConfig
     {
         public const string DefaultTvIp = "192.168.1.4";
 
-        public string TvIp { get; set; } = DefaultTvIp;
+        public string TvIp { get; init; } = DefaultTvIp;
 
         /// <summary>The app may control the TV brightness at all (automatic and manual).</summary>
         public bool Enabled { get; set; } = true;
