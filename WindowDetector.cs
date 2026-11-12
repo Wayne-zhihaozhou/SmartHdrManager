@@ -78,8 +78,7 @@ namespace HdrBrightControl
         }
 
         /// <summary>The desktop and the search window are never "fullscreen content".</summary>
-        private static bool IsShellProcess(string processName) =>
-            processName is "explorer" or "searchhost";
+        private static bool IsShellProcess(string processName) => ProcessNames.IsShell(processName);
 
         /// <summary>
         /// Process.GetProcessById opens a process handle and builds a Process object. The foreground process rarely

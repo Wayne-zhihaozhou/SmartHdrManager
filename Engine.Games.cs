@@ -68,7 +68,7 @@ namespace HdrBrightControl
         public bool AddGame(string procName, string? exePath = null, ProgramListKind kind = ProgramListKind.Hdr)
         {
             if (string.IsNullOrWhiteSpace(procName) ||
-                procName.Equals(ExplorerProcessName, StringComparison.OrdinalIgnoreCase) ||
+                procName.Equals(ProcessNames.Explorer, StringComparison.OrdinalIgnoreCase) ||
                 IsSelf(procName))
             {
                 Log("ERROR", "无效的程序名。");

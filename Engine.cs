@@ -73,9 +73,6 @@ namespace HdrBrightControl
             return name.ToLowerInvariant();
         }
 
-        /// <summary>Windows desktop and search UI: no game, no video.</summary>
-        private const string ExplorerProcessName = "explorer";
-
         private static readonly StringComparer Cmp = StringComparer.OrdinalIgnoreCase;
 
         public AppConfig Config { get; private set; }
@@ -489,7 +486,7 @@ namespace HdrBrightControl
         /// </summary>
         private void HandleExternalChange(bool any, long now)
         {
-            string front = string.IsNullOrEmpty(_foregroundProcess) ? "unknown" : _foregroundProcess;
+            string front = string.IsNullOrEmpty(_foregroundProcess) ? ProcessNames.Unknown : _foregroundProcess;
             Log("INFO", $"Windows HDR 在未经本程序的情况下变为 {(any ? "开启" : "关闭")} – 由游戏、Win+Alt+B 或 Windows 设置触发（前台窗口：{front}）。");
 
             _hdrOnByApp = false;
@@ -498,7 +495,7 @@ namespace HdrBrightControl
             _switchConfirmed = true;
 
             if (any && _foregroundFullscreen && !IsSelf(front) &&
-                front is not ("unknown" or ExplorerProcessName))
+                front is not (ProcessNames.Unknown or ProcessNames.Explorer))
             {
                 _externalHoldProcess = front;
                 _externalEnded = false;

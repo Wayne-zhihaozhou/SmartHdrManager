@@ -44,9 +44,16 @@ namespace HdrBrightControl
         }
     }
 
-    /// <summary>Process name of another process: exe name without ".exe", lower case.</summary>
+    /// <summary>Process name constants and shell process detection.</summary>
     public static class ProcessNames
     {
+        public const string Explorer = "explorer";
+        public const string SearchHost = "searchhost";
+        public const string Unknown = "unknown";
+
+        public static bool IsShell(string processName) =>
+            processName is Explorer or SearchHost;
+
         /// <summary>True while at least one process with this name runs.</summary>
         public static bool IsRunning(string processName)
         {
