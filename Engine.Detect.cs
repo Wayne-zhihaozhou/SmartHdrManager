@@ -109,6 +109,5 @@ namespace HdrBrightControl
             }
             return found;
         }
-
     }
 }

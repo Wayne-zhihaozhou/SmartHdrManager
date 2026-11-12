@@ -164,8 +164,6 @@ namespace HdrBrightControl
 
         private readonly EventWaitHandle _togglePause = new(false, EventResetMode.AutoReset, TogglePauseEventName);
 
-
-
         public void Signal(CliCommand command)
         {
             if (command == CliCommand.TogglePause) _togglePause.Set();
