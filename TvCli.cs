@@ -21,8 +21,6 @@ namespace HdrBrightControl
         private const string PictureCategory = "picture";
         private const string BrightnessKey = "backlight";
 
-        private const int MinBrightness = 0;
-        private const int MaxBrightness = 100;
         private const int SettingRequestTimeoutMs = 8000;
         private const int ReadRequestTimeoutMs = 6000;
         private const int AlertRequestTimeoutMs = 5000;
@@ -52,8 +50,8 @@ namespace HdrBrightControl
         /// <summary>Sets the brightness (0-100) and reads it back to verify.</summary>
         public static async Task<TvResult> SetBrightnessAsync(int value)
         {
-            if (value < MinBrightness || value > MaxBrightness)
-                return Fail($"亮度值超出范围: {value}（有效范围 {MinBrightness}-{MaxBrightness}）");
+            if (value < BrightnessRange.Min || value > BrightnessRange.Max)
+                return Fail($"亮度值超出范围: {value}（有效范围 {BrightnessRange.Min}-{BrightnessRange.Max}）");
 
             await Gate.WaitAsync().ConfigureAwait(false);
             try

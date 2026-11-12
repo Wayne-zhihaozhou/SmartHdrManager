@@ -35,7 +35,6 @@ namespace HdrBrightControl
     public sealed class GameList : Control
     {
         private const double GlideRate = 8.5;
-        private const int BrightnessStep = 10;
         private const int RowTextPadding = 22;
         private const int RowGapPx = 4;
         private const int ScrollbarWidthPx = 10;
@@ -354,8 +353,8 @@ namespace HdrBrightControl
             }
             else if (e.Button == MouseButtons.Left && PressedRowHit(e.Location))
             {
-                if (_pressedOnMinus) AdjustBrightness(_pressed, -BrightnessStep);
-                else if (_pressedOnPlus) AdjustBrightness(_pressed, BrightnessStep);
+                if (_pressedOnMinus) AdjustBrightness(_pressed, -BrightnessRange.Step);
+                else if (_pressedOnPlus) AdjustBrightness(_pressed, BrightnessRange.Step);
             }
 
             _pressed = -1;

@@ -7,8 +7,6 @@ namespace HdrBrightControl
 {
     public sealed partial class HdrEngine
     {
-        private const int DefaultBrightness = 50;
-
         public static string CleanExeInput(string rawInput)
         {
             string trimmed = rawInput.Trim().Trim('"', '\'');
@@ -42,7 +40,7 @@ namespace HdrBrightControl
                         Processes = new List<string> { process },
                         ExePath = paths.TryGetValue(process, out var path) ? path : null,
                         Tracked = sdr || IsHdrEnabledFor(hdrModes, process),
-                        Brightness = brightnessMap.TryGetValue(process, out int brightness) ? brightness : DefaultBrightness
+                        Brightness = brightnessMap.TryGetValue(process, out int brightness) ? brightness : BrightnessRange.Default
                     });
                 }
 
@@ -52,7 +50,7 @@ namespace HdrBrightControl
 
         public void SetGameBrightness(IEnumerable<string> processes, int brightness, string displayName)
         {
-            int value = Math.Clamp(brightness, BrightnessMin, BrightnessMax);
+            int value = Math.Clamp(brightness, BrightnessRange.Min, BrightnessRange.Max);
 
             lock (Sync)
             {

@@ -57,8 +57,6 @@ namespace HdrBrightControl
         private const int LauncherFollowMs = 45000;
         private const int ExternalChangeGraceMs = 8000;
         private const int ExternalHoldCheckMs = 2000;
-        private const int BrightnessMin = 0;
-        private const int BrightnessMax = 100;
         private const int BrightnessSettleAfterHdrMs = 2500;
         private const int BrightnessVerifyAfterHdrMs = 6000;
         private const int BrightnessRetryDelayMs = 2000;
@@ -110,7 +108,7 @@ namespace HdrBrightControl
                 BrightnessEnabled = c.Brightness?.Enabled ?? true;
                 FallbackSeconds = Math.Max(0, c.SdrFallbackDelaySeconds);
                 TickMs = Math.Clamp(c.ProcessScanIntervalMs, 50, 1000);
-                DesktopBrightness = Math.Clamp(c.DesktopBrightness, BrightnessMin, BrightnessMax);
+                DesktopBrightness = Math.Clamp(c.DesktopBrightness, BrightnessRange.Min, BrightnessRange.Max);
                 Brightness = BuildBrightness(c);
             }
 
@@ -146,7 +144,7 @@ namespace HdrBrightControl
 
                 foreach (var entry in c.PerGameBrightness ?? new Dictionary<string, int>())
                     if (!brightness.ContainsKey(entry.Key))
-                        brightness[entry.Key] = Math.Clamp(entry.Value, BrightnessMin, BrightnessMax);
+                        brightness[entry.Key] = Math.Clamp(entry.Value, BrightnessRange.Min, BrightnessRange.Max);
 
                 return brightness;
             }

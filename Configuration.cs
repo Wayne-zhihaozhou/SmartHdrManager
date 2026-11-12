@@ -36,7 +36,7 @@ namespace HdrBrightControl
         public int SdrFallbackDelaySeconds { get; set; } = 3;
 
         /// <summary>TV brightness while no application of either list is running.</summary>
-        public int DesktopBrightness { get; set; } = 50;
+        public int DesktopBrightness { get; set; } = BrightnessRange.Default;
 
         public BrightnessConfig? Brightness { get; set; }
     }
