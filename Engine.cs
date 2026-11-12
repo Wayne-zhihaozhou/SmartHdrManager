@@ -10,16 +10,6 @@ namespace HdrBrightControl
     {
         public bool HdrOn { get; init; }
         public bool Paused { get; init; }
-        public string ActiveProcess { get; init; } = string.Empty;
-        public bool IsFullscreen { get; init; }
-        public string? RunningGame { get; init; }
-        public string? RunningSdrApp { get; init; }
-        public string? FollowingLauncher { get; init; }
-
-        /// <summary>List entry the window in front belongs to, or null when it is on neither list.</summary>
-        public string? ForegroundEntry { get; init; }
-
-        /// <summary>List entry whose brightness is on the TV right now, or null for the desktop brightness.</summary>
         public string? BrightnessOwner { get; init; }
     }
 
@@ -388,12 +378,6 @@ namespace HdrBrightControl
             {
                 HdrOn = _hdrAny,
                 Paused = Paused,
-                ActiveProcess = procName,
-                IsFullscreen = isFullscreen,
-                RunningGame = _runningGame,
-                RunningSdrApp = _runningSdrApp,
-                FollowingLauncher = _followLauncher,
-                ForegroundEntry = _contentProgram?.Entry,
                 BrightnessOwner = _brightnessOwner
             };
         }
