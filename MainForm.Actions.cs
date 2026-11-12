@@ -251,7 +251,7 @@ namespace HdrBrightControl
                 "移除游戏", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
             if (answer != DialogResult.Yes) return;
 
-            _engine.RemoveGame(selected.Key, selected.Processes, sdr);
+            _engine.RemoveGame(selected.Processes, sdr);
             RebuildGames(sdr);
         }
 

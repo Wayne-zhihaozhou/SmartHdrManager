@@ -111,7 +111,7 @@ namespace HdrBrightControl
             return true;
         }
 
-        public void RemoveGame(string key, IEnumerable<string> processes, bool sdr = false)
+        public void RemoveGame(IEnumerable<string> processes, bool sdr = false)
         {
             var procList = processes.ToList();
             lock (Sync)
