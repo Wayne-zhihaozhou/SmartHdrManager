@@ -299,8 +299,13 @@ namespace HdrBrightControl
             if (lines.Length == 0) return;
 
             _log.AppendText(string.Join(Environment.NewLine, lines) + Environment.NewLine);
-            if (_log.TextLength > LogTrimThreshold)
-                _log.Text = _log.Text[^LogKeepLength..];
+            if (_log.TextLength <= LogTrimThreshold) return;
+
+            int keepFrom = _log.TextLength - LogKeepLength;
+            int lineBreak = _log.Text.IndexOf('\n', 0, keepFrom);
+            int cut = lineBreak >= 0 && lineBreak < keepFrom ? lineBreak + 1 : keepFrom;
+            _log.Select(0, cut);
+            _log.SelectedText = string.Empty;
         }
 
         private void UpdateWindowTitle(EngineStatus status)
