@@ -48,7 +48,7 @@ namespace HdrBrightControl
         private readonly ToggleSwitch _swAutostart = new();
         private readonly ToggleSwitch _swHdrControl = new();
         private readonly ToggleSwitch _swBrightnessControl = new();
-        private readonly NumberStepper _desktopBrightness = new() { Minimum = BrightnessRange.Min, Maximum = BrightnessRange.Max, Step = BrightnessRange.Step };
+        private readonly NumberStepper _desktopBrightness = new() { Minimum = (int)BrightnessRange.Min, Maximum = (int)BrightnessRange.Max, Step = (int)BrightnessRange.Step };
         private Label _tvStatusLabel = null!;
         private int _testPageIndex = -1;
 

@@ -39,7 +39,7 @@ namespace HdrBrightControl
                         Processes = new List<string> { process },
                         ExePath = paths.TryGetValue(process, out var path) ? path : null,
                         Tracked = kind == ProgramListKind.Sdr || IsHdrEnabledFor(hdrModes, process),
-                        Brightness = brightnessMap.TryGetValue(process, out int brightness) ? brightness : BrightnessRange.Default
+                        Brightness = brightnessMap.TryGetValue(process, out int brightness) ? brightness : (int)BrightnessRange.Default
                     });
                 }
 
@@ -49,7 +49,7 @@ namespace HdrBrightControl
 
         public void SetGameBrightness(IEnumerable<string> processes, int brightness, string displayName)
         {
-            int value = Math.Clamp(brightness, BrightnessRange.Min, BrightnessRange.Max);
+            int value = Math.Clamp(brightness, (int)BrightnessRange.Min, (int)BrightnessRange.Max);
 
             lock (Sync)
             {

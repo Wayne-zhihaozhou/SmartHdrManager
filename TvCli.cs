@@ -50,8 +50,8 @@ namespace HdrBrightControl
         /// <summary>Sets the brightness (0-100) and reads it back to verify.</summary>
         public static async Task<TvResult> SetBrightnessAsync(int value)
         {
-            if (value < BrightnessRange.Min || value > BrightnessRange.Max)
-                return Fail($"亮度值超出范围: {value}（有效范围 {BrightnessRange.Min}-{BrightnessRange.Max}）");
+            if (value < (int)BrightnessRange.Min || value > (int)BrightnessRange.Max)
+                return Fail($"亮度值超出范围: {value}（有效范围 {(int)BrightnessRange.Min}-{(int)BrightnessRange.Max}）");
 
             await Gate.WaitAsync().ConfigureAwait(false);
             try

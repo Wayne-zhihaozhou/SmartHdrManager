@@ -571,10 +571,10 @@ namespace HdrBrightControl
         public int Minimum { get; set; }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Maximum { get; set; } = BrightnessRange.Max;
+        public int Maximum { get; set; } = (int)BrightnessRange.Max;
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Step { get; set; } = BrightnessRange.Step;
+        public int Step { get; set; } = (int)BrightnessRange.Step;
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Value

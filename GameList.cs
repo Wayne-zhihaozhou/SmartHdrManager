@@ -351,8 +351,8 @@ namespace HdrBrightControl
             }
             else if (e.Button == MouseButtons.Left && PressedRowHit(e.Location))
             {
-                if (_pressedOnMinus) AdjustBrightness(_pressed, -BrightnessRange.Step);
-                else if (_pressedOnPlus) AdjustBrightness(_pressed, BrightnessRange.Step);
+                if (_pressedOnMinus) AdjustBrightness(_pressed, -(int)BrightnessRange.Step);
+                else if (_pressedOnPlus) AdjustBrightness(_pressed, (int)BrightnessRange.Step);
             }
 
             _pressed = -1;
