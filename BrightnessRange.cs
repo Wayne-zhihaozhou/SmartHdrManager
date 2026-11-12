@@ -1,11 +1,11 @@
 namespace HdrBrightControl
 {
     /// <summary>Common brightness range constants used across the application.</summary>
-    public static class BrightnessRange
+    public enum BrightnessRange
     {
-        public const int Min = 0;
-        public const int Max = 100;
-        public const int Step = 10;
-        public const int Default = 50;
+        Min = 0,
+        Default = 50,
+        Max = 100,
+        Step = 10
     }
 }
