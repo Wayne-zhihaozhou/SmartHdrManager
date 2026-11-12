@@ -95,8 +95,8 @@ namespace HdrBrightControl
             _tabs.AddTab("日志");
             root.Controls.Add(_tabs, 0, 0);
 
-            AddPage(BuildGamesPage(sdr: false));
-            AddPage(BuildGamesPage(sdr: true));
+            AddPage(BuildGamesPage(ProgramListKind.Hdr));
+            AddPage(BuildGamesPage(ProgramListKind.Sdr));
             _testPageIndex = _pages.Count;
             AddPage(BuildTestPage());
             AddPage(BuildSettingsPage());
@@ -172,11 +172,11 @@ namespace HdrBrightControl
         {
             _tabs.SelectedIndexChanged += (_, _) => OnPageSelected(_tabs.SelectedIndex);
 
-            _searchHdr.TextChanged += (_, _) => RebuildGames(sdr: false);
-            _searchSdr.TextChanged += (_, _) => RebuildGames(sdr: true);
+            _searchHdr.TextChanged += (_, _) => RebuildGames(ProgramListKind.Hdr);
+            _searchSdr.TextChanged += (_, _) => RebuildGames(ProgramListKind.Sdr);
 
-            _gamesHdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, sdr: false);
-            _gamesSdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, sdr: true);
+            _gamesHdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, ProgramListKind.Hdr);
+            _gamesSdr.BrightnessToggled += (_, item) => OnGameBrightnessChanged(item, ProgramListKind.Sdr);
 
             _gamesHdr.ItemActivated += (_, item) => OnGameItemActivated(item);
             _gamesSdr.ItemActivated += (_, item) => OnGameItemActivated(item);

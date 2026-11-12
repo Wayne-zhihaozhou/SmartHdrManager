@@ -15,13 +15,13 @@ namespace HdrBrightControl
         private const int RunningDialogWidth = 560;
         private const int RunningDialogHeight = 420;
 
-        private void RebuildGames(bool sdr)
+        private void RebuildGames(ProgramListKind kind)
         {
-            var list = sdr ? _gamesSdr : _gamesHdr;
-            var search = sdr ? _searchSdr : _searchHdr;
+            var list = kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr;
+            var search = kind == ProgramListKind.Sdr ? _searchSdr : _searchHdr;
 
             string filter = search.Text.Trim();
-            GameItem[] items = _engine.GetGameRows(sdr)
+            GameItem[] items = _engine.GetGameRows(kind)
                 .Where(row => filter.Length == 0 || MatchesFilter(row, filter))
                 .Select(row => new GameItem(row))
                 .ToArray();
@@ -31,8 +31,8 @@ namespace HdrBrightControl
 
         private void RebuildAllGames()
         {
-            RebuildGames(sdr: false);
-            RebuildGames(sdr: true);
+            RebuildGames(ProgramListKind.Hdr);
+            RebuildGames(ProgramListKind.Sdr);
         }
 
         private static bool MatchesFilter(GameRow row, string filter) =>
@@ -51,7 +51,7 @@ namespace HdrBrightControl
             _engine.ApplyBrightnessControlSettings();
         }
 
-        private void OnGameBrightnessChanged(GameItem item, bool sdr)
+        private void OnGameBrightnessChanged(GameItem item, ProgramListKind kind)
         {
             _engine.SetGameBrightness(item.Processes, item.Brightness, item.Name);
 
@@ -59,7 +59,7 @@ namespace HdrBrightControl
             // value for later, and the engine applies it as soon as they take the screen back.
             if (item.Tracked && IsBrightnessControlEnabled() && OwnsScreen(item)) ApplyGameBrightness(item.Brightness);
 
-            BeginInvoke(new Action(() => (sdr ? _gamesSdr : _gamesHdr).Invalidate()));
+            BeginInvoke(new Action(() => (kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr).Invalidate()));
         }
 
         private bool OwnsScreen(GameItem item)
@@ -141,11 +141,11 @@ namespace HdrBrightControl
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
-        private void OnAddExe(bool sdr)
+        private void OnAddExe(ProgramListKind kind)
         {
             using var dialog = new OpenFileDialog
             {
-                Title = sdr ? "选择应保持 SDR 的游戏或程序（.exe）" : "选择应使用 HDR 的游戏或程序（.exe）",
+                Title = kind == ProgramListKind.Sdr ? "选择应保持 SDR 的游戏或程序（.exe）" : "选择应使用 HDR 的游戏或程序（.exe）",
                 Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*",
                 Multiselect = true,
                 InitialDirectory = string.Empty
@@ -153,18 +153,18 @@ namespace HdrBrightControl
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
             foreach (string file in dialog.FileNames)
-                _engine.AddGame(HdrEngine.CleanExeInput(file), exePath: file, sdr: sdr);
+                _engine.AddGame(HdrEngine.CleanExeInput(file), exePath: file, kind);
 
-            RebuildGames(sdr);
+            RebuildGames(kind);
         }
 
-        private void OnAddRunning(bool sdr)
+        private void OnAddRunning(ProgramListKind kind)
         {
             var picked = PickRunningProcess();
             if (picked == null) return;
 
-            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, sdr: sdr);
-            RebuildGames(sdr);
+            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind);
+            RebuildGames(kind);
         }
 
         private (string Name, string? Path)? PickRunningProcess()
@@ -233,9 +233,9 @@ namespace HdrBrightControl
             return (rows[list.SelectedIndex].Name, rows[list.SelectedIndex].Path);
         }
 
-        private void OnRemoveGame(bool sdr)
+        private void OnRemoveGame(ProgramListKind kind)
         {
-            var list = sdr ? _gamesSdr : _gamesHdr;
+            var list = kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr;
             var selected = list.SelectedItem;
             if (selected == null)
             {
@@ -243,7 +243,7 @@ namespace HdrBrightControl
                 return;
             }
 
-            string consequence = sdr
+            string consequence = kind == ProgramListKind.Sdr
                 ? "移除后，该游戏将不再强制保持 SDR。"
                 : "移除后，该游戏将不再自动触发 HDR。";
             var answer = MessageBox.Show(this,
@@ -251,8 +251,8 @@ namespace HdrBrightControl
                 "移除游戏", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
             if (answer != DialogResult.Yes) return;
 
-            _engine.RemoveGame(selected.Processes, sdr);
-            RebuildGames(sdr);
+            _engine.RemoveGame(selected.Processes, kind);
+            RebuildGames(kind);
         }
 
         /// <summary>Launches the program of a row that was double-clicked on the HDR or SDR page.</summary>

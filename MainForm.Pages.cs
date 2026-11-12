@@ -20,7 +20,7 @@ namespace HdrBrightControl
         private const int RowDescriptionHeight = 20;
         private const int ButtonSpacing = 8;
 
-        private Control BuildGamesPage(bool sdr)
+        private Control BuildGamesPage(ProgramListKind kind)
         {
             var page = new TableLayoutPanel { ColumnCount = 1, RowCount = 4, Margin = new Padding(0) };
             page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -29,10 +29,10 @@ namespace HdrBrightControl
             page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             page.RowStyles.Add(new RowStyle(SizeType.Absolute, ActionRowHeight));
 
-            var list = sdr ? _gamesSdr : _gamesHdr;
-            var search = sdr ? _searchSdr : _searchHdr;
+            var list = kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr;
+            var search = kind == ProgramListKind.Sdr ? _searchSdr : _searchHdr;
 
-            page.Controls.Add(BuildGamesHint(sdr), 0, 0);
+            page.Controls.Add(BuildGamesHint(kind), 0, 0);
             page.Controls.Add(BuildSearchCard(search), 0, 1);
 
             var listCard = new RoundedPanel
@@ -46,18 +46,18 @@ namespace HdrBrightControl
             listCard.Controls.Add(list);
             _toolTip.SetToolTip(list, "双击条目可启动该程序");
             page.Controls.Add(listCard, 0, 2);
-            page.Controls.Add(BuildGamesActions(sdr), 0, 3);
+            page.Controls.Add(BuildGamesActions(kind), 0, 3);
 
             return page;
         }
 
-        private static Control BuildGamesHint(bool sdr)
+        private static Control BuildGamesHint(ProgramListKind kind)
         {
             var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = new Padding(0) };
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             row.Controls.Add(new Label
             {
-                Text = sdr
+                Text = kind == ProgramListKind.Sdr
                     ? "开启应用后，其运行期间将强制保持 SDR　·　双击条目可启动程序"
                     : "开启应用后，其运行期间将使用 HDR　·　双击条目可启动程序",
                 Font = Theme.Small,
@@ -115,7 +115,7 @@ namespace HdrBrightControl
                              Math.Max(0, card.ClientSize.Width - textLeft - S(12)), search.Height);
         }
 
-        private Control BuildGamesActions(bool sdr)
+        private Control BuildGamesActions(ProgramListKind kind)
         {
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 12, 0, 0) };
 
@@ -127,9 +127,9 @@ namespace HdrBrightControl
             _toolTip.SetToolTip(addRunning, "从正在运行的程序中选择");
             _toolTip.SetToolTip(remove, "移除选中的游戏或程序");
 
-            addExe.Click += (_, _) => OnAddExe(sdr);
-            addRunning.Click += (_, _) => OnAddRunning(sdr);
-            remove.Click += (_, _) => OnRemoveGame(sdr);
+            addExe.Click += (_, _) => OnAddExe(kind);
+            addRunning.Click += (_, _) => OnAddRunning(kind);
+            remove.Click += (_, _) => OnRemoveGame(kind);
 
             foreach (var button in new Control[] { addExe, addRunning, remove })
             {
