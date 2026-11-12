@@ -20,20 +20,6 @@ namespace HdrBrightControl
             "companion", "supporttool", "watchdog", "pbsvc", "punkbuster", "javaw"
         };
 
-        private static readonly HashSet<string> KnownLaunchers = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "redprelauncher", "redlauncher", "gtavlauncher", "playgtav", "playrdr2", "rdr2launcher", "launcher",
-            "startprotectedgame", "launcherpatcher", "gamelauncher", "bootstrapper", "dowser", "playlan", "ffxivboot",
-            "ffxivboot64", "edlaunch", "runme"
-        };
-
-        /// <summary>
-        /// Runs after every process scan. When a watched HDR game closes within <see cref="LauncherShortRunMs"/> of
-        /// appearing, it was probably only a launcher (REDprelauncher, PlayGTAV, …). For up to
-        /// <see cref="LauncherFollowMs"/> HDR stays on (if it was on) and the app looks for a program from the same
-        /// game folder. If one runs, it is followed and remembered (LauncherGames). Only process names are compared –
-        /// no handles are opened to the game (anti-cheat safe).
-        /// </summary>
         private void TrackLauncherFollow(Snapshot snapshot, long now)
         {
             string? game = _runningGame;
@@ -130,12 +116,6 @@ namespace HdrBrightControl
             _followNames = null;
             _followHoldsHdr = false;
             Interlocked.Increment(ref _followGeneration);
-        }
-
-        private bool IsLauncher(string process)
-        {
-            if (KnownLaunchers.Contains(process)) return true;
-            lock (Sync) return Config.LauncherGames.ContainsKey(process);
         }
 
         private static bool IsExcludedExeName(string name)
