@@ -26,8 +26,7 @@ namespace HdrBrightControl
         private bool _exiting;
         private string _lastTooltip = string.Empty;
 
-        public TrayAppContext(HdrEngine engine, EventWaitHandle showEvent, CommandEvents commands, CliCommand startCommand,
-                              bool startHidden)
+        public TrayAppContext(HdrEngine engine, EventWaitHandle showEvent, CommandEvents commands, CliOptions opts)
         {
             _engine = engine;
             _showEvent = showEvent;
@@ -45,9 +44,9 @@ namespace HdrBrightControl
             _engine.Start();
             if (TrayAndStartupManager.RefreshAutostartPath())
                 _engine.Log("INFO", "\"开机自启动\"指向了旧位置 – 已更新为本程序。");
-            if (startCommand != CliCommand.None) RunCommand(startCommand);
+            if (opts.Command != CliCommand.None) RunCommand(opts.Command);
 
-            if (!startHidden) ShowMain();
+            if (!opts.StartHidden) ShowMain();
         }
 
         /// <summary>Command-line action of this launch (a second launch only signals the running instance).</summary>
@@ -172,13 +171,6 @@ namespace HdrBrightControl
         /// <summary>Returns one pending command (and consumes it), or None.</summary>
         public CliCommand TakeSignaled() => _togglePause.WaitOne(0) ? CliCommand.TogglePause : CliCommand.None;
 
-        public static CliCommand Parse(string[] args)
-        {
-            foreach (string arg in args)
-                if (arg.Trim().Equals("--toggle-pause", StringComparison.OrdinalIgnoreCase)) return CliCommand.TogglePause;
-            return CliCommand.None;
-        }
-
         public void Dispose()
         {
             _togglePause.Dispose();
@@ -204,16 +196,14 @@ namespace HdrBrightControl
         private static void Main(string[] args)
         {
             SetTaskbarIdentity(AppUserModelId);
-            var command = CommandEvents.Parse(args);
-            bool startHidden = command != CliCommand.None ||
-                               args.Any(arg => arg.Equals("--tray", StringComparison.OrdinalIgnoreCase));
+            var opts = CliOptions.Parse(args);
+            bool startHidden = opts.StartHidden;
 
             using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\HdrBrightControl.ShowWindow");
             using var commands = new CommandEvents();
             using var mutex = new Mutex(true, @"Local\HdrBrightControl.SingleInstance", out bool isFirstInstance);
 
-            bool justUpdated = args.Any(arg => arg.Equals("--updated", StringComparison.OrdinalIgnoreCase));
-            if (!isFirstInstance && justUpdated)
+            if (!isFirstInstance && opts.JustUpdated)
             {
                 try { isFirstInstance = mutex.WaitOne(TimeSpan.FromSeconds(UpdateMutexWaitSeconds)); }
                 catch (AbandonedMutexException) { isFirstInstance = true; }
@@ -221,7 +211,7 @@ namespace HdrBrightControl
 
             if (!isFirstInstance)
             {
-                if (command != CliCommand.None) commands.Signal(command);
+                if (opts.Command != CliCommand.None) commands.Signal(opts.Command);
                 else if (!startHidden) showEvent.Set();
                 return;
             }
@@ -235,7 +225,7 @@ namespace HdrBrightControl
             AppDomain.CurrentDomain.UnhandledException += (_, e) => HdrEngine.WriteFileLog($"FATAL  {e.ExceptionObject}");
 
             var engine = new HdrEngine();
-            using var context = new TrayAppContext(engine, showEvent, commands, command, startHidden);
+            using var context = new TrayAppContext(engine, showEvent, commands, opts);
             Application.Run(context);
         }
     }
