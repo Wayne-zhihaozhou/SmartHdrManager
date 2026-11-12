@@ -50,7 +50,6 @@ namespace HdrBrightControl
         private readonly ToggleSwitch _swBrightnessControl = new();
         private readonly NumberStepper _desktopBrightness = new() { Minimum = 0, Maximum = 100, Step = 10 };
         private Label _hdrStatusLabel = null!;
-        private Label _activityLabel = null!;
         private Label _tvStatusLabel = null!;
         private Label _tvBrightnessValue = null!;
         private ModernButton _tvBrightnessRefresh = null!;
@@ -288,8 +287,8 @@ namespace HdrBrightControl
             var status = _engine.Status;
 
             UpdateStatusLabel(status);
-            UpdateActivityLabel(status);
             AppendNewLogLines();
+            UpdateWindowTitle(status);
 
             if (_swHdrControl.Checked != !status.Paused) ApplySwitch(_swHdrControl, !status.Paused);
         }
@@ -305,32 +304,6 @@ namespace HdrBrightControl
             if (_hdrStatusLabel.ForeColor != color) _hdrStatusLabel.ForeColor = color;
         }
 
-        private void UpdateActivityLabel(EngineStatus status)
-        {
-            string activity = DescribeActivity(status);
-            if (_activityLabel.Text != activity) _activityLabel.Text = activity;
-        }
-
-        private static string DescribeActivity(EngineStatus status)
-        {
-            if (status.Paused) return "在恢复前不会自动切换 HDR。";
-
-            if (status.RunningGame != null) return $"HDR 游戏运行中：{status.RunningGame}";
-
-            if (status.RunningSdrApp != null) return $"SDR 游戏运行中：{status.RunningSdrApp}（HDR 关闭）";
-
-            if (status.FollowingLauncher != null) return $"{status.FollowingLauncher} 已关闭 · 等待其启动的游戏 …";
-
-            if (string.IsNullOrEmpty(status.ActiveProcess)) return "等待中 …";
-
-            string window = $"活动窗口：{status.ActiveProcess}{(status.IsFullscreen ? "（全屏）" : "")}";
-            if (status.ForegroundEntry != null &&
-                !status.ForegroundEntry.Equals(status.ActiveProcess, StringComparison.OrdinalIgnoreCase))
-                window += $" → 列表条目 {status.ForegroundEntry}";
-
-            return window;
-        }
-
         private void AppendNewLogLines()
         {
             var lines = _engine.ReadLog(ref _logCursor);
@@ -339,6 +312,16 @@ namespace HdrBrightControl
             _log.AppendText(string.Join(Environment.NewLine, lines) + Environment.NewLine);
             if (_log.TextLength > LogTrimThreshold)
                 _log.Text = _log.Text[^LogKeepLength..];
+        }
+
+        private void UpdateWindowTitle(EngineStatus status)
+        {
+            string hdrState = status.Paused
+                ? (status.HdrOn ? "HDR 开·暂停" : "自动化暂停")
+                : status.HdrOn ? "HDR 开" : "HDR 关";
+
+            string tvBright = _tvBrightnessValue?.Text ?? "—";
+            Text = $"HDR 亮控 · {hdrState} · 亮度 {tvBright}";
         }
 
         private void LoadSettings()

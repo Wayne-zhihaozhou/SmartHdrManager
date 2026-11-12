@@ -186,7 +186,6 @@ namespace HdrBrightControl
             AddSection(page, "测试", "测试电视连接和设置亮度。");
             page.AddRow(BuildTvBrightnessRow(), SettingRowHeight);
             page.AddRow(BuildTestActions(), ActionRowHeight);
-            page.AddRow(BuildActivityPanel(), ActionRowHeight);
 
             page.AddFillerRow();
             return page;
@@ -304,23 +303,6 @@ namespace HdrBrightControl
             return panel;
         }
 
-        private Control BuildActivityPanel()
-        {
-            var panel = new Panel { Height = ActionRowHeight, Margin = new Padding(0, 0, 0, 6) };
-
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-            table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-            _hdrStatusLabel = new Label { AutoSize = true, Font = Theme.Semibold, ForeColor = Theme.Text };
-            _activityLabel = new Label { AutoSize = false, AutoEllipsis = true, Font = Theme.Small, ForeColor = Theme.Muted, Dock = DockStyle.Fill };
-
-            table.Controls.Add(_hdrStatusLabel, 0, 0);
-            table.Controls.Add(_activityLabel, 0, 1);
-            panel.Controls.Add(table);
-            return panel;
-        }
 
         private Control BuildLogPage()
         {
