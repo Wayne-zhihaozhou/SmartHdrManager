@@ -80,8 +80,11 @@ namespace HdrBrightControl
             public Bitmap Bitmap = null!;
             public int Width;
             public int Height;
-            public int State;
+            public RowVisualState State;
         }
+
+        private readonly record struct RowVisualState(
+            int BitState, int Brightness, string Name);
 
         private readonly Dictionary<GameItem, RowCache> _rowCache = new();
 
@@ -466,7 +469,7 @@ namespace HdrBrightControl
         }
 
         /// <summary>Everything that changes a row's look; the cached bitmap is re-drawn when this changes.</summary>
-        private int RowState(int index)
+        private RowVisualState RowState(int index)
         {
             var item = _items[index];
             int state = 0;
@@ -474,7 +477,7 @@ namespace HdrBrightControl
             if (index == _hover) state |= 2;
             if (index == _selected && Focused && ShowFocusCues) state |= 4;
             if (!string.IsNullOrEmpty(item.ExePath) && _icons.TryGetValue(item.ExePath, out var icon) && icon != null) state |= 16;
-            return state;
+            return new RowVisualState(state, item.Brightness, item.Name);
         }
 
         private RowCache? GetRowBitmap(int index, int width, int height)
@@ -482,9 +485,9 @@ namespace HdrBrightControl
             if (width <= 0 || height <= 0) return null;
 
             var item = _items[index];
-            int state = RowState(index);
+            var state = RowState(index);
 
-            if (_rowCache.TryGetValue(item, out var cache) && cache.Width == width && cache.Height == height && cache.State == state)
+            if (_rowCache.TryGetValue(item, out var cache) && cache.Width == width && cache.Height == height && cache.State.Equals(state))
                 return cache;
 
             cache?.Bitmap.Dispose();

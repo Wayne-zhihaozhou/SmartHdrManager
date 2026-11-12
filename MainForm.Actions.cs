@@ -59,7 +59,7 @@ namespace HdrBrightControl
             // value for later, and the engine applies it as soon as they take the screen back.
             if (item.Tracked && IsBrightnessControlEnabled() && OwnsScreen(item)) ApplyGameBrightness(item.Brightness);
 
-            BeginInvoke(new Action(() => RebuildGames(sdr)));
+            BeginInvoke(new Action(() => (sdr ? _gamesSdr : _gamesHdr).Invalidate()));
         }
 
         private bool OwnsScreen(GameItem item)
