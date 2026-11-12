@@ -166,15 +166,17 @@ namespace HdrBrightControl
         public static string LastError { get; private set; } = string.Empty;
 
         /// <summary>Reads the HDR state of the display. Returns false when the configuration cannot be read.</summary>
-        public static bool TryQueryHdrState(out bool enabled)
+        public static bool TryQueryHdrState(out bool supported, out bool enabled)
         {
+            supported = false;
             enabled = false;
             if (QueryActivePaths(out var paths, out _) != ERROR_SUCCESS) return false;
 
             foreach (var path in paths)
             {
-                if (!TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool supported, out bool isOn, out _)) continue;
-                if (!supported) continue;
+                if (!TryGetHdrState(path.targetInfo.adapterId, path.targetInfo.id, out bool pathSupported, out bool isOn, out _)) continue;
+                if (!pathSupported) continue;
+                supported = true;
                 enabled = isOn;
                 return true;
             }

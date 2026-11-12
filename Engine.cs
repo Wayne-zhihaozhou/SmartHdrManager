@@ -169,6 +169,7 @@ namespace HdrBrightControl
         private int _forceHdrQuery = 1;
         private bool _firstHdrQueryDone;
         private bool _apiLogged;
+        private bool _noHdrLogged;
 
         private string? _runningGame;
         private string? _runningSdrApp;
@@ -433,7 +434,7 @@ namespace HdrBrightControl
             if (!forced && now < _nextHdrQueryMs)
                 return;
 
-            if (HdrController.TryQueryHdrState(out bool any))
+            if (HdrController.TryQueryHdrState(out bool supported, out bool any))
             {
                 if (!_apiLogged && HdrController.HdrApiName != "not determined yet")
                 {
@@ -441,7 +442,15 @@ namespace HdrBrightControl
                     Log("INFO", $"显示控制：{HdrController.HdrApiName} – {WindowsVersion.Describe()}。");
                 }
 
-                if (!_firstHdrQueryDone && any)
+                if (!supported)
+                {
+                    if (!_noHdrLogged)
+                    {
+                        _noHdrLogged = true;
+                        Log("INFO", "未检测到支持 HDR 的显示器。");
+                    }
+                }
+                else if (!_firstHdrQueryDone && any)
                     Log("HDR", "HDR 已开启 – 保持现状（本程序只切回自己开启的 HDR）。");
 
                 bool towardOwn = _expectAny.HasValue && any == _expectAny.Value;
