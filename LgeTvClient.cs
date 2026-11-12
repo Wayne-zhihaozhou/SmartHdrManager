@@ -546,6 +546,40 @@ namespace HdrBrightControl
             FailWaiters(error);
         }
 
+        private async Task TeardownAsync(bool graceful)
+        {
+            ClientWebSocket? socket;
+            HttpMessageInvoker? invoker;
+            CancellationTokenSource? cts;
+            lock (_sync)
+            {
+                socket = _socket; _socket = null;
+                invoker = _invoker; _invoker = null;
+                cts = _receiveCts; _receiveCts = null;
+            }
+
+            try { cts?.Cancel(); } catch { }
+            cts?.Dispose();
+
+            if (socket != null)
+            {
+                if (graceful && socket.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        using var timeout = new CancellationTokenSource(ShutdownTimeoutMs);
+                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", timeout.Token)
+                            .ConfigureAwait(false);
+                    }
+                    catch { }
+                }
+                socket.Dispose();
+            }
+
+            invoker?.Dispose();
+            FailWaiters(new InvalidOperationException("电视连接已重置"));
+        }
+
         private void FailWaiters(Exception error)
         {
             List<TaskCompletionSource<JsonElement>> pending;
@@ -569,39 +603,7 @@ namespace HdrBrightControl
 
         private async Task CloseSocketAsync()
         {
-            ClientWebSocket? socket;
-            HttpMessageInvoker? invoker;
-            CancellationTokenSource? cts;
-            lock (_sync)
-            {
-                socket = _socket;
-                _socket = null;
-                invoker = _invoker;
-                _invoker = null;
-                cts = _receiveCts;
-                _receiveCts = null;
-            }
-
-            try { cts?.Cancel(); } catch { }
-            cts?.Dispose();
-
-            if (socket != null)
-            {
-                try
-                {
-                    if (socket.State == WebSocketState.Open)
-                    {
-                        using var timeout = new CancellationTokenSource(ShutdownTimeoutMs);
-                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", timeout.Token).ConfigureAwait(false);
-                    }
-                }
-                catch { }
-                socket.Dispose();
-            }
-
-            invoker?.Dispose();
-
-            FailAll(new InvalidOperationException("电视连接已重置"));
+            await TeardownAsync(graceful: true).ConfigureAwait(false);
         }
 
         /// <summary>Model name comes from getSystemInfo, the webOS version from hello; both may be missing.</summary>
@@ -670,25 +672,7 @@ namespace HdrBrightControl
             if (_disposed) return;
             _disposed = true;
 
-            ClientWebSocket? socket;
-            HttpMessageInvoker? invoker;
-            CancellationTokenSource? cts;
-            lock (_sync)
-            {
-                socket = _socket;
-                _socket = null;
-                invoker = _invoker;
-                _invoker = null;
-                cts = _receiveCts;
-                _receiveCts = null;
-            }
-
-            try { cts?.Cancel(); } catch { }
-            cts?.Dispose();
-            try { socket?.Dispose(); } catch { }
-            try { invoker?.Dispose(); } catch { }
-
-            FailAll(new ObjectDisposedException(nameof(LgeTvClient)));
+            TeardownAsync(graceful: false).GetAwaiter().GetResult();
         }
     }
 
