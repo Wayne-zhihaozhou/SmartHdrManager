@@ -180,7 +180,7 @@ namespace HdrBrightControl
 
     internal static class Program
     {
-        private const string AppUserModelId = "VantaCode420.HdrBrightControl";
+        private const string AppUserModelId = "Wayne-zhihaozhou.HdrBrightControl";
         private const string NotificationIconFileName = "app.ico";
         private const int NotificationIconSize = 64;
         private const int UpdateMutexWaitSeconds = 30;

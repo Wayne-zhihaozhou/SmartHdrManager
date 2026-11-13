@@ -22,9 +22,9 @@
     <Version>2.6.2</Version>
     <!-- Shown in the exe's Properties › Details -->
     <Product>HDR亮控</Product>
-    <Authors>VantaCode420</Authors>
-    <Company>VantaCode420</Company>
-    <Copyright>Copyright (c) 2026 VantaCode420</Copyright>
+    <Authors>Wayne-zhihaozhou</Authors>
+    <Company>Wayne-zhihaozhou</Company>
+    <Copyright>Copyright (c) 2026 Wayne-zhihaozhou. Based on SmartHdrManager by VantaCode420.</Copyright>
     <Description>HDR亮控</Description>
     <!-- .exe icon (Explorer, taskbar pins, shortcuts): same HDR design as the window/tray icons -->
     <ApplicationIcon>app.ico</ApplicationIcon>
