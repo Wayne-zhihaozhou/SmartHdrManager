@@ -2,7 +2,8 @@
 
 - **名称**：HDR亮控
 - **版本**：2.6.2
-- **作者**：VantaCode420
+- **作者**：Wayne-zhihaozhou
+- **参考项目**：[SmartHdrManager](https://github.com/VantaCode420/SmartHdrManager) by VantaCode420
 - **类型**：Windows 托盘应用（无控制台窗口）
 
 ---
