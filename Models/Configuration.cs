@@ -26,6 +26,9 @@ namespace HdrBrightControl
         /// <summary>Per-game HDR switch (process name -> enabled). A process without an entry counts as enabled.</summary>
         public Dictionary<string, bool> GameHdrModes { get; init; } = new();
 
+        /// <summary>Last launch time (Unix milliseconds) for each known program. Used to sort the list with most-recent first.</summary>
+        public Dictionary<string, long> LastLaunchedAt { get; init; } = new();
+
         /// <summary>Switch HDR on as soon as a listed game process is running (not only when it is in the foreground).</summary>
         public bool EnableHdrOnProcessStart { get; init; } = true;
 

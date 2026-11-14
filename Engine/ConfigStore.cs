@@ -64,6 +64,9 @@ namespace HdrBrightControl
             }
             result = result with { LauncherGames = launchers };
 
+            var lastLaunched = config.LastLaunchedAt ?? new Dictionary<string, long>();
+            result = result with { LastLaunchedAt = lastLaunched };
+
             var brightness = config.Brightness ?? new BrightnessConfig();
             result = result with { Brightness = brightness };
 
@@ -117,7 +120,8 @@ namespace HdrBrightControl
                     HdrGamesAndApps = Config.HdrGamesAndApps,
                     SdrGamesAndApps = Config.SdrGamesAndApps,
                     ProgramPaths = Config.ProgramPaths,
-                    LauncherGames = Config.LauncherGames
+                    LauncherGames = Config.LauncherGames,
+                    LastLaunchedAt = Config.LastLaunchedAt
                 };
                 Normalize(fresh);
 

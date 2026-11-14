@@ -25,6 +25,7 @@ namespace HdrBrightControl
                 var paths = Config.ProgramPaths ?? new Dictionary<string, string>();
                 var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
                 var hdrModes = Config.GameHdrModes;
+                var lastLaunched = Config.LastLaunchedAt ?? new Dictionary<string, long>();
 
                 var rows = new List<GameRow>();
                 var processes = list ?? new List<string>();
@@ -43,8 +44,21 @@ namespace HdrBrightControl
                     });
                 }
 
-                return rows.OrderBy(r => r.Name, Cmp).ToList();
+                return rows.OrderByDescending(r => LastLaunchTime(r.Processes, lastLaunched), Comparer<long>.Default)
+                           .ThenBy(r => r.Name, Cmp)
+                           .ToList();
             }
+        }
+
+        private static long LastLaunchTime(IEnumerable<string> processes, Dictionary<string, long> lastLaunched)
+        {
+            long max = 0;
+            foreach (var p in processes)
+            {
+                if (lastLaunched.TryGetValue(p, out var t) && t > max)
+                    max = t;
+            }
+            return max;
         }
 
         public void SetGameBrightness(IEnumerable<string> processes, int brightness, string displayName)
