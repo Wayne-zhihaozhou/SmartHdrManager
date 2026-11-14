@@ -5,16 +5,16 @@
 - **自动 HDR 切换**：前台运行指定程序时自动开启/关闭 HDR
 - **电视亮度控制**：仅适用于 LG webOS 系统（已在 LG G6 验证）
 
-![HDR 亮控界面](image.png)
+## 📸 界面截图
 
-## 🚀 快速开始
+### 设置页面
 
-### 编译
+![设置页面](settings.png)
 
-```powershell
-& "C:\Users\admin\.dotnet\dotnet.exe" build HdrBrightControl.csproj -c Release
-```
+### HDR 页面
 
-### 输出位置
+![HDR 页面](hdr-page.png)
 
-`bin\Release\net10.0-windows\win-x64\publish\HdrBrightControl.exe`
+## 📥 下载
+
+前往 [GitHub Releases](https://github.com/HdrBrightControl/HdrBrightControl/releases) 下载最新版本的编译好的软件，解压后直接运行即可。
