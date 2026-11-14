@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -20,8 +19,6 @@ namespace HdrBrightControl
         private readonly TvBrightnessService _tvService;
         private readonly ITrayService _tray;
         private readonly IStartupManager _startup;
-        private readonly EventWaitHandle _showEvent;
-        private readonly CommandEvents _commands;
         private readonly System.Windows.Forms.Timer _timer;
 
         private MainForm? _form;
@@ -32,13 +29,11 @@ namespace HdrBrightControl
 
         public IStartupManager StartupManager => _startup;
 
-        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, EventWaitHandle showEvent, CommandEvents commands, IStartupManager startup)
+        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, IStartupManager startup)
         {
             _engine = engine;
             _tvService = tvService;
             _startup = startup;
-            _showEvent = showEvent;
-            _commands = commands;
 
             _tray = new TrayService(ShowMain, Exit);
 
@@ -54,15 +49,6 @@ namespace HdrBrightControl
                 _engine.Log("INFO", "\"开机自启动\"指向了旧位置 – 已更新为本程序。");
 
             ShowMain();
-        }
-
-        /// <summary>Command-line action of this launch (a second launch only signals the running instance).</summary>
-        private void RunCommand(CliCommand command)
-        {
-            if (command != CliCommand.TogglePause) return;
-
-            _engine.Log("MANUAL", "命令行操作：切换 HDR 控制开关。");
-            SetPaused(!_engine.Paused);
         }
 
         private void ShowMain()
@@ -98,11 +84,6 @@ namespace HdrBrightControl
 
         private void OnTick(object? sender, EventArgs e)
         {
-            if (_showEvent.WaitOne(0)) ShowMain();
-
-            var command = _commands.TakeSignaled();
-            if (command != CliCommand.None) RunCommand(command);
-
             UpdateTrayStatus();
 
             if (_form == null) return;
@@ -154,35 +135,11 @@ namespace HdrBrightControl
         }
     }
 
-    internal enum CliCommand { None, TogglePause }
-
-    /// <summary>Named events through which a second launch passes a command-line action to the running tray instance.</summary>
-    internal sealed class CommandEvents : IDisposable
-    {
-        private const string TogglePauseEventName = @"Local\HdrBrightControl.TogglePause";
-
-        private readonly EventWaitHandle _togglePause = new(false, EventResetMode.AutoReset, TogglePauseEventName);
-
-        public void Signal(CliCommand command)
-        {
-            if (command == CliCommand.TogglePause) _togglePause.Set();
-        }
-
-        /// <summary>Returns one pending command (and consumes it), or None.</summary>
-        public CliCommand TakeSignaled() => _togglePause.WaitOne(0) ? CliCommand.TogglePause : CliCommand.None;
-
-        public void Dispose()
-        {
-            _togglePause.Dispose();
-        }
-    }
-
     internal static class Program
     {
         private const string AppUserModelId = "Wayne-zhihaozhou.HdrBrightControl";
         private const string NotificationIconFileName = "app.ico";
         private const int NotificationIconSize = 64;
-        private const int UpdateMutexWaitSeconds = 30;
 
         [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
@@ -196,23 +153,10 @@ namespace HdrBrightControl
         private static void Main(string[] args)
         {
             SetTaskbarIdentity(AppUserModelId);
-            var opts = CliOptions.Parse(args);
 
-            using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\HdrBrightControl.ShowWindow");
-            using var commands = new CommandEvents();
             using var mutex = new Mutex(true, @"Local\HdrBrightControl.SingleInstance", out bool isFirstInstance);
 
-            if (!isFirstInstance && opts.JustUpdated)
-            {
-                try { isFirstInstance = mutex.WaitOne(TimeSpan.FromSeconds(UpdateMutexWaitSeconds)); }
-                catch (AbandonedMutexException) { isFirstInstance = true; }
-            }
-
-            if (!isFirstInstance)
-            {
-                if (opts.Command != CliCommand.None) commands.Signal(opts.Command);
-                return;
-            }
+            if (!isFirstInstance) return;
 
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
@@ -231,7 +175,7 @@ namespace HdrBrightControl
             Application.ThreadException += (_, e) => engine.WriteLine($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => engine.WriteLine($"FATAL  {e.ExceptionObject}");
 
-            var context = new TrayAppContext(engine, tvService, showEvent, commands, startupManager);
+            var context = new TrayAppContext(engine, tvService, startupManager);
             var trayService = context.TrayService;
             startupManager.RefreshPath();
 
