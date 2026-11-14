@@ -103,6 +103,32 @@ namespace HdrBrightControl
             return await TvCli.SetBrightnessAsync(brightness);
         }
 
+        private async Task ShowHdrResultAsync(string busyText, bool enable)
+        {
+            _tvStatusLabel.Text = busyText;
+            _tvStatusLabel.ForeColor = Theme.Muted;
+
+            try
+            {
+                var result = HdrController.SetHdrState(enable);
+                if (result.Ok)
+                {
+                    _tvStatusLabel.Text = enable ? "HDR 已开启" : "HDR 已关闭";
+                    _tvStatusLabel.ForeColor = Color.Green;
+                }
+                else
+                {
+                    _tvStatusLabel.Text = $"失败: {result.Error}";
+                    _tvStatusLabel.ForeColor = Color.Red;
+                }
+            }
+            catch (Exception ex)
+            {
+                _tvStatusLabel.Text = $"失败: {ex.Message}";
+                _tvStatusLabel.ForeColor = Color.Red;
+            }
+        }
+
         private void OnDesktopBrightnessChanged()
         {
             int value = _desktopBrightness.Value;

@@ -203,17 +203,23 @@ namespace HdrBrightControl
             var pairButton = new ModernButton { Glyph = Theme.GlyphLink, Text = "重新配对", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
             var brightnessLow = new ModernButton { Text = "亮度 0", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
             var brightnessHigh = new ModernButton { Text = "亮度 100", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
+            var hdrOn = new ModernButton { Text = "HDR 开", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
+            var hdrOff = new ModernButton { Text = "HDR 关", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
 
             testButton.Click += async (_, _) => await ShowTvResultAsync("测试中...", TvCli.TestConnectionAsync);
             pairButton.Click += async (_, _) => await ShowTvResultAsync("配对中...", TvCli.PairAsync);
             brightnessLow.Click += async (_, _) => await ShowTvResultAsync("设置中...", () => SetTestBrightnessAsync(0));
             brightnessHigh.Click += async (_, _) => await ShowTvResultAsync("设置中...", () => SetTestBrightnessAsync(100));
+            hdrOn.Click += async (_, _) => await ShowHdrResultAsync("开启中...", true);
+            hdrOff.Click += async (_, _) => await ShowHdrResultAsync("关闭中...", false);
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
             panel.Controls.Add(testButton);
             panel.Controls.Add(pairButton);
             panel.Controls.Add(brightnessLow);
             panel.Controls.Add(brightnessHigh);
+            panel.Controls.Add(hdrOn);
+            panel.Controls.Add(hdrOff);
             panel.Controls.Add(_tvStatusLabel);
             return panel;
         }
