@@ -48,7 +48,6 @@ namespace HdrBrightControl
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HdrBrightControl", "log.txt");
 
         private const int ProcessScanPeriodMs = 1000;
-        private const int HdrRequeryIntervalMs = 2000;
         private const int SwitchSpacingMs = 1500;
         private const int FailuresBeforeCooldown = 3;
         private const int FailureCooldownMs = 30000;
@@ -160,7 +159,6 @@ namespace HdrBrightControl
 
         private bool _hdrAny;
         private bool _verifyOn;
-        private long _nextHdrQueryMs;
         private int _forceHdrQuery = 1;
         private bool _firstHdrQueryDone;
         private bool _apiLogged;
@@ -405,8 +403,7 @@ namespace HdrBrightControl
 
         private void RefreshHdrState(long now)
         {
-            bool forced = Interlocked.Exchange(ref _forceHdrQuery, 0) == 1;
-            if (!forced && now < _nextHdrQueryMs)
+            if (Interlocked.Exchange(ref _forceHdrQuery, 0) != 1)
                 return;
 
             if (_hdrSwitch.TryQuery(out bool supported, out bool any))
@@ -447,7 +444,7 @@ namespace HdrBrightControl
                 if (_hdrAny != any) _hdrChangedMs = now;
                 _hdrAny = any;
 
-                if (_verifyOn && !forced)
+                if (_verifyOn)
                 {
                     _verifyOn = false;
                     if (!any)
@@ -461,7 +458,6 @@ namespace HdrBrightControl
                     }
                 }
             }
-            _nextHdrQueryMs = now + HdrRequeryIntervalMs;
         }
 
         /// <summary>
@@ -900,8 +896,6 @@ namespace HdrBrightControl
 
         private void AfterSwitch(bool ok, long now)
         {
-            _nextHdrQueryMs = now + SwitchSpacingMs;
-
             if (ok)
             {
                 if (!_verifyOn) _decision.ConsecutiveFailures = 0;
