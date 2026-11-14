@@ -58,21 +58,6 @@ namespace HdrBrightControl
             return result;
         }
 
-        private void MigrateLegacyConfig()
-        {
-            if (IsPortable || File.Exists(ConfigPath) || !File.Exists(LegacyConfigPath)) return;
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-                File.Copy(LegacyConfigPath, ConfigPath);
-                Log("CONFIG", $"设置已迁移到 {ConfigPath}。");
-                try { File.Move(LegacyConfigPath, LegacyConfigPath + ".old", overwrite: true); } catch { }
-            }
-            catch (Exception ex)
-            {
-                Log("ERROR", $"旧设置无法迁移（{ex.Message}）。");
-            }
-        }
 
         private void ApplyConfigValues(AppConfig source)
         {

@@ -7,14 +7,14 @@ namespace HdrBrightControl
 {
     public interface IConfigStore
     {
-        AppConfig Load(string configPath, IAppLog? log, string backupPath, string originalPath);
+        AppConfig Load(string configPath, IAppLog? log, string backupPath);
         void Save(string configPath, AppConfig config, IAppLog? log);
         AppConfig Normalize(AppConfig config);
     }
 
     public sealed class DiskConfigStore : IConfigStore
     {
-        public AppConfig Load(string configPath, IAppLog? log, string backupPath, string originalPath)
+        public AppConfig Load(string configPath, IAppLog? log, string backupPath)
         {
             if (!System.IO.File.Exists(configPath))
                 return Normalize(new AppConfig());

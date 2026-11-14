@@ -34,15 +34,9 @@ namespace HdrBrightControl
     /// </summary>
     public sealed partial class HdrEngine : IAppLog
     {
-        /// <summary>Old location next to the exe. Not writable when the app is installed in "Program Files".</summary>
-        public static readonly string LegacyConfigPath = Path.Combine(AppContext.BaseDirectory, "config.json");
-
-        /// <summary>A file named "portable.txt" next to the exe keeps the settings next to the exe.</summary>
-        public static readonly bool IsPortable = File.Exists(Path.Combine(AppContext.BaseDirectory, "portable.txt"));
-
-        public static readonly string ConfigPath = IsPortable
-            ? LegacyConfigPath
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HdrBrightControl", "config.json");
+        /// <summary>User-appdata location for the settings file.</summary>
+        public static readonly string ConfigPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HdrBrightControl", "config.json");
 
         public static readonly string LogPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HdrBrightControl", "log.txt");
@@ -198,8 +192,7 @@ namespace HdrBrightControl
             _hdrSwitch = new WindowsHdrSwitch();
             _configStore = new DiskConfigStore();
             InitializeLogFile();
-            MigrateLegacyConfig();
-            Config = _configStore.Load(ConfigPath, this, ConfigPath + ".bak", LegacyConfigPath);
+            Config = _configStore.Load(ConfigPath, this, ConfigPath + ".bak");
             Save();
         }
 
