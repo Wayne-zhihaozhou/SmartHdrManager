@@ -280,6 +280,9 @@ namespace HdrBrightControl
                 });
                 
                 _engine.Log("LAUNCH", $"已启动 '{item.Name}'：{exePath}");
+                
+                // Refresh the list so the newly launched item moves to the top
+                RebuildAllGames();
             }
             catch (Exception ex)
             {
