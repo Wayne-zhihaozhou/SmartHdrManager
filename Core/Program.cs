@@ -32,7 +32,7 @@ namespace HdrBrightControl
 
         public IStartupManager StartupManager => _startup;
 
-        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, EventWaitHandle showEvent, CommandEvents commands, CliOptions opts, IStartupManager startup)
+        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, EventWaitHandle showEvent, CommandEvents commands, IStartupManager startup)
         {
             _engine = engine;
             _tvService = tvService;
@@ -52,9 +52,8 @@ namespace HdrBrightControl
             _engine.Start();
             if (_startup.RefreshPath())
                 _engine.Log("INFO", "\"开机自启动\"指向了旧位置 – 已更新为本程序。");
-            if (opts.Command != CliCommand.None) RunCommand(opts.Command);
 
-            if (!opts.StartHidden) ShowMain();
+            ShowMain();
         }
 
         /// <summary>Command-line action of this launch (a second launch only signals the running instance).</summary>
@@ -198,7 +197,6 @@ namespace HdrBrightControl
         {
             SetTaskbarIdentity(AppUserModelId);
             var opts = CliOptions.Parse(args);
-            bool startHidden = opts.StartHidden;
 
             using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\HdrBrightControl.ShowWindow");
             using var commands = new CommandEvents();
@@ -213,7 +211,6 @@ namespace HdrBrightControl
             if (!isFirstInstance)
             {
                 if (opts.Command != CliCommand.None) commands.Signal(opts.Command);
-                else if (!startHidden) showEvent.Set();
                 return;
             }
 
@@ -234,7 +231,7 @@ namespace HdrBrightControl
             Application.ThreadException += (_, e) => engine.WriteLine($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => engine.WriteLine($"FATAL  {e.ExceptionObject}");
 
-            var context = new TrayAppContext(engine, tvService, showEvent, commands, opts, startupManager);
+            var context = new TrayAppContext(engine, tvService, showEvent, commands, startupManager);
             var trayService = context.TrayService;
             startupManager.RefreshPath();
 

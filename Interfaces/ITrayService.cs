@@ -17,6 +17,7 @@ namespace HdrBrightControl
         bool RefreshPath();
         bool IsAutostartEnabled();
         bool SetAutostart(bool enable);
+        bool ShouldStartHidden();
     }
 
     public sealed class TrayService : ITrayService, IDisposable
@@ -85,7 +86,8 @@ namespace HdrBrightControl
     {
         private const string RunRegistryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string AppRegistryName = "HdrBrightControl";
-        private const string AutostartArguments = "--tray";
+        private const string SettingsKey = @"Software\HdrBrightControl";
+        private const string StartHiddenValue = "StartHidden";
 
         public bool IsEnabled()
         {
@@ -104,17 +106,19 @@ namespace HdrBrightControl
         {
             try
             {
-                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegistryKey, true);
-                if (key == null) return false;
+                using var runKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegistryKey, true);
+                if (runKey == null) return false;
 
                 if (enable)
                 {
                     string exePath = Environment.ProcessPath ?? System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName;
-                    key.SetValue(AppRegistryName, $"\"{exePath}\" {AutostartArguments}");
+                    runKey.SetValue(AppRegistryName, $"\"{exePath}\"");
+                    SetStartHidden(true);
                 }
                 else
                 {
-                    key.DeleteValue(AppRegistryName, false);
+                    runKey.DeleteValue(AppRegistryName, false);
+                    SetStartHidden(false);
                 }
                 return true;
             }
@@ -134,7 +138,7 @@ namespace HdrBrightControl
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegistryKey, true);
                 if (key?.GetValue(AppRegistryName) is not string current) return false;
 
-                string wanted = $"\"{exePath}\" {AutostartArguments}";
+                string wanted = $"\"{exePath}\"";
                 if (string.Equals(current, wanted, StringComparison.OrdinalIgnoreCase)) return false;
 
                 string? registered = ParseRegisteredExePath(current);
@@ -158,6 +162,30 @@ namespace HdrBrightControl
         public bool SetAutostart(bool enable)
         {
             return Set(enable);
+        }
+
+        private void SetStartHidden(bool value)
+        {
+            try
+            {
+                using var settingsKey = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(SettingsKey);
+                if (settingsKey == null) return;
+                settingsKey.SetValue(StartHiddenValue, value ? 1 : 0, Microsoft.Win32.RegistryValueKind.DWord);
+            }
+            catch { }
+        }
+
+        public bool ShouldStartHidden()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(SettingsKey, false);
+                return key?.GetValue(StartHiddenValue) is int v && v != 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string? ParseRegisteredExePath(string registryValue)
