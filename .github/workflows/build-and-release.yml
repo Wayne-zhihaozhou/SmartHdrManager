@@ -30,28 +30,27 @@ jobs:
       
     - name: Publish
       run: |
-        dotnet publish HdrBrightControl.csproj -c Release `
+        $publishDir = "./publish"
+        if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $publishDir | Out-Null
+        
+        dotnet publish HdrBrightControl.csproj `
+          -c Release `
           -r win-x64 `
           --self-contained true `
           -p:PublishSingleFile=true `
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -p:EnableCompressionInSingleFile=true `
-          -o ./publish
+          -o $publishDir
       
     - name: Create ZIP package
       run: |
-        Compress-Archive -Path ./publish/* -DestinationPath HdrBrightControl-v${{ github.ref_name }}.zip
+        $tag = "${{ github.ref_name }}"
+        Compress-Archive -Path ./publish/* -DestinationPath "HdrBrightControl-${tag}.zip" -Force
         
     - name: Upload to Release
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: HdrBrightControl-v${{ github.ref_name }}.zip
+        files: HdrBrightControl-${{ github.ref_name }}.zip
         generate_release_notes: true
-        
-    - name: Upload artifact (workflow_dispatch)
-      uses: actions/upload-artifact@v4
-      if: !startsWith(github.ref, 'refs/tags/')
-      with:
-        name: HdrBrightControl-${{ github.run_number }}
-        path: ./publish/
