@@ -17,4 +17,4 @@
 
 ## 📥 下载
 
-前往 [GitHub Releases](https://github.com/HdrBrightControl/HdrBrightControl/releases) 下载最新版本的编译好的软件，解压后直接运行即可。
+前往 [GitHub Releases](https://github.com/Wayne-zhihaozhou/HdrBrightControl/releases) 下载最新版本的编译好的软件，解压后直接运行即可。
