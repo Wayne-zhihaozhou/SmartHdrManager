@@ -5,9 +5,6 @@ namespace HdrBrightControl
     /// <summary>Everything that is stored in config.json.</summary>
     public sealed record AppConfig
     {
-        /// <summary>Format version of this file: lets a newer version fix default lists in an existing config.json once.</summary>
-        public int ConfigVersion { get; init; }
-
         /// <summary>Active HDR list: only these games switch HDR on automatically.</summary>
         public List<string> HdrGamesAndApps { get; init; } = new();
 

@@ -8,8 +8,6 @@ namespace HdrBrightControl
 {
     public sealed partial class HdrEngine
     {
-        private const int CurrentConfigVersion = 5;
-
         private AppConfig LoadOrCreateConfig()
         {
             if (!File.Exists(ConfigPath))
@@ -58,22 +56,6 @@ namespace HdrBrightControl
             result = result with { Brightness = brightness };
 
             return result;
-        }
-
-        private AppConfig UpgradeConfig(AppConfig config)
-        {
-            if (config.ConfigVersion >= CurrentConfigVersion) return config;
-
-            if (config.ConfigVersion < 2)
-            {
-                foreach (string example in new[] { "cyberpunk2077", "eldenring", "alanwake2" })
-                {
-                    if (config.HdrGamesAndApps.RemoveAll(n => string.Equals(n, example, StringComparison.OrdinalIgnoreCase)) > 0)
-                        Log("CONFIG", $"已从 HDR 游戏中移除示例条目 '{example}'（本机未安装）。");
-                }
-            }
-
-            return config with { ConfigVersion = CurrentConfigVersion };
         }
 
         private void MigrateLegacyConfig()

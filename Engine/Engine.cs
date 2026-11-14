@@ -200,7 +200,6 @@ namespace HdrBrightControl
             InitializeLogFile();
             MigrateLegacyConfig();
             Config = _configStore.Load(ConfigPath, this, ConfigPath + ".bak", LegacyConfigPath);
-            UpgradeConfig(Config);
             Save();
         }
 
