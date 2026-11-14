@@ -243,6 +243,16 @@ namespace HdrBrightControl
                     WorkingDirectory = Path.GetDirectoryName(exePath) ?? string.Empty
                 };
                 Process.Start(startInfo)?.Dispose();
+                
+                // Record the launch time for sorting (most recent first)
+                _engine.Update(config =>
+                {
+                    var lastLaunched = config.LastLaunchedAt ?? new Dictionary<string, long>();
+                    foreach (var proc in item.Processes)
+                        lastLaunched[proc] = DateTime.UtcNow.Ticks;
+                    return config with { LastLaunchedAt = lastLaunched };
+                });
+                
                 _engine.Log("LAUNCH", $"已启动 '{item.Name}'：{exePath}");
             }
             catch (Exception ex)
