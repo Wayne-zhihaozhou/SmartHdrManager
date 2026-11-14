@@ -199,8 +199,8 @@ namespace HdrBrightControl
                 AutoSize = true
             };
 
-            var testButton = new ModernButton { Glyph = Theme.GlyphRefresh, Text = "测试连接", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
-            var pairButton = new ModernButton { Glyph = Theme.GlyphLink, Text = "重新配对", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
+            var testButton = new ModernButton { Text = "测试连接", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
+            var pairButton = new ModernButton { Text = "重新配对", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
             var brightnessLow = new ModernButton { Text = "亮度 0", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
             var brightnessHigh = new ModernButton { Text = "亮度 100", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
             var hdrOn = new ModernButton { Text = "HDR 开", AutoSize = true, Margin = new Padding(0, 0, ButtonSpacing, 0) };
