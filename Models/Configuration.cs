@@ -14,9 +14,6 @@ namespace HdrBrightControl
         /// <summary>SDR list: these games keep HDR off while they run.</summary>
         public List<string> SdrGamesAndApps { get; init; } = new();
 
-        /// <summary>Learned launchers: launcher process -> the game process(es) it started.</summary>
-        public Dictionary<string, List<string>> LauncherGames { get; init; } = new();
-
         /// <summary>Full exe paths of known programs (for their icons in the games list).</summary>
         public Dictionary<string, string> ProgramPaths { get; init; } = new();
 

@@ -83,31 +83,5 @@ namespace HdrBrightControl
             }
         }
 
-        private static string? FindRunningFromFolder(HashSet<string> names, string launcher, DateTime notBefore)
-        {
-            if (names.Count == 0) return null;
-
-            Process[] processes;
-            try { processes = Process.GetProcesses(); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"查找文件夹进程失败: {ex.Message}"); return null; }
-
-            string? found = null;
-            int ownProcessId = Environment.ProcessId;
-            foreach (var process in processes)
-            {
-                try
-                {
-                    if (found != null || process.Id == ownProcessId) continue;
-
-                    string name = process.ProcessName;
-                    if (names.Contains(name) && !name.Equals(launcher, StringComparison.OrdinalIgnoreCase) &&
-                        process.StartTime >= notBefore)
-                        found = name.ToLowerInvariant();
-                }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"进程枚举失败: {ex.Message}"); }
-                finally { process.Dispose(); }
-            }
-            return found;
-        }
     }
 }

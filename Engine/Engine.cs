@@ -52,8 +52,6 @@ namespace HdrBrightControl
         private const int FailuresBeforeCooldown = 3;
         private const int FailureCooldownMs = 30000;
         private const int DisplayEventGraceMs = 5000;
-        private const int LauncherShortRunMs = 15000;
-        private const int LauncherFollowMs = 45000;
         private const int ExternalChangeGraceMs = 8000;
         private const int ExternalHoldCheckMs = 2000;
         private const int BrightnessSettleAfterHdrMs = 2500;
@@ -177,14 +175,9 @@ namespace HdrBrightControl
         private long _nextProcessScanMs;
         private string? _activeHdrGameProcess;
 
-        private LauncherState _launcher = new();
-
         private HdrState _hdr = new();
         private bool _externalEnded;
         private string _externalEndedWhat = string.Empty;
-
-        private string? _hdrOnForGame;
-        private long _hdrOnForGameAtMs;
 
         private string _foregroundProcess = string.Empty;
         private bool _foregroundFullscreen;
@@ -346,7 +339,6 @@ namespace HdrBrightControl
             {
                 ScanRunningPrograms(snapshot);
                 _nextProcessScanMs = now + ProcessScanPeriodMs;
-                TrackLauncherFollow(snapshot, now);
             }
 
             if (!Paused)
@@ -471,7 +463,6 @@ namespace HdrBrightControl
             Log("INFO", $"Windows HDR 在未经本程序的情况下变为 {(any ? "开启" : "关闭")} – 由游戏、Win+Alt+B 或 Windows 设置触发（前台窗口：{front}）。");
 
             _hdr.OnByApp = false;
-            _hdrOnForGame = null;
             _hdr.ExpectAny = any;
             _hdr.SwitchConfirmed = true;
 
@@ -523,12 +514,6 @@ namespace HdrBrightControl
                 }
             }
 
-            if (_launcher.FollowLauncher != null && _launcher.FollowHoldsHdr && !shouldEnableHdr)
-            {
-                shouldEnableHdr = true;
-                reason = $"等待 '{_launcher.FollowLauncher}' 启动的游戏";
-            }
-
             if (!shouldEnableHdr && snapshot.EnableOnProcessStart && _runningGame != null)
             {
                 shouldEnableHdr = true;
@@ -543,7 +528,6 @@ namespace HdrBrightControl
             else if (_runningGame != null) demand = "game:" + _runningGame;
             else if (_contentProgram is { IsHdr: true } hdrInFront) demand = "game:" + hdrInFront.Entry;
             else if (_externalHoldProcess != null) demand = "ext:" + _externalHoldProcess;
-            else if (_launcher.FollowLauncher != null && _launcher.FollowHoldsHdr) demand = "follow:" + _launcher.FollowLauncher;
             else demand = "focus:" + _contentProcess;
 
             if (HandedOff(demand))
@@ -564,11 +548,6 @@ namespace HdrBrightControl
                 {
                     string? game = _runningGame ?? (_contentProgram is { IsHdr: true } inFront ? inFront.Entry : null);
                     TurnHdrOn(reason);
-                    if (_hdrAny && game != null)
-                    {
-                        _hdrOnForGame = game;
-                        _hdrOnForGameAtMs = now;
-                    }
                 }
                 return;
             }
@@ -939,19 +918,6 @@ namespace HdrBrightControl
             public int Attempts;
             public long NextAttemptMs;
             public long VerifyAtMs;
-        }
-
-        private sealed class LauncherState
-        {
-            public string? SeenGame;
-            public long SeenGameSinceMs;
-            public bool TrackingStarted;
-            public string? FollowLauncher;
-            public long FollowUntilMs;
-            public bool FollowHoldsHdr;
-            public DateTime FollowNotBefore;
-            public int Generation;
-            public volatile HashSet<string>? Names;
         }
 
         private sealed class HdrState

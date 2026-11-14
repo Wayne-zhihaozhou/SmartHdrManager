@@ -70,19 +70,6 @@ namespace HdrBrightControl
                 if (!string.IsNullOrWhiteSpace(entry.Key)) hdrModes[entry.Key.Trim().ToLowerInvariant()] = entry.Value;
             result = result with { GameHdrModes = hdrModes };
 
-            var launchers = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>>(System.StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in config.LauncherGames ?? new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>>())
-            {
-                if (string.IsNullOrWhiteSpace(entry.Key) || entry.Value == null) continue;
-                var games = entry.Value
-                    .Where(n => !string.IsNullOrWhiteSpace(n) && !n.Equals(entry.Key, System.StringComparison.OrdinalIgnoreCase))
-                    .Select(n => n.Trim().ToLowerInvariant())
-                    .Distinct()
-                    .ToList();
-                if (games.Count > 0) launchers[entry.Key.Trim().ToLowerInvariant()] = games;
-            }
-            result = result with { LauncherGames = launchers };
-
             var brightness = config.Brightness ?? new BrightnessConfig();
             result = result with { Brightness = brightness };
 

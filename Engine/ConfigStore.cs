@@ -51,19 +51,6 @@ namespace HdrBrightControl
                 if (!string.IsNullOrWhiteSpace(entry.Key)) hdrModes[entry.Key.Trim().ToLowerInvariant()] = entry.Value;
             result = result with { GameHdrModes = hdrModes };
 
-            var launchers = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in config.LauncherGames ?? new Dictionary<string, List<string>>())
-            {
-                if (string.IsNullOrWhiteSpace(entry.Key) || entry.Value == null) continue;
-                var games = entry.Value
-                    .Where(n => !string.IsNullOrWhiteSpace(n) && !n.Equals(entry.Key, StringComparison.OrdinalIgnoreCase))
-                    .Select(n => n.Trim().ToLowerInvariant())
-                    .Distinct()
-                    .ToList();
-                if (games.Count > 0) launchers[entry.Key.Trim().ToLowerInvariant()] = games;
-            }
-            result = result with { LauncherGames = launchers };
-
             var lastLaunched = config.LastLaunchedAt ?? new Dictionary<string, long>();
             result = result with { LastLaunchedAt = lastLaunched };
 
@@ -120,7 +107,6 @@ namespace HdrBrightControl
                     HdrGamesAndApps = Config.HdrGamesAndApps,
                     SdrGamesAndApps = Config.SdrGamesAndApps,
                     ProgramPaths = Config.ProgramPaths,
-                    LauncherGames = Config.LauncherGames,
                     LastLaunchedAt = Config.LastLaunchedAt
                 };
                 Normalize(fresh);
